@@ -1,0 +1,195 @@
+package com.wyutools.app.ui
+
+import android.graphics.Rect
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
+import com.wyutools.app.SharedCardSnapshot
+import com.wyutools.app.SharedViewTransition
+import com.wyutools.app.auth.AuthViewModel
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.roundToInt
+
+@Composable
+fun HomeScreen(
+    authVm: AuthViewModel,
+    onOpenLxt: (SharedCardSnapshot?) -> Unit,
+    onOpenElec: (SharedCardSnapshot?) -> Unit,
+    onOpenGym: (SharedCardSnapshot?) -> Unit,
+    onLogin: () -> Unit,
+    onOpenJxgl: () -> Unit,
+    onOpenSettings: (SharedCardSnapshot?) -> Unit,
+) {
+    val pager = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
+    val toolsScroll = rememberScrollState()
+    val meScroll = rememberScrollState()
+    val toolsFraction = rememberWyuCollapseFraction(toolsScroll)
+    val meFraction = rememberWyuCollapseFraction(meScroll)
+    val bottomMargin = rememberWyuNavigatorBottomMargin()
+    val page = pager.currentPage
+    val activeFraction = if (page == 0) toolsFraction else meFraction
+    val contentBottom = bottomMargin + WyuNavigatorBarHeight + 24.dp
+    val dark = isSystemInDarkTheme()
+    val surface = MiuixTheme.colorScheme.surface
+    val primary = MiuixTheme.colorScheme.primary
+    val wallpaper = LocalWyuWallpaper.current
+    val backgroundBrush = remember(wallpaper, dark, surface, primary) {
+        if (wallpaper == WyuWallpaper.Custom) {
+            null
+        } else {
+            wallpaper.background(dark, surface) ?: wyuHomeBackground(dark, surface, primary)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        WyuPageScaffold(
+            progress = { activeFraction.value },
+            maskCollapseHeight = WyuLargeTitleHeight,
+            backgroundBrush = backgroundBrush,
+            overlay = {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    WyuNavigatorBar(
+                        selectedIndex = page,
+                        selectionFraction = {
+                            pager.currentPage + pager.currentPageOffsetFraction
+                        },
+                        onSelect = { index ->
+                            if (index != pager.currentPage) {
+                                scope.launch {
+                                    pager.animateScrollToPage(
+                                        page = index,
+                                        animationSpec = tween(350, easing = WyuDecelerateEasing),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
+            },
+            topBar = {
+                WyuActionBar(
+                    title = if (page == 0) "工具" else "我",
+                    collapsedFraction = { activeFraction.value },
+                    floatingAction = {
+                        if (page == 1) {
+                            SettingsEntry(onOpen = onOpenSettings)
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1,
+            ) { index ->
+                if (index == 0) {
+                    ToolsContent(
+                        scrollState = toolsScroll,
+                        topInset = padding.calculateTopPadding(),
+                        bottomInset = contentBottom,
+                        onOpenLxt = onOpenLxt,
+                        onOpenElec = onOpenElec,
+                        onOpenGym = onOpenGym,
+                    )
+                } else {
+                    MeContent(
+                        vm = authVm,
+                        onLogin = onLogin,
+                        onOpenJxgl = onOpenJxgl,
+                        scrollState = meScroll,
+                        topInset = padding.calculateTopPadding(),
+                        bottomInset = contentBottom,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsEntry(onOpen: (SharedCardSnapshot?) -> Unit) {
+    val graphicsLayer = rememberGraphicsLayer()
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val radiusPx = with(density) { 24.dp.toPx() }
+    val bounds = remember { Rect() }
+    var launching by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .onGloballyPositioned { coordinates ->
+                val local = coordinates.boundsInWindow()
+                val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
+                    null
+                } else {
+                    IntArray(2).also(view::getLocationOnScreen)
+                }
+                bounds.set(
+                    local.left.roundToInt() + (origin?.get(0) ?: 0),
+                    local.top.roundToInt() + (origin?.get(1) ?: 0),
+                    local.right.roundToInt() + (origin?.get(0) ?: 0),
+                    local.bottom.roundToInt() + (origin?.get(1) ?: 0),
+                )
+            }
+            .drawWithContent {
+                graphicsLayer.record {
+                    this@drawWithContent.drawContent()
+                }
+                drawLayer(graphicsLayer)
+            },
+    ) {
+        WyuTopBarAction(
+            icon = Icons.Outlined.Settings,
+            label = "设置",
+            onClick = {
+                if (bounds.isEmpty || launching) {
+                    if (!launching) onOpen(null)
+                } else {
+                    launching = true
+                    scope.launch {
+                        val bitmap = runCatching {
+                            graphicsLayer.toImageBitmap().asAndroidBitmap()
+                        }.getOrNull()
+                        launching = false
+                        onOpen(
+                            bitmap?.let {
+                                SharedCardSnapshot(
+                                    bitmap = it,
+                                    bounds = Rect(bounds),
+                                    radiusPx = radiusPx,
+                                )
+                            },
+                        )
+                    }
+                }
+            },
+        )
+    }
+}
