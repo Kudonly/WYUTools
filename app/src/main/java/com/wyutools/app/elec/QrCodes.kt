@@ -41,7 +41,7 @@ object QrCodes {
     fun saveToGallery(
         context: Context,
         bitmap: Bitmap,
-        prefix: String = "WYUtools-电费充值",
+        prefix: String = "WYUTools-电费充值",
     ): String {
         val fileName = "$prefix-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.CHINA).format(Date())}.png"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -49,7 +49,7 @@ object QrCodes {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/WYUtools")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/WYUTools")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
@@ -68,10 +68,10 @@ object QrCodes {
                 resolver.delete(uri, null, null)
                 throw e
             }
-            return "已保存到相册 Pictures/WYUtools"
+            return "已保存到相册 Pictures/WYUTools"
         }
 
-        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "WYUtools")
+        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "WYUTools")
         if (!dir.exists() && !dir.mkdirs()) throw IOException("无法创建保存目录")
         val file = File(dir, fileName)
         FileOutputStream(file).use { output ->

@@ -2,6 +2,8 @@ package com.wyutools.app.auth
 
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.FormBody
@@ -85,6 +87,8 @@ class SsoApi {
         .build()
 
     private val cookies = SsoCookieStore()
+
+    private val jxglMutex = Mutex()
 
     private data class RawResponse(
         val code: Int,
@@ -278,6 +282,10 @@ class SsoApi {
      * 会话换取 jxgl 的 JSESSIONID。
      */
     suspend fun establishJxgl(): String = withContext(Dispatchers.IO) {
+        jxglMutex.withLock { establishJxglLocked() }
+    }
+
+    private fun establishJxglLocked(): String {
         val candidates = buildList {
             fetchJxglCardEntry()?.let { add(it) }
             add(JXGL_DIRECT_ENTRY)
@@ -286,13 +294,69 @@ class SsoApi {
         for (entry in candidates) {
             try {
                 warmUpJxgl(entry)
-                return@withContext entry
+                return entry
             } catch (error: SsoException) {
                 if (error.sessionExpired) throw error
                 lastError = error
             }
         }
         throw lastError ?: SsoException("教务系统访问失败，请稍后重试。")
+    }
+
+    /**
+     * 拉取教务课表原始 JSON。
+     *
+     * 先直接复用现有 jxgl 会话；被踢回统一认证时重建一次会话再重试。
+     * 返回原始响应给 schedule 层解析，避免认证层依赖课表模型。
+     */
+    suspend fun fetchJxglSchedule(termCode: String): String = withContext(Dispatchers.IO) {
+        fun request(): RawResponse {
+            // 与教务系统的课表页保持一致：只带学期，zc 留空表示整学期
+            val body = FormBody.Builder()
+                .add("xnxqdm", termCode)
+                .add("zc", "")
+                .build()
+            val request = newRequest(JXGL_SCHEDULE_DATA_URL)
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", JXGL_SCHEDULE_PAGE_URL)
+                .post(body)
+                .build()
+            return execute(request)
+        }
+
+        var response = request()
+        if (scheduleNeedsLogin(response)) {
+            establishJxgl()
+            response = request()
+        }
+        if (response.code != 200) {
+            throw SsoException("课表获取失败（HTTP ${response.code}），请稍后重试。")
+        }
+        if (scheduleNeedsLogin(response)) {
+            throw SsoException("登录已失效，请重新登录。", sessionExpired = true)
+        }
+        if (response.body.trim().startsWith("<")) {
+            throw SsoException("教务系统返回了异常页面，请稍后重试。")
+        }
+        checkAuthPayload(
+            runCatching { JSONObject(response.body.trim()) }.getOrNull()
+                ?: throw SsoException("课表数据格式异常，请稍后重试。"),
+        )
+        response.body
+    }
+
+    private fun scheduleNeedsLogin(response: RawResponse): Boolean {
+        if (response.code == 401 || response.code == 403) return true
+        if (isAuthServerUrl(response.url.toString())) return true
+        val location = response.location
+        if (location != null && (isAuthServerUrl(location) || location.contains("login", true))) {
+            return true
+        }
+        val body = response.body
+        if (SESSION_CODE_PATTERN.containsMatchIn(body)) return true
+        if (looksLikeLoginPage(body)) return true
+        return false
     }
 
     /** 返回 null 表示卡片未提供可用入口（入口丢失或列表为空）。 */
@@ -560,7 +624,12 @@ class SsoApi {
         private const val JXGL_APP_NAME = "教务系统"
         private const val JXGL_DIRECT_ENTRY = "https://jxgl.wyu.edu.cn/new/ssoLogin"
         private const val JXGL_HOME = "https://jxgl.wyu.edu.cn/"
+        private const val JXGL_SCHEDULE_PAGE_URL =
+            "https://jxgl.wyu.edu.cn/new/student/xsgrkb/main.page"
+        private const val JXGL_SCHEDULE_DATA_URL =
+            "https://jxgl.wyu.edu.cn/new/student/xsgrkb/getCalendarWeekDatas"
         private const val AUTH_SERVER_HOST = "authserver.wyu.edu.cn"
+        private val SESSION_CODE_PATTERN = Regex("\"code\"\\s*:\\s*-401")
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val SESSION_EXPIRED_HINTS = listOf(
             "尚未登录",

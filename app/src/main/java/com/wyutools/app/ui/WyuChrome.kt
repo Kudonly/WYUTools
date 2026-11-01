@@ -77,6 +77,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -106,6 +108,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -116,11 +119,13 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.ProgressiveBlur
+import top.yukonga.miuix.kmp.blur.blur
+import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
-import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -1189,12 +1194,15 @@ fun WyuNavigatorBar(
     selectionFraction: () -> Float,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    liquidGlassEnabled: Boolean = false,
 ) {
     val dark = isSystemInDarkTheme()
     val bottomMargin = rememberWyuNavigatorBottomMargin()
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val backdrop = LocalWyuPageBackdrop.current
+    val shaderSupported = remember { isRuntimeShaderSupported() }
+    val liquidGlass = liquidGlassEnabled && backdrop != null && shaderSupported
     val lastIndex = WyuNavTabs.lastIndex
     val cellWidth = 88.dp
     val inset = 3.dp
@@ -1213,10 +1221,28 @@ fun WyuNavigatorBar(
         Color.White.copy(alpha = if (glass) 0.58f else 1f)
     }
     val pillBorder = if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.04f)
-    val scrimColor = if (dark) Color.Black.copy(alpha = 0.92f) else Color(0xFFF5F3F3)
+    val glassContainerColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
+    val glassBackdrop = if (liquidGlass) backdrop else null
+    val barBackdrop = rememberLayerBackdrop()
+    val thumbBackdrop = if (glassBackdrop != null) {
+        rememberWyuCombinedBackdrop(glassBackdrop, barBackdrop)
+    } else {
+        null
+    }
+    val pillSpecular = if (glassBackdrop != null) rememberWyuSpecularHighlight(extraDegrees = -45f) else null
+    val thumbSpecular = if (glassBackdrop != null) rememberWyuSpecularHighlight(extraDegrees = 90f) else null
 
     val initialFraction = selectionFraction().coerceIn(0f, lastIndex.toFloat())
-    val indicator = remember { Animatable(initialFraction) }
+    val damped = remember {
+        WyuDampedDragAnimation(
+            animationScope = scope,
+            initialValue = initialFraction,
+            valueRange = 0f..lastIndex.toFloat(),
+            visibilityThreshold = 0.001f,
+            pressedScale = 78f / 56f,
+        )
+    }
+    val glassIconScale: () -> Float = { 1f + 0.02f * damped.pressProgress }
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(initialFraction) }
     var interacting by remember { mutableStateOf(false) }
@@ -1243,23 +1269,15 @@ fun WyuNavigatorBar(
             val target = fraction.coerceIn(0f, lastIndex.toFloat())
             if (interacting) {
                 // Keep the pressed preview in place until the pager lands on it.
-                if (abs(target - indicator.value) < 0.01f) interacting = false
+                if (abs(target - damped.value) < 0.01f) interacting = false
             } else {
-                indicator.snapTo(target)
+                damped.snapToValue(target)
             }
         }
     }
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    1f to scrimColor,
-                ),
-            )
-            .padding(top = 28.dp),
+        modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.BottomCenter,
     ) {
         Box(
@@ -1275,28 +1293,88 @@ fun WyuNavigatorBar(
                     spotColor = Color.Black.copy(alpha = 0.16f),
                 )
                 .then(
-                    if (backdrop != null) {
-                        Modifier.textureBlur(
-                            backdrop = backdrop,
-                            shape = pillShape,
-                            blurRadius = 30f,
+                    if (glassBackdrop != null) {
+                        Modifier.layerBackdrop(barBackdrop)
+                    } else {
+                        Modifier
+                    },
+                )
+                .then(
+                    if (glassBackdrop != null) {
+                        Modifier.drawBackdrop(
+                            backdrop = glassBackdrop,
+                            shape = { pillShape },
+                            effects = {
+                                padding = maxOf(padding, 40.dp.toPx())
+                                vibrancy()
+                                blur(2.dp.toPx(), 2.dp.toPx())
+                                lens(
+                                    refractionHeight = 28.dp.toPx(),
+                                    refractionAmount = 40.dp.toPx(),
+                                )
+                            },
+                            highlight = {
+                                pillSpecular?.value?.copy(alpha = 0.75f)
+                                    ?: WyuGlassSpecular.copy(alpha = 0f)
+                            },
+                            layerBlock = {
+                                val width = size.width.coerceAtLeast(1f)
+                                val s = lerp(
+                                    1f,
+                                    1f + 8.dp.toPx() / width,
+                                    damped.pressProgress,
+                                )
+                                scaleX = s
+                                scaleY = s
+                            },
+                            onDrawSurface = {
+                                drawRect(glassContainerColor)
+                                drawRect(Color.White.copy(alpha = 0.1f * damped.pressProgress))
+                            },
                         )
                     } else {
                         Modifier
                     },
                 )
-                .clip(pillShape)
-                .background(pillColor)
-                .border(0.5.dp, pillBorder, pillShape)
+                .then(
+                    if (glassBackdrop == null) {
+                        Modifier
+                            .then(
+                                if (backdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = backdrop,
+                                        shape = pillShape,
+                                        blurRadius = 30f,
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .clip(pillShape)
+                            .background(pillColor)
+                            .border(0.5.dp, pillBorder, pillShape)
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(inset)
                 .pointerInput(WyuNavTabs.size) {
                     fun revertPreview(target: Int) {
                         scope.launch {
-                            indicator.animateTo(
-                                target.toFloat(),
-                                tween(160, easing = WyuDecelerateEasing),
-                            )
+                            damped.animateToValue(target.toFloat())
                             interacting = false
+                        }
+                    }
+                    fun releasePreviewAfterLanding() {
+                        val gen = interactionGen
+                        scope.launch {
+                            delay(450)
+                            if (gen == interactionGen &&
+                                pressedIndex < 0 &&
+                                !dragging
+                            ) {
+                                interacting = false
+                            }
                         }
                     }
                     awaitEachGesture {
@@ -1305,16 +1383,12 @@ fun WyuNavigatorBar(
                         val startSelected = currentSelected
                         val downIndex = (down.position.x / cellPx).toInt().coerceIn(0, lastIndex)
                         pressedIndex = downIndex
+                        damped.press()
                         if (downIndex != startSelected) {
                             // Slide the thumb under the finger immediately on press.
                             interactionGen++
                             interacting = true
-                            scope.launch {
-                                indicator.animateTo(
-                                    downIndex.toFloat(),
-                                    tween(160, easing = WyuDecelerateEasing),
-                                )
-                            }
+                            damped.updateValue(downIndex.toFloat())
                         }
                         val startFraction = if (dragging) dragFraction else downIndex.toFloat()
                         var totalX = 0f
@@ -1350,6 +1424,7 @@ fun WyuNavigatorBar(
                                     dragFraction = (startFraction + totalX / cellPx)
                                         .coerceIn(0f, lastIndex.toFloat())
                                     lastTick = dragFraction.roundToInt()
+                                    damped.updateValue(dragFraction)
                                     change.consume()
                                 } else if (abs(totalY) > viewConfiguration.touchSlop) {
                                     cancelled = true
@@ -1361,6 +1436,7 @@ fun WyuNavigatorBar(
                                     change.consume()
                                     dragFraction = (dragFraction + dx / cellPx)
                                         .coerceIn(0f, lastIndex.toFloat())
+                                    damped.updateValue(dragFraction)
                                     val tick = dragFraction.roundToInt()
                                     if (tick != lastTick) {
                                         lastTick = tick
@@ -1371,21 +1447,15 @@ fun WyuNavigatorBar(
                         }
                         pressedIndex = -1
                         if (dragActive) {
-                            val released = dragFraction
-                            val target = released.roundToInt().coerceIn(0, lastIndex)
-                            scope.launch {
-                                indicator.snapTo(released)
-                                dragging = false
-                                indicator.animateTo(
-                                    target.toFloat(),
-                                    tween(350, easing = WyuDecelerateEasing),
-                                )
-                                interacting = false
-                            }
+                            val target = dragFraction.roundToInt().coerceIn(0, lastIndex)
+                            dragging = false
+                            damped.updateValue(target.toFloat())
+                            damped.release()
                             if (target != startSelected) {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                 currentOnSelect(target)
                             }
+                            releasePreviewAfterLanding()
                         } else if (!cancelled) {
                             val now = SystemClock.uptimeMillis()
                             if (now - lastSelectAt >= 200L) {
@@ -1395,39 +1465,35 @@ fun WyuNavigatorBar(
                                     currentOnSelect(downIndex)
                                     // Release the preview if the pager transition is
                                     // interrupted before it lands.
-                                    val gen = interactionGen
-                                    scope.launch {
-                                        delay(450)
-                                        if (gen == interactionGen &&
-                                            pressedIndex < 0 &&
-                                            !dragging
-                                        ) {
-                                            interacting = false
-                                        }
-                                    }
+                                    releasePreviewAfterLanding()
                                 }
                             } else if (downIndex != startSelected) {
                                 revertPreview(startSelected)
                             }
-                        } else if (downIndex != startSelected) {
-                            revertPreview(startSelected)
+                            damped.release()
+                        } else {
+                            damped.release()
+                            if (downIndex != startSelected) {
+                                revertPreview(startSelected)
+                            }
                         }
                     }
                 },
         ) {
-            Box(
-                modifier = Modifier
-                    .width(cellWidth)
-                    .fillMaxHeight()
-                    .graphicsLayer {
-                        val fraction = if (dragging) dragFraction else indicator.value
-                        translationX = fraction * size.width
-                        scaleX = thumbScaleX
-                        scaleY = thumbScaleY
-                    }
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(indicatorColor),
-            )
+            if (glassBackdrop == null) {
+                Box(
+                    modifier = Modifier
+                        .width(cellWidth)
+                        .fillMaxHeight()
+                        .graphicsLayer {
+                            translationX = damped.value * size.width
+                            scaleX = thumbScaleX
+                            scaleY = thumbScaleY
+                        }
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(indicatorColor),
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1435,53 +1501,135 @@ fun WyuNavigatorBar(
             ) {
                 WyuNavTabs.forEachIndexed { index, tab ->
                     val isSelected = index == selectedIndex
-                    val scale by animateFloatAsState(
+                    val pressScale by animateFloatAsState(
                         targetValue = if (pressedIndex == index) 0.9f else 1f,
                         animationSpec = spring(dampingRatio = 0.8f, stiffness = 700f),
                         label = "navigatorPress",
                     )
-                    val alpha = if (isSelected) 0.95f else 0.55f
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .semantics(mergeDescendants = true) {
-                                role = Role.Tab
-                                selected = isSelected
-                                onClick(label = tab.label) {
-                                    if (index != currentSelected) {
-                                        currentOnSelect(index)
-                                    }
-                                    true
-                                }
-                            },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = contentColor.copy(alpha = alpha),
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = tab.label,
-                            style = TextStyle(
-                                fontSize = 11.sp,
-                                lineHeight = 13.sp,
-                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-                            ),
-                            color = contentColor.copy(alpha = alpha),
-                            maxLines = 1,
-                        )
-                    }
+                    WyuNavigatorTab(
+                        tab = tab,
+                        selected = isSelected,
+                        tint = contentColor,
+                        alpha = if (isSelected) 0.95f else 0.55f,
+                        scale = if (glassBackdrop != null) {
+                            glassIconScale
+                        } else {
+                            { pressScale }
+                        },
+                        activate = {
+                            if (index != currentSelected) currentOnSelect(index)
+                        },
+                    )
                 }
             }
         }
+        if (thumbBackdrop != null && thumbSpecular != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomMargin + inset)
+                    .width(cellWidth)
+                    .height(WyuNavigatorBarHeight - inset * 2)
+                    .graphicsLayer {
+                        translationX = (damped.value - lastIndex / 2f) * size.width
+                    }
+                    .drawBackdrop(
+                        backdrop = thumbBackdrop,
+                        shape = { pillShape },
+                        effects = {
+                            val progress = damped.pressProgress
+                            lens(
+                                refractionHeight = 8.dp.toPx() * progress,
+                                refractionAmount = 11.dp.toPx() * progress,
+                                depthEffect = true,
+                                chromaticAberration = 0.5f,
+                            )
+                        },
+                        highlight = {
+                            thumbSpecular.value.copy(alpha = damped.pressProgress)
+                        },
+                        layerBlock = {
+                            val velocity = damped.velocity / 10f
+                            scaleX = damped.scaleX
+                            scaleY = damped.scaleY
+                            scaleX /= 1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f)
+                            scaleY *= 1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f)
+                        },
+                        onDrawBackdrop = { drawSample ->
+                            val progress = damped.pressProgress
+                            val zoom = lerp(1f, 0.92f, progress)
+                            translate(top = -1.dp.toPx() * progress) {
+                                scale(zoom, zoom) { drawSample() }
+                            }
+                        },
+                        onDrawSurface = {
+                            val progress = damped.pressProgress
+                            drawRect(
+                                color = if (dark) {
+                                    Color.White.copy(alpha = 0.1f)
+                                } else {
+                                    Color.Black.copy(alpha = 0.1f)
+                                },
+                                alpha = 1f - progress,
+                            )
+                            drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                        },
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.WyuNavigatorTab(
+    tab: WyuNavTab,
+    selected: Boolean,
+    tint: Color,
+    alpha: Float,
+    scale: () -> Float,
+    activate: (() -> Unit)?,
+) {
+    val semanticsModifier = if (activate != null) {
+        Modifier.semantics(mergeDescendants = true) {
+            role = Role.Tab
+            this.selected = selected
+            onClick(label = tab.label) {
+                activate()
+                true
+            }
+        }
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .then(semanticsModifier)
+            .graphicsLayer {
+                val value = scale()
+                scaleX = value
+                scaleY = value
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = tab.icon,
+            contentDescription = null,
+            modifier = Modifier.size(28.dp),
+            tint = tint.copy(alpha = alpha),
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = tab.label,
+            style = TextStyle(
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            ),
+            color = tint.copy(alpha = alpha),
+            maxLines = 1,
+        )
     }
 }

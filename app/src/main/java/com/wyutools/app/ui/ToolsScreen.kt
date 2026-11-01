@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.SportsBasketball
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.runtime.Composable
@@ -33,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.toArgb
@@ -44,11 +47,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wyutools.app.SharedCardSnapshot
 import com.wyutools.app.SharedViewTransition
+import com.wyutools.app.schedule.ScheduleFocus
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
@@ -60,6 +67,9 @@ fun ToolsContent(
     scrollState: ScrollState,
     topInset: Dp,
     bottomInset: Dp,
+    scheduleFocus: ScheduleFocus?,
+    scheduleWeek: Int,
+    onOpenSchedule: (SharedCardSnapshot?) -> Unit,
     onOpenLxt: (SharedCardSnapshot?) -> Unit,
     onOpenElec: (SharedCardSnapshot?) -> Unit,
     onOpenGym: (SharedCardSnapshot?) -> Unit,
@@ -76,6 +86,12 @@ fun ToolsContent(
             text = "校园服务",
             insideMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
         )
+        ScheduleToolEntry(
+            focus = scheduleFocus,
+            week = scheduleWeek,
+            onClick = onOpenSchedule,
+        )
+        Spacer(Modifier.height(12.dp))
         ToolEntry(
             icon = Icons.Outlined.WaterDrop,
             title = "洗澡",
@@ -109,17 +125,20 @@ fun ToolsContent(
 }
 
 @Composable
-private fun ToolEntry(
-    icon: ImageVector,
+private fun ToolCard(
     title: String,
-    summary: String,
     onClick: (SharedCardSnapshot?) -> Unit,
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 20.dp,
+    color: Color? = null,
+    contentColor: Color? = null,
+    content: @Composable ColumnScope.(Modifier) -> Unit,
 ) {
     val graphicsLayer = rememberGraphicsLayer()
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val density = LocalDensity.current
-    val radiusPx = with(density) { 20.dp.toPx() }
+    val radiusPx = with(density) { cornerRadius.toPx() }
     val cardBounds = remember { Rect() }
     val titleBounds = remember { Rect() }
     val titleStyle = MiuixTheme.textStyles.headline2
@@ -134,6 +153,12 @@ private fun ToolEntry(
         }).toPx()
     }
     var launching by remember { mutableStateOf(false) }
+    val fallbackColor = (color ?: surfaceColor).toArgb()
+    val cardColors = if (color != null && contentColor != null) {
+        CardDefaults.defaultColors(color = color, contentColor = contentColor)
+    } else {
+        CardDefaults.defaultColors()
+    }
 
     Card(
         onClick = {
@@ -154,7 +179,7 @@ private fun ToolEntry(
                             bitmap = it,
                             cardBounds = cardBounds,
                             titleBounds = titleBounds,
-                            fallbackColor = surfaceColor.toArgb(),
+                            fallbackColor = fallbackColor,
                             paddingPx = (3 * density.density).roundToInt(),
                         )
                     }
@@ -179,7 +204,7 @@ private fun ToolEntry(
                 )
             }
         },
-        modifier = Modifier
+        modifier = modifier
             .onGloballyPositioned { coordinates ->
                 val bounds = coordinates.boundsInWindow()
                 val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
@@ -201,8 +226,36 @@ private fun ToolEntry(
                 drawLayer(graphicsLayer)
             },
         insideMargin = PaddingValues(0.dp),
-        cornerRadius = 20.dp,
+        cornerRadius = cornerRadius,
+        colors = cardColors,
     ) {
+        content(
+            Modifier.onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
+                    null
+                } else {
+                    IntArray(2).also(view::getLocationOnScreen)
+                }
+                titleBounds.set(
+                    bounds.left.roundToInt() + (origin?.get(0) ?: 0),
+                    bounds.top.roundToInt() + (origin?.get(1) ?: 0),
+                    bounds.right.roundToInt() + (origin?.get(0) ?: 0),
+                    bounds.bottom.roundToInt() + (origin?.get(1) ?: 0),
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun ToolEntry(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    onClick: (SharedCardSnapshot?) -> Unit,
+) {
+    ToolCard(title = title, onClick = onClick) { titleModifier ->
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -230,22 +283,9 @@ private fun ToolEntry(
             ) {
                 Text(
                     text = title,
-                    style = titleStyle,
+                    style = MiuixTheme.textStyles.headline2,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        val bounds = coordinates.boundsInWindow()
-                        val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
-                            null
-                        } else {
-                            IntArray(2).also(view::getLocationOnScreen)
-                        }
-                        titleBounds.set(
-                            bounds.left.roundToInt() + (origin?.get(0) ?: 0),
-                            bounds.top.roundToInt() + (origin?.get(1) ?: 0),
-                            bounds.right.roundToInt() + (origin?.get(0) ?: 0),
-                            bounds.bottom.roundToInt() + (origin?.get(1) ?: 0),
-                        )
-                    },
+                    modifier = titleModifier,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -258,6 +298,98 @@ private fun ToolEntry(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleToolEntry(
+    focus: ScheduleFocus?,
+    week: Int,
+    onClick: (SharedCardSnapshot?) -> Unit,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val onSurface = MiuixTheme.colorScheme.onSurface
+    val secondary = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val course = focus?.course
+    val ongoing = focus?.ongoing == true
+    val status = when {
+        focus == null -> "今天没有课了"
+        ongoing -> "正在上课"
+        else -> "接下来"
+    }
+    val detail = course?.let {
+        buildList {
+            add(it.compactTimeText())
+            val room = it.roomForWeek(week)
+            if (room.isNotBlank()) add(room)
+        }.filter { it.isNotBlank() }.joinToString(" · ")
+    }.orEmpty().ifBlank { "好好休息吧！( ˘ω˘ )" }
+
+    ToolCard(
+        title = "课表",
+        onClick = onClick,
+        cornerRadius = 24.dp,
+    ) { titleModifier ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(primary.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = primary,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "课表",
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Medium,
+                    modifier = titleModifier,
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = status,
+                style = MiuixTheme.textStyles.footnote1,
+                fontWeight = FontWeight.SemiBold,
+                color = if (ongoing) primary else secondary,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = course?.name ?: "没有课哦",
+                fontSize = 24.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.Bold,
+                color = onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = detail,
+                style = MiuixTheme.textStyles.footnote1,
+                color = secondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

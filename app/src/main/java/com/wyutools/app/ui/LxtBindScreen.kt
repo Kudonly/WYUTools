@@ -1,5 +1,6 @@
 package com.wyutools.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.wyutools.app.lxt.LxtApi
@@ -35,8 +37,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.SnackbarHost
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -50,21 +50,20 @@ fun LxtBindScreen(
     forValve: Boolean = false,
 ) {
     val ui by vm.ui.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val bindListState = rememberLazyListState()
     val collapseFraction = rememberWyuCollapseFraction(bindListState)
 
     LaunchedEffect(Unit) { vm.startBind(forValve) }
     LaunchedEffect(ui.message) {
         ui.message?.let { message ->
-            snackbar.showSnackbar(message)
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             vm.consumeMessage()
         }
     }
 
     WyuPageScaffold(
         progress = { collapseFraction.value },
-        snackbarHost = { SnackbarHost(snackbar) },
         maskCollapseHeight = WyuLargeTitleHeight,
         topBar = {
             WyuActionBar(

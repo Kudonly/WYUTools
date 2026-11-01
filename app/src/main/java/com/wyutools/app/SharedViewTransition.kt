@@ -26,12 +26,14 @@ object SharedViewTransition {
     private const val TAG = "SharedViewTransition"
 
     const val EXTRA_START_ROUTE = "com.wyutools.app.extra.START_ROUTE"
+    const val ROUTE_SCHEDULE = "schedule"
     const val ROUTE_LXT = "lxt"
     const val ROUTE_ELEC = "elec"
     const val ROUTE_GYM = "gym"
     const val ROUTE_SETTINGS = "settings"
 
-    val featureRoutes = setOf(ROUTE_LXT, ROUTE_ELEC, ROUTE_GYM, ROUTE_SETTINGS)
+    val featureRoutes =
+        setOf(ROUTE_SCHEDULE, ROUTE_LXT, ROUTE_ELEC, ROUTE_GYM, ROUTE_SETTINGS)
     private val protocolVersion: Int by lazy {
         runCatching { ViewAnimationManager.isViewAnimationSupported() }.getOrDefault(0)
     }

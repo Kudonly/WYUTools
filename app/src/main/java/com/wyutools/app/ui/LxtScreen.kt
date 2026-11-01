@@ -1,5 +1,6 @@
 package com.wyutools.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -64,8 +66,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
-import top.yukonga.miuix.kmp.basic.SnackbarHost
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -83,7 +83,7 @@ fun LxtScreen(
     onBindValve: () -> Unit,
 ) {
     val ui by vm.ui.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
     val collapseFraction = rememberWyuCollapseFraction(scrollState)
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -94,7 +94,7 @@ fun LxtScreen(
     LaunchedEffect(Unit) { vm.onLxtEntered() }
     LaunchedEffect(ui.message) {
         ui.message?.let { message ->
-            snackbar.showSnackbar(message)
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             vm.consumeMessage()
         }
     }
@@ -109,7 +109,6 @@ fun LxtScreen(
 
     WyuPageScaffold(
         progress = { collapseFraction.value },
-        snackbarHost = { SnackbarHost(snackbar) },
         maskCollapseHeight = WyuLargeTitleHeight,
         topBar = {
             WyuActionBar(
@@ -298,7 +297,7 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
             Column {
                 Text("登录洗澡", style = MiuixTheme.textStyles.title2)
                 Text(
-                    "使用学号或手机号和密码登录",
+                    "使用乐校通账号登录",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

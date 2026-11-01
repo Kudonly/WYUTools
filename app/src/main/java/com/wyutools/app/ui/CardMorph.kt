@@ -376,9 +376,9 @@ fun CardMorphOverlay(
 }
 
 /**
- * Returns to the card: the page snapshot shrinks onto the originating card
- * while the cached home backdrop sharpens and undims in step with the sheet,
- * so by the time the card lands the background is already the live home.
+ * Returns to the card: the window closes over the page snapshot onto the
+ * originating card while the cached home backdrop sharpens and undims in step
+ * with it, so by the time the card lands the background is already the live home.
  *
  * The page snapshot arrives a few frames after the overlay: until then the
  * overlay only shows the flying title while the live page hides its own, so
@@ -412,7 +412,7 @@ fun CardReturnOverlay(
             // The page stayed composed underneath, so it can simply be handed back.
             onReopened()
         } else {
-            // The sheet has landed and the backdrop already matches the live
+            // The window has landed and the backdrop already matches the live
             // home, so the swap happens under pixels that look unchanged.
             onSwap()
         }
@@ -442,8 +442,8 @@ fun CardReturnOverlay(
             val path = roundedPath(rect, radius)
 
             // The sharp home snapshot sits underneath the cached blur, and the
-            // blur dissolves into it across the same progress that shrinks the
-            // sheet, so the background never lags behind the container.
+            // blur dissolves into it across the same progress that closes the
+            // window, so the background never lags behind the page.
             if (sharpImage != null) {
                 drawImageStretched(sharpImage, 1f)
             } else if (backdropImage != null) {
@@ -463,23 +463,12 @@ fun CardReturnOverlay(
                 }
             }
 
-            // The page dissolves into the sheet early, while the sheet itself
-            // keeps shrinking all the way onto the card: the landing is the
-            // last thing to happen instead of a static tail.
-            val pageAlpha = 1f - smoothstep(0.10f, 0.42f, fraction)
-            val sheetAlpha = 1f - smoothstep(0.78f, 1f, fraction)
+            // Mirror of the opening: the page snapshot stays in place and the
+            // window closes over it. Nothing solid is painted under the page,
+            // so the light wallpaper surfaces never flash through as white.
             val cardAlpha = smoothstep(0.72f, 0.96f, fraction)
-
-            if (sheetAlpha > 0f) {
-                clipPath(path) {
-                    drawRect(
-                        color = surface,
-                        topLeft = rect.topLeft,
-                        size = rect.size,
-                        alpha = sheetAlpha,
-                    )
-                    drawImageIntoTarget(image, rect, pageAlpha * sheetAlpha)
-                }
+            clipPath(path) {
+                drawImageStretched(image, 1f)
             }
             if (cardAlpha > 0f && target.width > 0f && target.height > 0f) {
                 drawImageIntoTarget(cardImage, target, cardAlpha)

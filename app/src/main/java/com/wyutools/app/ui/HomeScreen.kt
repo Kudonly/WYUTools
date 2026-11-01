@@ -11,6 +11,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.wyutools.app.SharedCardSnapshot
 import com.wyutools.app.SharedViewTransition
 import com.wyutools.app.auth.AuthViewModel
+import com.wyutools.app.schedule.ScheduleViewModel
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
@@ -37,6 +40,8 @@ import kotlin.math.roundToInt
 @Composable
 fun HomeScreen(
     authVm: AuthViewModel,
+    scheduleVm: ScheduleViewModel,
+    onOpenSchedule: (SharedCardSnapshot?) -> Unit,
     onOpenLxt: (SharedCardSnapshot?) -> Unit,
     onOpenElec: (SharedCardSnapshot?) -> Unit,
     onOpenGym: (SharedCardSnapshot?) -> Unit,
@@ -58,6 +63,20 @@ fun HomeScreen(
     val surface = MiuixTheme.colorScheme.surface
     val primary = MiuixTheme.colorScheme.primary
     val wallpaper = LocalWyuWallpaper.current
+    val scheduleUi by scheduleVm.ui.collectAsState()
+    val authUi by authVm.ui.collectAsState()
+    val liquidGlassSetting by WyuAppearance.liquidGlassNav.collectAsState()
+    val now = rememberCurrentMinute()
+    val scheduleData = scheduleUi.data
+    val scheduleFocus = scheduleData?.focusCourse(scheduleUi.weekAnchor, now)
+    val scheduleWeek = scheduleData
+        ?.currentWeek(scheduleUi.weekAnchor, now.toLocalDate())
+        ?: 1
+    // 首页卡片依赖课表缓存，首次启动或缓存失效时静默补一次数据，
+    // 避免用户未进课表页前摘要误显示“没有课哦”。
+    LaunchedEffect(authUi.restoring, authUi.loggedIn) {
+        if (!authUi.restoring && authUi.loggedIn) scheduleVm.onAuthReady()
+    }
     val backgroundBrush = remember(wallpaper, dark, surface, primary) {
         if (wallpaper == WyuWallpaper.Custom) {
             null
@@ -88,6 +107,7 @@ fun HomeScreen(
                                 }
                             }
                         },
+                        liquidGlassEnabled = liquidGlassSetting,
                     )
                 }
             },
@@ -113,6 +133,9 @@ fun HomeScreen(
                         scrollState = toolsScroll,
                         topInset = padding.calculateTopPadding(),
                         bottomInset = contentBottom,
+                        scheduleFocus = scheduleFocus,
+                        scheduleWeek = scheduleWeek,
+                        onOpenSchedule = onOpenSchedule,
                         onOpenLxt = onOpenLxt,
                         onOpenElec = onOpenElec,
                         onOpenGym = onOpenGym,

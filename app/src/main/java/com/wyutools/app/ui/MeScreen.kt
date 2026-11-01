@@ -1,5 +1,6 @@
 package com.wyutools.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -43,8 +45,6 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.SnackbarHost
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -60,12 +60,12 @@ fun MeContent(
 ) {
     val ui by vm.ui.collectAsState()
     val demoMode by vm.demoMode.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     var showLogout by remember { mutableStateOf(false) }
 
     LaunchedEffect(ui.notice) {
         val notice = ui.notice ?: return@LaunchedEffect
-        snackbar.showSnackbar(notice)
+        Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
         vm.consumeNotice()
     }
 
@@ -106,13 +106,6 @@ fun MeContent(
                 )
             }
         }
-
-        SnackbarHost(
-            state = snackbar,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = bottomInset + 12.dp),
-        )
     }
 
     MiuixConfirmDialog(

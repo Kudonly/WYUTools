@@ -41,7 +41,7 @@ enum class WyuWallpaper(val label: String) {
     Aurora("极光"),
     Custom("自定义");
 
-    fun background(dark: Boolean, surface: Color): Brush? {
+    fun backgroundStops(dark: Boolean, surface: Color): List<Pair<Float, Color>>? {
         val stops = when (this) {
             Default, Custom -> return null
             Mist -> if (dark) {
@@ -68,22 +68,35 @@ enum class WyuWallpaper(val label: String) {
                 listOf(Color(0xFFDCD2F6), Color(0xFFE4E8FA), Color(0xFFF2EEFB))
             }
         }
-        return Brush.verticalGradient(
+        return listOf(
             0f to stops[0],
             0.38f to stops[1],
             0.72f to stops[2],
             1f to surface,
         )
     }
+
+    fun background(dark: Boolean, surface: Color): Brush? {
+        val stops = backgroundStops(dark, surface) ?: return null
+        return Brush.verticalGradient(*stops.toTypedArray())
+    }
 }
 
-fun wyuHomeBackground(dark: Boolean, surface: Color, primary: Color): Brush {
+fun wyuHomeBackgroundStops(
+    dark: Boolean,
+    surface: Color,
+    primary: Color,
+): List<Pair<Float, Color>> {
     val tint = lerp(surface, primary, if (dark) 0.12f else 0.16f)
-    return Brush.verticalGradient(
+    return listOf(
         0f to tint,
         0.34f to surface,
         1f to surface,
     )
+}
+
+fun wyuHomeBackground(dark: Boolean, surface: Color, primary: Color): Brush {
+    return Brush.verticalGradient(*wyuHomeBackgroundStops(dark, surface, primary).toTypedArray())
 }
 
 fun DrawScope.drawWyuImageCover(image: ImageBitmap, dim: Float = 0f) {
@@ -115,6 +128,7 @@ object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
     private const val KeyCustomBrightness = "custom_brightness"
+    private const val KeyLiquidGlassNav = "liquid_glass_nav"
     private const val CustomFileName = "custom_wallpaper.jpg"
     private const val MaxWallpaperSide = 2560
 
@@ -130,6 +144,9 @@ object WyuAppearance {
     private val _customBrightness = MutableStateFlow(1f)
     val customBrightness: StateFlow<Float> = _customBrightness.asStateFlow()
 
+    private val _liquidGlassNav = MutableStateFlow(false)
+    val liquidGlassNav: StateFlow<Boolean> = _liquidGlassNav.asStateFlow()
+
     private var prefs: SharedPreferences? = null
     @Volatile
     private var loadingCustom = false
@@ -141,6 +158,7 @@ object WyuAppearance {
         prefs = loaded
         _hasCustomWallpaper.value = customFile(appContext).let { it.isFile && it.length() > 0L }
         _customBrightness.value = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.2f, 1f)
+        _liquidGlassNav.value = loaded.getBoolean(KeyLiquidGlassNav, false)
         val saved = WyuWallpaper.entries
             .firstOrNull { it.name == loaded.getString(KeyWallpaper, null) }
         _wallpaper.value = when {
@@ -164,6 +182,13 @@ object WyuAppearance {
         if (_customBrightness.value == clamped) return
         _customBrightness.value = clamped
         prefs?.edit()?.putFloat(KeyCustomBrightness, clamped)?.apply()
+    }
+
+    fun setLiquidGlassNav(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        if (_liquidGlassNav.value == enabled) return
+        _liquidGlassNav.value = enabled
+        prefs?.edit()?.putBoolean(KeyLiquidGlassNav, enabled)?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {
