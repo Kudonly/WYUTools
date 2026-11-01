@@ -45,6 +45,7 @@ import com.wyutools.app.ui.HomeScreen
 import com.wyutools.app.ui.JxglWebScreen
 import com.wyutools.app.ui.LxtBindScreen
 import com.wyutools.app.ui.LxtScreen
+import com.wyutools.app.ui.ScheduleScreen
 import com.wyutools.app.ui.SettingsScreen
 import com.wyutools.app.ui.WyuMorphPageState
 import com.wyutools.app.ui.WyuPageEffects
@@ -253,6 +254,10 @@ fun WyuApp(
                 ) {
                     HomeScreen(
                         authVm = authVm,
+                        scheduleVm = app.scheduleViewModel,
+                        onOpenSchedule = { card ->
+                            openTool(SharedViewTransition.ROUTE_SCHEDULE, card)
+                        },
                         onOpenLxt = { card -> openTool(SharedViewTransition.ROUTE_LXT, card) },
                         onOpenElec = { card -> openTool(SharedViewTransition.ROUTE_ELEC, card) },
                         onOpenGym = { card -> openTool(SharedViewTransition.ROUTE_GYM, card) },
@@ -261,6 +266,21 @@ fun WyuApp(
                         onOpenSettings = { card ->
                             openTool(SharedViewTransition.ROUTE_SETTINGS, card)
                         },
+                    )
+                }
+            }
+            composable("schedule") {
+                WyuPageEffects(
+                    active = currentRoute == "schedule",
+                    startBlurred = initialRoute != SharedViewTransition.ROUTE_SCHEDULE &&
+                        cardMorph == null &&
+                        returnMorph == null,
+                ) {
+                    ScheduleScreen(
+                        vm = app.scheduleViewModel,
+                        authVm = authVm,
+                        onLogin = { nav.navigate("me/login") },
+                        onBack = { closeTool(SharedViewTransition.ROUTE_SCHEDULE) },
                     )
                 }
             }

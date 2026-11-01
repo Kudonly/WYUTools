@@ -72,7 +72,7 @@ object ElecApi {
     private const val PATH_HISTORY = "/scp-api/electricity-recharge/orderQueryWithPage"
     private const val PATH_CREATE_ORDER = "/scp-api/electricity-recharge/create-order-cb"
     private const val PATH_CHECK_ORDER = "/scp-api/electricity-recharge/check-order-cb"
-    private const val USER_AGENT = "WYUtools/1.0 (Android)"
+    private const val USER_AGENT = "WYUTools/1.0 (Android)"
 
     private val PAY_TIME_FORMAT: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")

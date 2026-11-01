@@ -195,6 +195,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         handleSessionExpired(forceAutoLogin = true)
     }
 
+    /** 课表导入专用：直接复用教务会话，过期时自动尝试重新登录。 */
+    suspend fun fetchSchedule(termCode: String): String {
+        if (!_ui.value.loggedIn) {
+            throw SsoException("登录统一身份认证后即可导入课表。")
+        }
+        return try {
+            api.fetchJxglSchedule(termCode)
+        } catch (error: SsoException) {
+            if (error.sessionExpired) handleSessionExpired(forceAutoLogin = true)
+            throw error
+        }
+    }
+
     fun logout() {
         if (_ui.value.loggingOut) return
         autoLoginJob?.cancel()

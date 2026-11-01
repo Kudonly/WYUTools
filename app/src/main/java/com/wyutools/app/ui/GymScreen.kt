@@ -1,5 +1,6 @@
 package com.wyutools.app.ui
 
+import android.widget.Toast
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,8 +71,6 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
-import top.yukonga.miuix.kmp.basic.SnackbarHost
-import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -162,7 +162,7 @@ private fun GymContent(
     var bookingTarget by remember { mutableStateOf<Pair<GymVenue, GymSlot>?>(null) }
     var cancelTarget by remember { mutableStateOf<GymRecord?>(null) }
     var showLogout by remember { mutableStateOf(false) }
-    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     val venueListState = rememberLazyListState()
@@ -183,13 +183,12 @@ private fun GymContent(
         if (bookingTarget != null && !ui.booking) {
             bookingTarget = null
         }
-        snackbar.showSnackbar(notice.message)
+        Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
         vm.consumeNotice()
     }
 
     WyuPageScaffold(
         progress = { collapseFraction.value },
-        snackbarHost = { SnackbarHost(snackbar) },
         maskCollapseHeight = WyuLargeTitleHeight,
         overlay = {
             GymTabsOverlay(
