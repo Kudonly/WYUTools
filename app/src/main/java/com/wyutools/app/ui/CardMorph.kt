@@ -2,6 +2,9 @@ package com.wyutools.app.ui
 
 import android.app.Activity
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Matrix
+import android.graphics.Shader
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +26,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
@@ -31,13 +37,16 @@ import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -57,18 +66,37 @@ import kotlin.math.roundToInt
  * progress value, so motion stays continuous for the whole duration.
  */
 private val MorphEasing = CubicBezierEasing(0.65f, 0f, 0.03f, 1f)
-private const val MorphDuration = 400
+private const val MorphDuration = 460
 
 /** A stalled frame (e.g. the destination's first composition) may cost the
  *  morph at most this much progress, so it slows down instead of skipping. */
 private const val MorphMaxFrameStepMs = 34f
 
+/** Matches the depth of iOS Control Center: the home screen pulls back and darkens. */
+private const val MorphBackdropDim = 0.30f
+private const val MorphBackdropScale = 0.08f
+
+/** The fixed corner band of the backdrop's contentsCenter. It matches half of
+ *  the shrink, so the centre absorbs the pullback while the outer border and
+ *  screen corners keep their original pixels. */
+private const val MorphBackdropCenterInset = 0.04f
+
+/** Blur is applied to the backdrop at draw time (GPU), not baked into a bitmap,
+ *  so it keeps sampling the sharp home as the backdrop scales. */
+private val MorphBackdropBlur = 8.dp
+
 private suspend fun Animatable<Float, AnimationVector1D>.animateMorph(
     target: Float,
+    onProgress: (Float) -> Unit = {},
 ) {
     val from = value
+    onProgress(from)
     val distance = abs(target - from)
-    if (distance <= 0.001f) return
+    if (distance <= 0.001f) {
+        snapTo(target)
+        onProgress(target)
+        return
+    }
     val totalMs = (MorphDuration * distance).coerceAtLeast(1f)
     var lastFrameNanos = 0L
     var elapsedMs = 0f
@@ -79,9 +107,12 @@ private suspend fun Animatable<Float, AnimationVector1D>.animateMorph(
             elapsedMs += deltaMs.coerceIn(0f, MorphMaxFrameStepMs)
             val eased = MorphEasing.transform((elapsedMs / totalMs).coerceIn(0f, 1f))
             snapTo(from + (target - from) * eased)
+            onProgress(value)
         }
         lastFrameNanos = frameNanos
     }
+    snapTo(target)
+    onProgress(target)
 }
 
 private fun smoothstep(edge0: Float, edge1: Float, value: Float): Float {
@@ -262,6 +293,136 @@ private fun DrawScope.drawImageStretched(image: ImageBitmap, alpha: Float) {
     )
 }
 
+/**
+ * Scales the backdrop with CALayer's contentsCenter semantics: the four
+ * corners keep their original size, the edges stretch on one axis and the
+ * centre stretches on both. FilterQuality.Low is Core Animation's default
+ * linear filter, which keeps the resampled wallpaper smooth.
+ */
+private fun DrawScope.drawImageScaledWithContentsCenter(
+    image: ImageBitmap,
+    scale: Float,
+    alpha: Float,
+) {
+    if (alpha <= 0f || scale <= 0f) return
+    val dstWidth = size.width * scale
+    val dstHeight = size.height * scale
+    val dstLeft = ((size.width - dstWidth) / 2f).roundToInt()
+    val dstTop = ((size.height - dstHeight) / 2f).roundToInt()
+    val dstRight = (dstLeft + dstWidth).roundToInt()
+    val dstBottom = (dstTop + dstHeight).roundToInt()
+    val insetX = (image.width * MorphBackdropCenterInset).roundToInt()
+        .coerceIn(0, image.width / 2)
+    val insetY = (image.height * MorphBackdropCenterInset).roundToInt()
+        .coerceIn(0, image.height / 2)
+    if (insetX * 2 >= dstRight - dstLeft || insetY * 2 >= dstBottom - dstTop) {
+        drawImage(
+            image = image,
+            srcOffset = IntOffset.Zero,
+            srcSize = IntSize(image.width, image.height),
+            dstOffset = IntOffset(dstLeft, dstTop),
+            dstSize = IntSize(dstRight - dstLeft, dstBottom - dstTop),
+            alpha = alpha,
+            filterQuality = FilterQuality.Low,
+        )
+        return
+    }
+    val srcX = intArrayOf(0, insetX, image.width - insetX, image.width)
+    val srcY = intArrayOf(0, insetY, image.height - insetY, image.height)
+    val dstX = intArrayOf(dstLeft, dstLeft + insetX, dstRight - insetX, dstRight)
+    val dstY = intArrayOf(dstTop, dstTop + insetY, dstBottom - insetY, dstBottom)
+    for (row in 0..2) {
+        for (column in 0..2) {
+            val srcWidth = srcX[column + 1] - srcX[column]
+            val srcHeight = srcY[row + 1] - srcY[row]
+            if (srcWidth <= 0 || srcHeight <= 0) continue
+            drawImage(
+                image = image,
+                srcOffset = IntOffset(srcX[column], srcY[row]),
+                srcSize = IntSize(srcWidth, srcHeight),
+                dstOffset = IntOffset(dstX[column], dstY[row]),
+                dstSize = IntSize(
+                    dstX[column + 1] - dstX[column],
+                    dstY[row + 1] - dstY[row],
+                ),
+                alpha = alpha,
+                filterQuality = FilterQuality.Low,
+            )
+        }
+    }
+}
+
+private data class MorphHole(val rect: Rect, val radius: Float)
+
+private fun morphHole(
+    progress: Float,
+    start: Rect,
+    width: Float,
+    height: Float,
+    startRadius: Float,
+    screenRadius: Float,
+): MorphHole {
+    val rect = Rect(
+        lerp(start.left, 0f, progress),
+        lerp(start.top, 0f, progress),
+        lerp(start.right, width, progress),
+        lerp(start.bottom, height, progress),
+    )
+    val radius = if (screenRadius > 0f) {
+        lerp(startRadius, screenRadius, progress)
+    } else {
+        startRadius * (1f - progress)
+    }
+    return MorphHole(rect, radius)
+}
+
+/**
+ * The morph backdrop is rendered from the sharp home capture every frame and
+ * blurred by the GPU, so the blur is live instead of a pre-blurred bitmap.
+ * The contentsCenter pull-back leaves a band around the scaled image; the
+ * BitmapShader mirrors the image across that edge into the band, so the fill
+ * keeps sampling the home's own border pixels instead of a stretched copy.
+ */
+@Composable
+private fun MorphBackdrop(
+    image: ImageBitmap?,
+    bitmap: Bitmap?,
+    strength: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    val surface = MiuixTheme.colorScheme.surface
+    val mirrorShader = remember(bitmap) {
+        bitmap?.let { BitmapShader(it, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR) }
+    }
+    val mirrorBrush = remember(mirrorShader) {
+        mirrorShader?.let { ShaderBrush(it) }
+    }
+    val pull = strength()
+    val scale = 1f - MorphBackdropScale * pull
+    Canvas(
+        modifier
+            .fillMaxSize()
+            .blur(radius = MorphBackdropBlur * pull, edgeTreatment = BlurredEdgeTreatment.Rectangle),
+    ) {
+        if (image != null && bitmap != null && mirrorShader != null && mirrorBrush != null) {
+            val dstWidth = size.width * scale
+            val dstHeight = size.height * scale
+            val dstLeft = (size.width - dstWidth) / 2f
+            val dstTop = (size.height - dstHeight) / 2f
+            mirrorShader.setLocalMatrix(
+                Matrix().apply {
+                    setScale(dstWidth / bitmap.width, dstHeight / bitmap.height)
+                    postTranslate(dstLeft, dstTop)
+                },
+            )
+            drawRect(brush = mirrorBrush)
+            drawImageScaledWithContentsCenter(image, scale, 1f)
+        } else {
+            drawRect(surface)
+        }
+    }
+}
+
 private fun DrawScope.drawImageIntoTarget(image: ImageBitmap, rect: Rect, alpha: Float) {
     if (alpha <= 0f || rect.width <= 0f || rect.height <= 0f) return
     drawImage(
@@ -276,37 +437,37 @@ private fun DrawScope.drawImageIntoTarget(image: ImageBitmap, rect: Rect, alpha:
 }
 
 /**
- * Opens the card into the page: the destination is visible through a growing
- * rounded window from the first frame, while the home backdrop dims and blurs.
+ * Opens the card into the page: the card preview stretches with the growing
+ * rounded window and dissolves into the destination underneath it, while the
+ * home backdrop dims and blurs, so the card and the page stay one surface.
  */
 @Composable
 fun CardMorphOverlay(
     snapshot: SharedCardSnapshot,
     sharpHome: Bitmap?,
-    homeBackdrop: Bitmap?,
+    pageBlur: Bitmap?,
     cancelRequested: Boolean,
     onCovered: () -> Unit,
     onFinished: () -> Unit,
     onCancelled: () -> Unit,
 ) {
-    val expand = remember(snapshot, sharpHome, homeBackdrop) { Animatable(0f) }
+    val expand = remember(snapshot, sharpHome) { Animatable(0f) }
     // Survives effect restarts, so a reversal never re-runs the navigation step.
-    val started = remember(snapshot, sharpHome, homeBackdrop) { booleanArrayOf(false) }
+    val started = remember(snapshot, sharpHome) { booleanArrayOf(false) }
     val cardImage = remember(snapshot) { snapshot.bitmap.asImageBitmap() }
     val sharpImage = remember(sharpHome) { sharpHome?.asImageBitmap() }
-    val backdropImage = remember(homeBackdrop) { homeBackdrop?.asImageBitmap() }
+    val pageBlurImage = remember(pageBlur) { pageBlur?.asImageBitmap() }
     val start = rememberStartBounds(snapshot)
     val screenRadius = rememberScreenCornerRadiusPx()
-    val surface = MiuixTheme.colorScheme.surface
 
-    LaunchedEffect(snapshot, sharpHome, homeBackdrop, cancelRequested) {
+    LaunchedEffect(snapshot, sharpHome, cancelRequested) {
         if (!started[0]) {
             started[0] = true
             withFrameNanos { }
             onCovered()
         }
         val target = if (cancelRequested) 0f else 1f
-        expand.animateMorph(target)
+        expand.animateMorph(target) { WyuMorphPageState.contentProgress = it }
         if (cancelRequested) onCancelled() else onFinished()
     }
 
@@ -319,52 +480,69 @@ fun CardMorphOverlay(
                 onClick = {},
             ),
     ) {
+        // The live page shows through the growing hole, so the backdrop is
+        // clipped outside it after its real-time blur has been rendered.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    val hole = morphHole(
+                        progress = expand.value,
+                        start = start,
+                        width = size.width,
+                        height = size.height,
+                        startRadius = snapshot.radiusPx,
+                        screenRadius = screenRadius,
+                    )
+                    clipPath(roundedPath(hole.rect, hole.radius), ClipOp.Difference) {
+                        this@drawWithContent.drawContent()
+                    }
+                },
+        ) {
+            MorphBackdrop(
+                image = sharpImage,
+                bitmap = sharpHome,
+                strength = { expand.value },
+            )
+        }
         Canvas(Modifier.fillMaxSize()) {
             val progress = expand.value
-            // Geometry follows the eased progress directly; no second curve on top.
-            val hole = Rect(
-                lerp(start.left, 0f, progress),
-                lerp(start.top, 0f, progress),
-                lerp(start.right, size.width, progress),
-                lerp(start.bottom, size.height, progress),
+            val hole = morphHole(
+                progress = progress,
+                start = start,
+                width = size.width,
+                height = size.height,
+                startRadius = snapshot.radiusPx,
+                screenRadius = screenRadius,
             )
-            // The window opens up to the device's own corner radius.
-            val radius = if (screenRadius > 0f) {
-                lerp(snapshot.radiusPx, screenRadius, progress)
-            } else {
-                snapshot.radiusPx * (1f - progress)
-            }
-            val holePath = roundedPath(hole, radius)
+            val holePath = roundedPath(hole.rect, hole.radius)
 
-            clipPath(holePath, ClipOp.Difference) {
-                when {
-                    sharpImage != null -> {
-                        drawImageStretched(sharpImage, 1f)
-                        if (backdropImage != null) {
-                            drawImageStretched(backdropImage, progress)
-                        }
-                    }
-                    backdropImage != null -> drawImageStretched(backdropImage, 1f)
-                    else -> drawRect(surface)
-                }
-                val dim = 0.19f * progress
-                if (dim > 0f) {
+            val dim = MorphBackdropDim * progress
+            if (dim > 0f) {
+                clipPath(holePath, ClipOp.Difference) {
                     drawRect(Color.Black.copy(alpha = dim))
                 }
             }
 
-            // The card stays put while the page window grows out from under it.
-            val cardAlpha = 1f - smoothstep(0.06f, 0.42f, progress)
-            if (cardAlpha > 0f && start.width > 0f && start.height > 0f) {
-                drawImage(
-                    image = cardImage,
-                    srcOffset = IntOffset.Zero,
-                    srcSize = IntSize(cardImage.width, cardImage.height),
-                    dstOffset = IntOffset(start.left.roundToInt(), start.top.roundToInt()),
-                    dstSize = IntSize(start.width.roundToInt(), start.height.roundToInt()),
-                    alpha = cardAlpha,
-                    filterQuality = FilterQuality.Medium,
-                )
+            // Reversing the open morph blurs the page as its window closes,
+            // matching the normal return instead of snapping back sharp.
+            if (pageBlurImage != null && cancelRequested) {
+                val blurAlpha = smoothstep(0.05f, 0.75f, 1f - progress)
+                if (blurAlpha > 0.001f) {
+                    clipPath(holePath) {
+                        drawImageStretched(pageBlurImage, blurAlpha)
+                    }
+                }
+            }
+
+            // The card is the window: it rides the growing hole as a stretched
+            // preview and dissolves into the page behind it, so the card opens
+            // into the page instead of fading in place.
+            val cardAlpha = 1f - smoothstep(0.15f, 0.7f, progress)
+            if (cardAlpha > 0f && hole.rect.width > 0f && hole.rect.height > 0f) {
+                clipPath(holePath) {
+                    drawImageIntoTarget(cardImage, hole.rect, cardAlpha)
+                }
             }
         }
         FlightTitle(
@@ -376,9 +554,10 @@ fun CardMorphOverlay(
 }
 
 /**
- * Returns to the card: the window closes over the page snapshot onto the
- * originating card while the cached home backdrop sharpens and undims in step
- * with it, so by the time the card lands the background is already the live home.
+ * Returns to the card: the window condenses the page snapshot back into the
+ * originating card while the home backdrop grows, sharpens and undims from the
+ * state the open morph left it in, so by the time the card lands the background
+ * is already the live home.
  *
  * The page snapshot arrives a few frames after the overlay: until then the
  * overlay only shows the flying title while the live page hides its own, so
@@ -388,26 +567,26 @@ fun CardMorphOverlay(
 fun CardReturnOverlay(
     snapshot: SharedCardSnapshot,
     page: Bitmap?,
-    homeBackdrop: Bitmap?,
+    pageBlur: Bitmap?,
     sharpHome: Bitmap?,
     reopenRequested: Boolean,
     onTap: () -> Unit,
     onSwap: () -> Unit,
     onReopened: () -> Unit,
 ) {
-    val raw = remember(snapshot, page, homeBackdrop) { Animatable(0f) }
+    val raw = remember(snapshot, page) { Animatable(0f) }
     val cardImage = remember(snapshot) { snapshot.bitmap.asImageBitmap() }
-    val backdropImage = remember(homeBackdrop) { homeBackdrop?.asImageBitmap() }
     val sharpImage = remember(sharpHome) { sharpHome?.asImageBitmap() }
-    val pageImage = remember(page) { page?.asImageBitmap() }
+    val pageBlurImage = remember(pageBlur) { pageBlur?.asImageBitmap() }
     val target = rememberStartBounds(snapshot)
     val screenRadius = rememberScreenCornerRadiusPx()
-    val surface = MiuixTheme.colorScheme.surface
+    val density = LocalDensity.current
+    val liftPx = with(density) { WyuMorphPageState.ContentLift.toPx() }
 
-    LaunchedEffect(snapshot, page, homeBackdrop, sharpHome, reopenRequested) {
+    LaunchedEffect(snapshot, page, sharpHome, reopenRequested) {
         if (page == null) return@LaunchedEffect
         val animateTarget = if (reopenRequested) 0f else 1f
-        raw.animateMorph(animateTarget)
+        raw.animateMorph(animateTarget) { WyuMorphPageState.contentProgress = 1f - it }
         if (reopenRequested) {
             // The page stayed composed underneath, so it can simply be handed back.
             onReopened()
@@ -427,51 +606,78 @@ fun CardReturnOverlay(
                 onClick = { if (page != null && raw.value < 0.999f) onTap() },
             ),
     ) {
+        // The live page shows through the shrinking window, exactly as it does
+        // while opening; until the snapshot is ready nothing is covered.
+        if (page != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        val hole = morphHole(
+                            progress = 1f - raw.value,
+                            start = target,
+                            width = size.width,
+                            height = size.height,
+                            startRadius = snapshot.radiusPx,
+                            screenRadius = screenRadius,
+                        )
+                        clipPath(roundedPath(hole.rect, hole.radius), ClipOp.Difference) {
+                            this@drawWithContent.drawContent()
+                        }
+                    },
+            ) {
+                MorphBackdrop(
+                    image = sharpImage,
+                    bitmap = sharpHome,
+                    strength = { 1f - raw.value },
+                )
+            }
+        }
         Canvas(Modifier.fillMaxSize()) {
-            val image = pageImage ?: return@Canvas
+            if (page == null) return@Canvas
             val fraction = raw.value
             // Same single curve as opening, so close mirrors open exactly.
-            val fullscreen = Rect(0f, 0f, size.width, size.height)
-            val rect = fullscreen.lerpTo(target, fraction)
-            // Full screen starts at the device's corner radius, landing on the card's.
-            val radius = lerp(
-                if (screenRadius > 0f) screenRadius else 0f,
-                snapshot.radiusPx,
-                fraction,
+            val hole = morphHole(
+                progress = 1f - fraction,
+                start = target,
+                width = size.width,
+                height = size.height,
+                startRadius = snapshot.radiusPx,
+                screenRadius = screenRadius,
             )
-            val path = roundedPath(rect, radius)
+            val holePath = roundedPath(hole.rect, hole.radius)
 
-            // The sharp home snapshot sits underneath the cached blur, and the
-            // blur dissolves into it across the same progress that closes the
-            // window, so the background never lags behind the page.
-            if (sharpImage != null) {
-                drawImageStretched(sharpImage, 1f)
-            } else if (backdropImage != null) {
-                drawImageStretched(backdropImage, 1f)
-            } else {
-                drawRect(surface)
-            }
-            if (backdropImage != null) {
-                val blurAlpha = if (sharpImage != null) {
-                    1f - smoothstep(0.22f, 0.9f, fraction)
-                } else {
-                    1f
+            val dim = MorphBackdropDim * (1f - fraction)
+            if (dim > 0f) {
+                clipPath(holePath, ClipOp.Difference) {
+                    drawRect(Color.Black.copy(alpha = dim))
                 }
+            }
+
+            // The page content sinks and lowers as the window closes; the
+            // blurred copy follows the same transform so it never ghosts.
+            if (pageBlurImage != null) {
+                val blurAlpha = smoothstep(0.04f, 0.78f, fraction)
                 if (blurAlpha > 0.001f) {
-                    drawImageStretched(backdropImage, blurAlpha)
-                    drawRect(Color.Black.copy(alpha = 0.16f * blurAlpha))
+                    clipPath(holePath) {
+                        val contentScale = 1f - WyuMorphPageState.ContentShrink * fraction
+                        withTransform({
+                            translate(0f, liftPx * fraction)
+                            scale(contentScale, contentScale, pivot = center)
+                        }) {
+                            drawImageStretched(pageBlurImage, blurAlpha)
+                        }
+                    }
                 }
             }
 
-            // Mirror of the opening: the page snapshot stays in place and the
-            // window closes over it. Nothing solid is painted under the page,
-            // so the light wallpaper surfaces never flash through as white.
-            val cardAlpha = smoothstep(0.72f, 0.96f, fraction)
-            clipPath(path) {
-                drawImageStretched(image, 1f)
-            }
-            if (cardAlpha > 0f && target.width > 0f && target.height > 0f) {
-                drawImageIntoTarget(cardImage, target, cardAlpha)
+            // Mirror of the opening: the widget condenses with the window while
+            // the card is stretched back into the landing geometry.
+            val cardAlpha = smoothstep(0.3f, 0.85f, fraction)
+            if (cardAlpha > 0f) {
+                clipPath(holePath) {
+                    drawImageIntoTarget(cardImage, hole.rect, cardAlpha)
+                }
             }
         }
         FlightTitle(

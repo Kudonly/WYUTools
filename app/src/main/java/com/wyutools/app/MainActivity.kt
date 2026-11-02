@@ -92,7 +92,6 @@ fun WyuApp(
     val authVm = app.authViewModel
 
     val cardSnapshots = remember { mutableMapOf<String, SharedCardSnapshot>() }
-    val homeBackdrops = remember { mutableMapOf<String, Bitmap>() }
     val homeSharpSnapshots = remember { mutableMapOf<String, Bitmap>() }
     var cardMorph by remember { mutableStateOf<CardMorph?>(null) }
     var returnMorph by remember { mutableStateOf<CardReturn?>(null) }
@@ -107,6 +106,25 @@ fun WyuApp(
     val pageLayer = rememberGraphicsLayer()
     var pageCaptureRequested by remember { mutableStateOf(false) }
     val pageCaptureDone = remember { booleanArrayOf(false) }
+
+    suspend fun recordNavHostPage(): Bitmap? {
+        withFrameNanos { }
+        pageCaptureDone[0] = false
+        pageCaptureRequested = true
+        var frames = 0
+        while (!pageCaptureDone[0] && frames < 100) {
+            withFrameNanos { }
+            frames++
+        }
+        pageCaptureRequested = false
+        val recorded = pageCaptureDone[0]
+        pageCaptureDone[0] = false
+        return if (recorded) {
+            runCatching { pageLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+        } else {
+            null
+        }
+    }
 
     val goBack: () -> Unit = {
         if (!nav.popBackStack()) onExit()
@@ -128,27 +146,18 @@ fun WyuApp(
                 toolRoute,
                 snapshot,
                 null,
-                homeBackdrops[toolRoute],
                 homeSharpSnapshots[toolRoute],
             )
             scope.launch {
-                withFrameNanos { }
-                pageCaptureRequested = true
-                var frames = 0
-                while (!pageCaptureDone[0] && frames < 100) {
-                    withFrameNanos { }
-                    frames++
-                }
-                pageCaptureRequested = false
-                val recorded = pageCaptureDone[0]
-                pageCaptureDone[0] = false
-                val page = if (recorded) {
-                    runCatching { pageLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
-                } else {
-                    null
-                }
+                val page = recordNavHostPage()
                 if (page != null) {
                     returnMorph = returnMorph?.copy(page = page)
+                    val blurred = withContext(Dispatchers.Default) {
+                        runCatching { createBlurBackdrop(page, scale = 10) }.getOrNull()
+                    }
+                    if (blurred != null) {
+                        returnMorph = returnMorph?.copy(pageBlur = blurred)
+                    }
                 } else {
                     returnMorph = null
                     returnRunning.value = false
@@ -169,15 +178,9 @@ fun WyuApp(
                     openPending.value = true
                     scope.launch {
                         val captured = captureWindow(activity)
-                        val backdrop = captured?.let { source ->
-                            withContext(Dispatchers.Default) {
-                                runCatching { createBlurBackdrop(source) }.getOrNull()
-                            }
-                        }
                         openPending.value = false
                         cardSnapshots[toolRoute] = card
-                        if (captured != null && backdrop != null) {
-                            homeBackdrops[toolRoute] = backdrop
+                        if (captured != null) {
                             homeSharpSnapshots[toolRoute] = captured
                             openCancel.value = false
                             WyuMorphPageState.titleHidden = card.title != null
@@ -185,9 +188,8 @@ fun WyuApp(
                             // waits for the morph, so nothing lands mid-animation.
                             WyuMorphPageState.morphSettled = false
                             morphRunning.value = true
-                            cardMorph = CardMorph(toolRoute, card, captured, backdrop)
+                            cardMorph = CardMorph(toolRoute, card, captured)
                         } else {
-                            captured?.recycle()
                             nav.navigate(toolRoute)
                         }
                     }
@@ -391,13 +393,27 @@ fun WyuApp(
             enabled = openPending.value || cardMorph != null || returnMorph != null,
         ) {
             // Back during opening reverses the morph instead of dropping it.
-            if (cardMorph != null) openCancel.value = true
+            if (cardMorph != null) {
+                openCancel.value = true
+                if (cardMorph?.page == null) {
+                    scope.launch {
+                        val page = recordNavHostPage()
+                        if (page != null) {
+                            val blurred = withContext(Dispatchers.Default) {
+                                runCatching { createBlurBackdrop(page, scale = 10) }
+                                    .getOrNull()
+                            }
+                            cardMorph = cardMorph?.copy(page = page, pageBlur = blurred)
+                        }
+                    }
+                }
+            }
         }
         cardMorph?.let { morph ->
             CardMorphOverlay(
                 snapshot = morph.snapshot,
                 sharpHome = morph.sharpHome,
-                homeBackdrop = morph.backdrop,
+                pageBlur = morph.pageBlur,
                 cancelRequested = openCancel.value,
                 onCovered = {
                     if (currentRoute == "home") nav.navigate(morph.route)
@@ -407,6 +423,7 @@ fun WyuApp(
                     openCancel.value = false
                     cardMorph = null
                     WyuMorphPageState.titleHidden = false
+                    WyuMorphPageState.contentProgress = 1f
                     WyuMorphPageState.morphSettled = true
                 },
                 onCancelled = {
@@ -435,9 +452,9 @@ fun WyuApp(
                         morphRunning.value = false
                         openCancel.value = false
                         WyuMorphPageState.titleHidden = false
+                        WyuMorphPageState.contentProgress = 1f
                         WyuMorphPageState.morphSettled = true
                         returnRunning.value = false
-                        homeBackdrops.remove(morph.route)
                         homeSharpSnapshots.remove(morph.route)
                     }
                 },
@@ -447,7 +464,7 @@ fun WyuApp(
             CardReturnOverlay(
                 snapshot = morph.snapshot,
                 page = morph.page,
-                homeBackdrop = morph.homeBackdrop,
+                pageBlur = morph.pageBlur,
                 sharpHome = morph.sharpHome,
                 reopenRequested = returnReopen.value,
                 onTap = { returnReopen.value = true },
@@ -475,8 +492,8 @@ fun WyuApp(
                         returnRunning.value = false
                         returnReopen.value = false
                         WyuMorphPageState.titleHidden = false
+                        WyuMorphPageState.contentProgress = 1f
                         cardSnapshots.remove(morph.route)
-                        homeBackdrops.remove(morph.route)
                         homeSharpSnapshots.remove(morph.route)
                     }
                 },
@@ -489,6 +506,7 @@ fun WyuApp(
                         returnRunning.value = false
                         returnReopen.value = false
                         WyuMorphPageState.titleHidden = false
+                        WyuMorphPageState.contentProgress = 1f
                     }
                 },
             )
@@ -500,15 +518,16 @@ private data class CardMorph(
     val route: String,
     val snapshot: SharedCardSnapshot,
     val sharpHome: Bitmap,
-    val backdrop: Bitmap?,
+    val page: Bitmap? = null,
+    val pageBlur: Bitmap? = null,
 )
 
 private data class CardReturn(
     val route: String,
     val snapshot: SharedCardSnapshot,
     val page: Bitmap?,
-    val homeBackdrop: Bitmap?,
     val sharpHome: Bitmap?,
+    val pageBlur: Bitmap? = null,
 )
 
 private suspend fun captureWindow(activity: Activity): Bitmap? =

@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -353,6 +354,13 @@ private fun ScheduleOverlay(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                val morph = WyuMorphPageState.contentProgress
+                val scale = 1f - WyuMorphPageState.ContentShrink * (1f - morph)
+                scaleX = scale
+                scaleY = scale
+                translationY = (1f - morph) * WyuMorphPageState.ContentLift.toPx()
+            }
             .statusBarsPadding()
             .padding(top = 62.dp, start = 16.dp, end = 16.dp)
             .graphicsLayer {
@@ -761,7 +769,10 @@ private fun WeekGrid(
     val sectionCount = data.sections.size.coerceAtLeast(1)
     val totalHeight = ScheduleWeekRowHeight * sectionCount
     val gridColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.18f)
-    val todayTint = MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+    // The today marker must not reuse a course-palette colour: a neutral wash
+    // plus a primary outline keeps it distinct from every pastel course block.
+    val todayTint = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+    val todayOutline = MiuixTheme.colorScheme.primary.copy(alpha = 0.45f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -784,6 +795,7 @@ private fun WeekGrid(
                     isToday = date == today,
                     gridColor = gridColor,
                     todayTint = todayTint,
+                    todayOutline = todayOutline,
                     modifier = Modifier.weight(1f),
                     onCourseClick = { course -> onCourseClick(course, date) },
                 )
@@ -801,6 +813,7 @@ private fun WeekDayColumn(
     isToday: Boolean,
     gridColor: Color,
     todayTint: Color,
+    todayOutline: Color,
     modifier: Modifier = Modifier,
     onCourseClick: (ScheduleCourse) -> Unit,
 ) {
@@ -812,9 +825,12 @@ private fun WeekDayColumn(
             .height(totalHeight)
             .drawBehind {
                 if (isToday) {
+                    val corner = CornerRadius(12.dp.toPx())
+                    drawRoundRect(color = todayTint, cornerRadius = corner)
                     drawRoundRect(
-                        color = todayTint,
-                        cornerRadius = CornerRadius(12.dp.toPx()),
+                        color = todayOutline,
+                        cornerRadius = corner,
+                        style = Stroke(width = 1.dp.toPx()),
                     )
                 }
                 val stroke = 0.5.dp.toPx()

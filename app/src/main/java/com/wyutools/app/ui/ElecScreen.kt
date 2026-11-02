@@ -215,26 +215,27 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(16.dp))
             QueryCard(ui = ui, vm = vm)
-            val result = ui.result
-            if (result != null) {
-                Spacer(Modifier.height(16.dp))
-                ResultCard(
-                    info = result,
-                    stats = ui.stats,
-                )
-                Spacer(Modifier.height(16.dp))
-                RechargeEntryCard(onRecharge = vm::openRecharge)
-                Spacer(Modifier.height(16.dp))
-                RechargeCard(
-                    ui = ui,
-                    onSelectPeriod = vm::setPeriod,
-                    onRetry = vm::retryRecharge,
-                )
-                if (ui.history.isNotEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    HistoryCard(history = ui.history, stats = ui.stats)
-                }
-            }
+            Spacer(Modifier.height(16.dp))
+            // The cards are laid out before any data exists, so the page is
+            // whole from the first frame; the query result simply fills in.
+            ResultCard(
+                info = ui.result,
+                stats = ui.stats,
+                dorm = dormLabel(ui),
+            )
+            Spacer(Modifier.height(16.dp))
+            RechargeEntryCard(
+                onRecharge = vm::openRecharge,
+                enabled = ui.result != null,
+            )
+            Spacer(Modifier.height(16.dp))
+            RechargeCard(
+                ui = ui,
+                onSelectPeriod = vm::setPeriod,
+                onRetry = vm::retryRecharge,
+            )
+            Spacer(Modifier.height(16.dp))
+            HistoryCard(history = ui.history, stats = ui.stats)
             Spacer(Modifier.height(24.dp))
             Text(
                 text = "数据来自五邑大学电费充值系统",
@@ -376,7 +377,10 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
 }
 
 @Composable
-private fun RechargeEntryCard(onRecharge: () -> Unit) {
+private fun RechargeEntryCard(
+    onRecharge: () -> Unit,
+    enabled: Boolean = true,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
@@ -409,6 +413,7 @@ private fun RechargeEntryCard(onRecharge: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         Button(
             onClick = onRecharge,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
             minHeight = 48.dp,
             colors = ButtonDefaults.buttonColorsPrimary(),
@@ -426,10 +431,11 @@ private fun RechargeEntryCard(onRecharge: () -> Unit) {
 
 @Composable
 private fun ResultCard(
-    info: ElecInfo,
+    info: ElecInfo?,
     stats: ElecStats,
+    dorm: String,
 ) {
-    val low = info.remainingKwh < 20.0
+    val low = info != null && info.remainingKwh < 20.0
     val container = if (low) {
         MiuixTheme.colorScheme.errorContainer
     } else {
@@ -468,8 +474,7 @@ private fun ResultCard(
                     text = "剩余电量",
                     style = MiuixTheme.textStyles.footnote1,
                 )
-                val dorm = listOfNotNull(info.buildingName, info.roomName).joinToString(" · ")
-                if (dorm.isNotEmpty()) {
+                if (dorm.isNotBlank()) {
                     Text(
                         text = dorm,
                         style = MiuixTheme.textStyles.footnote2,
@@ -481,7 +486,7 @@ private fun ResultCard(
         Spacer(Modifier.height(16.dp))
         Row {
             Text(
-                text = formatKwh(info.remainingKwh),
+                text = info?.let { formatKwh(it.remainingKwh) } ?: "—",
                 style = MiuixTheme.textStyles.headline2,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.alignByBaseline(),
@@ -513,10 +518,13 @@ private fun ResultCard(
         Spacer(Modifier.height(8.dp))
         val daily = stats.dailyUsageKwh
         val daysLeft = stats.daysLeft
-        InfoRow("抄表时间", info.updatedAt)
-        InfoRow("折合电费", "≈ ${formatYuan(info.remainingKwh * ELEC_PRICE_PER_KWH)}")
-        InfoRow("近期日均", daily?.let { "${formatKwh(it)} 度" })
-        InfoRow("预计可用", daysLeft?.let { formatDays(it) })
+        InfoRow("抄表时间", info?.updatedAt ?: "—")
+        InfoRow(
+            "折合电费",
+            info?.let { "≈ ${formatYuan(it.remainingKwh * ELEC_PRICE_PER_KWH)}" } ?: "—",
+        )
+        InfoRow("近期日均", daily?.let { "${formatKwh(it)} 度" } ?: "—")
+        InfoRow("预计可用", daysLeft?.let { formatDays(it) } ?: "—")
         Spacer(Modifier.height(8.dp))
         Text(
             text = "折合电费按 0.63 元/度估算；日均与可用天数来自本机查询记录",
@@ -567,7 +575,8 @@ private fun RechargeCard(
                 ActionChip(
                     text = period.label,
                     onClick = { onSelectPeriod(period) },
-                    enabled = !ui.rechargeLoading || ui.period == period,
+                    enabled = ui.result != null &&
+                        (!ui.rechargeLoading || ui.period == period),
                     primary = ui.period == period,
                 )
             }
@@ -599,7 +608,13 @@ private fun RechargeCard(
 
             else -> {
                 val page = ui.recharge
-                if (page == null) {
+                if (ui.result == null) {
+                    Text(
+                        text = "查询电费后自动读取充值记录",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                } else if (page == null) {
                     Text(
                         text = "暂无充值记录",
                         style = MiuixTheme.textStyles.footnote1,

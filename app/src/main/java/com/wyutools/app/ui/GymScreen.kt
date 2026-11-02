@@ -338,6 +338,13 @@ private fun GymTabsOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                val morph = WyuMorphPageState.contentProgress
+                val scale = 1f - WyuMorphPageState.ContentShrink * (1f - morph)
+                scaleX = scale
+                scaleY = scale
+                translationY = (1f - morph) * WyuMorphPageState.ContentLift.toPx()
+            }
             .statusBarsPadding()
             .padding(top = 62.dp),
     ) {

@@ -155,6 +155,13 @@ internal object WyuMorphPageState {
     /** False while the open morph runs; tool data refreshes wait until it lands. */
     var morphSettled by mutableStateOf(true)
 
+    /** 0 = page content slightly smaller and lower, 1 = settled. Both morph
+     *  directions drive it; read it only inside layer/draw scopes. */
+    var contentProgress by mutableFloatStateOf(1f)
+
+    const val ContentShrink = 0.04f
+    val ContentLift = 16.dp
+
     /** Returns once no open morph is running, so refreshes never land mid-animation. */
     suspend fun awaitSettled() {
         if (!morphSettled) snapshotFlow { morphSettled }.first { it }
@@ -311,7 +318,15 @@ fun WyuPageScaffold(
                                 },
                             )
                             .nestedScroll(pull.connection)
-                            .graphicsLayer { translationY = pull.contentOffset },
+                            .graphicsLayer {
+                                val morph = WyuMorphPageState.contentProgress
+                                translationY = pull.contentOffset +
+                                    (1f - morph) * WyuMorphPageState.ContentLift.toPx()
+                                val scale = 1f -
+                                    WyuMorphPageState.ContentShrink * (1f - morph)
+                                scaleX = scale
+                                scaleY = scale
+                            },
                     ) {
                         content(PaddingValues(top = topHeight.toDp()))
                     }
