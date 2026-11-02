@@ -56,7 +56,7 @@ object PaymentLauncher {
 
     private fun resolveTarget(channel: ElecPayChannel, scheme: String, host: String?): Target? {
         return when (scheme) {
-            "weixin", "wechat" -> WECHAT
+            "weixin", "wechat", "wxp" -> WECHAT
             "alipays", "alipay", "alipayqr" -> ALIPAY
             "http", "https" -> when {
                 isAlipayHost(host) -> ALIPAY

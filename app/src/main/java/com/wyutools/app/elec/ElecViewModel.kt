@@ -259,26 +259,7 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setRechargeAmount(value: String) {
-        val builder = StringBuilder()
-        var hasDot = false
-        for (ch in value) {
-            when {
-                ch.isDigit() -> builder.append(ch)
-                ch == '.' && !hasDot -> {
-                    hasDot = true
-                    builder.append(ch)
-                }
-            }
-        }
-        val raw = builder.toString()
-        val dot = raw.indexOf('.')
-        val intDigits = if (dot >= 0) raw.substring(0, dot) else raw
-        if (intDigits.length > 4) return
-        val normalized = if (dot >= 0) {
-            "$intDigits.${raw.substring(dot + 1).take(2)}"
-        } else {
-            intDigits
-        }
+        val normalized = normalizeRechargeAmount(value) ?: return
         _ui.update { it.copy(rechargeAmount = normalized, orderError = null) }
     }
 
@@ -479,5 +460,29 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         else -> "查询失败，请稍后重试"
+    }
+}
+
+/** 过滤充值金额输入；整数部分超过 4 位时返回 null，表示忽略本次输入。 */
+internal fun normalizeRechargeAmount(value: String): String? {
+    val builder = StringBuilder()
+    var hasDot = false
+    for (ch in value) {
+        when {
+            ch.isDigit() -> builder.append(ch)
+            ch == '.' && !hasDot -> {
+                hasDot = true
+                builder.append(ch)
+            }
+        }
+    }
+    val raw = builder.toString()
+    val dot = raw.indexOf('.')
+    val intDigits = if (dot >= 0) raw.substring(0, dot) else raw
+    if (intDigits.length > 4) return null
+    return if (dot >= 0) {
+        "$intDigits.${raw.substring(dot + 1).take(2)}"
+    } else {
+        intDigits
     }
 }

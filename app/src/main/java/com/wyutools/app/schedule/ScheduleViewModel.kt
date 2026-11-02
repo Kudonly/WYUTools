@@ -35,7 +35,18 @@ class ScheduleViewModel(
         restoreCache()
     }
 
-    fun onEnter() = maybeAutoRefresh()
+    fun onEnter() {
+        syncCurrentWeek()
+        maybeAutoRefresh()
+    }
+
+    fun syncCurrentWeek() {
+        val data = _ui.value.data ?: return
+        val week = data.currentWeek(_ui.value.weekAnchor).coerceIn(1, data.maxWeek)
+        if (_ui.value.selectedWeek != week) {
+            _ui.update { it.copy(selectedWeek = week) }
+        }
+    }
 
     fun onAuthReady() = maybeAutoRefresh()
 

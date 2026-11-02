@@ -368,7 +368,7 @@ private fun VenueTab(
     onSelectSlots: (GymVenue) -> Unit,
 ) {
     val today = LocalDate.now()
-    val dates = remember(today) { (0L..6L).map { today.plusDays(it) } }
+    val dates = remember(today) { (0L..4L).map { today.plusDays(it) } }
     val bookable = remember(ui.venues) { ui.venues.filter { it.slots.isNotEmpty() } }
     val sportOptions = remember(ui.venues) {
         ui.venues.mapNotNull { it.sportName?.trim()?.takeIf { name -> name.isNotEmpty() } }
@@ -409,12 +409,16 @@ private fun VenueTab(
             Spacer(Modifier.height(GymContentTopSpacer))
         }
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(dates, key = { it.toString() }) { date ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                dates.forEach { date ->
                     DateChip(
                         date = date,
                         selected = ui.selectedDate == date,
                         onClick = { onSelectDate(date) },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -488,12 +492,14 @@ private fun DateChip(
     date: LocalDate,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Button(
         onClick = onClick,
+        modifier = modifier,
         minHeight = 54.dp,
         cornerRadius = 16.dp,
-        insideMargin = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
         colors = if (selected) {
             ButtonDefaults.buttonColorsPrimary()
         } else {

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -65,6 +66,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.schedule.ScheduleCourse
 import com.wyutools.app.schedule.ScheduleData
@@ -141,6 +145,14 @@ fun ScheduleScreen(
     LaunchedEffect(Unit) { vm.onEnter() }
     LaunchedEffect(authUi.loggedIn, authUi.restoring) {
         if (!authUi.restoring && authUi.loggedIn) vm.onAuthReady()
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.syncCurrentWeek()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val data = ui.data
@@ -293,17 +305,15 @@ private fun ScheduleContent(
         }
     }
 
-    if (showSettings) {
-        ScheduleSettingsDialog(
-            show = showSettings,
-            data = data,
-            ui = ui,
-            currentWeek = currentWeek,
-            onToggleWeekend = vm::setShowWeekend,
-            onCalibrateWeek = vm::calibrateWeek,
-            onDismiss = { showSettings = false },
-        )
-    }
+    ScheduleSettingsDialog(
+        show = showSettings,
+        data = data,
+        ui = ui,
+        currentWeek = currentWeek,
+        onToggleWeekend = vm::setShowWeekend,
+        onCalibrateWeek = vm::calibrateWeek,
+        onDismiss = { showSettings = false },
+    )
 
     selectedCourse?.let { selection ->
         ScheduleCourseDialog(
@@ -392,7 +402,7 @@ private fun ScheduleWeekHeader(
             .fillMaxWidth()
             .height(ScheduleWeekHeaderHeight),
         cornerRadius = 22.dp,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        insideMargin = PaddingValues(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -756,7 +766,7 @@ private fun WeekGrid(
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 22.dp,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        insideMargin = PaddingValues(start = 10.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
     ) {
         Row(Modifier.fillMaxWidth()) {
             WeekTimeAxis(

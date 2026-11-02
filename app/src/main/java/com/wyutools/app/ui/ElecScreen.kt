@@ -61,9 +61,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,6 +82,7 @@ import com.wyutools.app.elec.ElecUiState
 import com.wyutools.app.elec.ElecViewModel
 import com.wyutools.app.elec.PaymentLauncher
 import com.wyutools.app.elec.QrCodes
+import com.wyutools.app.elec.normalizeRechargeAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -257,13 +260,16 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
             ui = ui,
             vm = vm,
             onDismiss = vm::dismissRecharge,
-            onSaveQr = { bitmap ->
+            onSaveQr = { bitmap, onResult ->
                 scope.launch {
-                    val message = withContext(Dispatchers.IO) {
+                    val outcome = withContext(Dispatchers.IO) {
                         runCatching { QrCodes.saveToGallery(context, bitmap) }
-                            .getOrElse { "保存失败：${it.message ?: "请重试"}" }
+                            .fold(
+                                onSuccess = { true to it },
+                                onFailure = { false to "保存失败：${it.message ?: "请重试"}" },
+                            )
                     }
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    onResult(outcome.first, outcome.second)
                 }
             },
         )
@@ -657,7 +663,7 @@ private fun RechargeDialog(
     ui: ElecUiState,
     vm: ElecViewModel,
     onDismiss: () -> Unit,
-    onSaveQr: (Bitmap) -> Unit,
+    onSaveQr: (Bitmap, (Boolean, String) -> Unit) -> Unit,
 ) {
     val order = ui.order
     val qrBitmap = ui.qrBitmap
@@ -734,6 +740,15 @@ private fun RechargeAmountContent(
     vm: ElecViewModel,
     onDismiss: () -> Unit,
 ) {
+    var amountField by remember { mutableStateOf(TextFieldValue(ui.rechargeAmount)) }
+    LaunchedEffect(ui.rechargeAmount) {
+        if (amountField.text != ui.rechargeAmount) {
+            amountField = TextFieldValue(
+                text = ui.rechargeAmount,
+                selection = TextRange(ui.rechargeAmount.length),
+            )
+        }
+    }
     RechargeDialogHeader(
         title = "充值电费",
         subtitle = dormLabel(ui),
@@ -788,8 +803,18 @@ private fun RechargeAmountContent(
     }
     Spacer(Modifier.height(12.dp))
     TextField(
-        value = ui.rechargeAmount,
-        onValueChange = vm::setRechargeAmount,
+        value = amountField,
+        onValueChange = { field ->
+            val normalized = normalizeRechargeAmount(field.text)
+            if (normalized != null) {
+                amountField = if (normalized == field.text) {
+                    field
+                } else {
+                    TextFieldValue(normalized, selection = TextRange(normalized.length))
+                }
+                vm.setRechargeAmount(normalized)
+            }
+        },
         label = "充值金额（元）",
         useLabelAsPlaceholder = true,
         singleLine = true,
@@ -859,7 +884,7 @@ private fun RechargeAmountContent(
     }
     Spacer(Modifier.height(10.dp))
     Text(
-        text = "生成二维码后会自动尝试打开微信或支付宝；未支付不会扣款，也可保存二维码或用其他设备扫码支付。",
+        text = "生成二维码后支付宝会自动尝试打开；微信支付码需保存后在扫一扫的相册中选择。未支付不会扣款，也可用其他设备扫码。",
         style = MiuixTheme.textStyles.footnote1,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     )
@@ -877,7 +902,7 @@ private fun QrRechargeContent(
     bitmap: Bitmap,
     vm: ElecViewModel,
     onDismiss: () -> Unit,
-    onSaveQr: (Bitmap) -> Unit,
+    onSaveQr: (Bitmap, (Boolean, String) -> Unit) -> Unit,
 ) {
     var now by remember(order.orderCode) { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(order.orderCode) {
@@ -892,7 +917,7 @@ private fun QrRechargeContent(
     val context = LocalContext.current
     var autoLaunched by rememberSaveable(order.orderCode) { mutableStateOf(false) }
     LaunchedEffect(order.orderCode) {
-        if (autoLaunched) return@LaunchedEffect
+        if (autoLaunched || ui.rechargeChannel == ElecPayChannel.WECHAT) return@LaunchedEffect
         autoLaunched = true
         delay(600L)
         if (ui.orderExpireAt <= System.currentTimeMillis()) return@LaunchedEffect
@@ -1017,8 +1042,7 @@ private fun QrRechargeContent(
         Spacer(Modifier.height(12.dp))
         Button(
             onClick = {
-                val result = PaymentLauncher.launch(context, ui.rechargeChannel, order.qrContent)
-                when (result) {
+                when (val result = PaymentLauncher.launch(context, ui.rechargeChannel, order.qrContent)) {
                     is PaymentLauncher.LaunchResult.Launched ->
                         Toast.makeText(context, "正在打开${result.appLabel}…", Toast.LENGTH_SHORT).show()
 
@@ -1039,6 +1063,60 @@ private fun QrRechargeContent(
             Text("打开${ui.rechargeChannel.label}支付")
         }
     }
+    Spacer(Modifier.height(10.dp))
+    Button(
+        onClick = {
+            onSaveQr(bitmap) { _, message ->
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        },
+        enabled = !expired && !ui.orderLoading && ui.payStatus != ElecPayStatus.FAILED,
+        modifier = Modifier.fillMaxWidth(),
+        minHeight = 48.dp,
+        colors = ButtonDefaults.buttonColors(),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Save,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("保存二维码")
+    }
+    Spacer(Modifier.height(10.dp))
+    Button(
+        onClick = vm::confirmPaid,
+        enabled = !ui.payChecking && !ui.orderLoading,
+        modifier = Modifier.fillMaxWidth(),
+        minHeight = 52.dp,
+        colors = ButtonDefaults.buttonColorsPrimary(),
+    ) {
+        if (ui.payChecking) {
+            CircularProgressIndicator(
+                size = 18.dp,
+                strokeWidth = 2.dp,
+                colors = ProgressIndicatorDefaults.progressIndicatorColors(
+                    foregroundColor = MiuixTheme.colorScheme.onPrimary,
+                ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("正在查询…")
+        } else {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (ui.payStatus == ElecPayStatus.TIMEOUT) "再次查询支付结果" else "已完成支付")
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    TextButton(
+        text = "暂不支付",
+        onClick = onDismiss,
+        modifier = Modifier.fillMaxWidth(),
+    )
     Spacer(Modifier.height(16.dp))
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1050,7 +1128,11 @@ private fun QrRechargeContent(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "1. 已自动尝试打开${ui.rechargeChannel.label}；如未跳转，可点击上方按钮或使用「扫一扫」扫描二维码。",
+                text = if (ui.rechargeChannel == ElecPayChannel.WECHAT) {
+                    "1. 点击上方按钮会尝试识别二维码链接并打开微信；如未跳转，可保存二维码后在微信扫一扫中从相册选择。"
+                } else {
+                    "1. 已自动尝试打开支付宝；如未跳转，可点击上方按钮或使用「扫一扫」扫描二维码。"
+                },
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -1095,56 +1177,7 @@ private fun QrRechargeContent(
             )
         }
     }
-    Spacer(Modifier.height(16.dp))
-    Button(
-        onClick = { onSaveQr(bitmap) },
-        enabled = !expired && !ui.orderLoading && ui.payStatus != ElecPayStatus.FAILED,
-        modifier = Modifier.fillMaxWidth(),
-        minHeight = 48.dp,
-        colors = ButtonDefaults.buttonColors(),
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Save,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text("保存二维码")
-    }
     Spacer(Modifier.height(10.dp))
-    Button(
-        onClick = vm::confirmPaid,
-        enabled = !ui.payChecking && !ui.orderLoading,
-        modifier = Modifier.fillMaxWidth(),
-        minHeight = 52.dp,
-        colors = ButtonDefaults.buttonColorsPrimary(),
-    ) {
-        if (ui.payChecking) {
-            CircularProgressIndicator(
-                size = 18.dp,
-                strokeWidth = 2.dp,
-                colors = ProgressIndicatorDefaults.progressIndicatorColors(
-                    foregroundColor = MiuixTheme.colorScheme.onPrimary,
-                ),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("正在查询…")
-        } else {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(if (ui.payStatus == ElecPayStatus.TIMEOUT) "再次查询支付结果" else "已完成支付")
-        }
-    }
-    Spacer(Modifier.height(4.dp))
-    TextButton(
-        text = "暂不支付",
-        onClick = onDismiss,
-        modifier = Modifier.fillMaxWidth(),
-    )
     Text(
         text = "暂不支付不会取消订单；如已扫码付款，请点击「已完成支付」确认到账。",
         style = MiuixTheme.textStyles.footnote2,

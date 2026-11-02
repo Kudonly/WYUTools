@@ -97,21 +97,21 @@ fun WyuOverlayDialog(
     LaunchedEffect(show) {
         if (show) {
             internallyVisible.value = true
-            launch { dimProgress.animateTo(1f, tween(300, easing = DecelerateEasing(1.5f))) }
+            launch { dimProgress.animateTo(1f, tween(340, easing = DecelerateEasing(1.5f))) }
             progress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
                     dampingRatio = 0.88f,
-                    stiffness = 450f,
+                    stiffness = 380f,
                     visibilityThreshold = 0.0001f,
                 ),
             )
         } else {
             if (!internallyVisible.value) return@LaunchedEffect
-            launch { dimProgress.animateTo(0f, tween(250, easing = DecelerateEasing(1.5f))) }
+            launch { dimProgress.animateTo(0f, tween(300, easing = DecelerateEasing(1.5f))) }
             progress.animateTo(
                 targetValue = 0f,
-                animationSpec = tween(260, easing = DecelerateEasing(1.5f)),
+                animationSpec = tween(320, easing = DecelerateEasing(1.5f)),
             )
             dimProgress.snapTo(0f)
             internallyVisible.value = false

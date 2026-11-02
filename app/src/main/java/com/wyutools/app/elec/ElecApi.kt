@@ -167,10 +167,23 @@ object ElecApi {
             page += 1
         } while (page <= 5)
 
+        val sorted = records.sortedByDescending { it.paidAtRaw }
+        val filtered = when (period) {
+            ElecPeriod.THREE_MONTHS -> filterSince(sorted, LocalDateTime.now().minusMonths(3))
+            ElecPeriod.ONE_YEAR -> filterSince(sorted, LocalDateTime.now().minusYears(1))
+            ElecPeriod.ALL -> sorted
+        }
         return ElecRechargePage(
-            records = records.sortedByDescending { it.paidAtRaw },
-            total = if (total > 0) total else records.size,
+            records = filtered,
+            total = if (period == ElecPeriod.ALL && total > 0) total else filtered.size,
         )
+    }
+
+    private fun filterSince(
+        records: List<ElecRechargeRecord>,
+        cutoff: LocalDateTime,
+    ): List<ElecRechargeRecord> = records.filter { record ->
+        record.paidAt?.let { !it.isBefore(cutoff) } ?: true
     }
 
     fun createRechargeOrder(
