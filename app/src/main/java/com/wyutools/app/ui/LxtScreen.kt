@@ -64,7 +64,6 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -146,13 +145,6 @@ fun LxtScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(padding.calculateTopPadding()))
-            if (ui.balanceBusy) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                )
-            }
             Spacer(Modifier.height(12.dp))
             if (ui.token == null) {
                 LoginCard(ui = ui, vm = vm)

@@ -2,6 +2,11 @@ package com.wyutools.app.ui
 
 import android.graphics.Bitmap
 import android.widget.Toast
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,7 +55,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -59,6 +66,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
@@ -95,10 +103,8 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Surface
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.time.Instant
@@ -110,6 +116,12 @@ import java.util.Locale
 
 private val RECORD_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
+
+private const val ElecQueryColorMillis = 500
+private const val ElecQueryLabelMillis = 280
+private const val ElecValueHoldMillis = 550L
+private const val ElecValueFadeMillis = 420
+private const val ElecValueBlurDp = 8f
 
 private fun formatKwh(value: Double): String =
     if (value == value.toLong().toDouble()) value.toLong().toString()
@@ -287,20 +299,12 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
             text = "输入宿舍信息",
             style = MiuixTheme.textStyles.title3,
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "输入楼栋与房间号，例如 13 栋 101 室",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextField(
+            GlassTextField(
                 value = ui.building,
                 onValueChange = vm::setBuilding,
                 label = "楼栋",
-                useLabelAsPlaceholder = true,
-                singleLine = true,
                 enabled = !ui.loading,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
@@ -308,12 +312,10 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
                 ),
                 modifier = Modifier.weight(1f),
             )
-            TextField(
+            GlassTextField(
                 value = ui.room,
                 onValueChange = vm::setRoom,
                 label = "房间号",
-                useLabelAsPlaceholder = true,
-                singleLine = true,
                 enabled = !ui.loading,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
@@ -321,19 +323,6 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
                 ),
                 keyboardActions = KeyboardActions(onDone = { vm.query() }),
                 modifier = Modifier.weight(1.4f),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "记住本次宿舍",
-                style = MiuixTheme.textStyles.body2,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(
-                checked = ui.remember,
-                onCheckedChange = vm::setRemember,
-                enabled = !ui.loading,
             )
         }
         val error = ui.error
@@ -346,31 +335,45 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
             )
         }
         Spacer(Modifier.height(16.dp))
+        val idleQueryColor = MiuixTheme.colorScheme.primary
+        val busyQueryColor = lerp(idleQueryColor, Color.Black, 0.16f)
+        val queryColor by animateColorAsState(
+            targetValue = if (ui.loading) busyQueryColor else idleQueryColor,
+            animationSpec = tween(ElecQueryColorMillis),
+            label = "elecQueryColor",
+        )
         Button(
             onClick = vm::query,
-            enabled = !ui.loading,
             modifier = Modifier.fillMaxWidth(),
             minHeight = 48.dp,
-            colors = ButtonDefaults.buttonColorsPrimary(),
+            colors = ButtonDefaults.buttonColorsPrimary(color = queryColor),
         ) {
-            if (ui.loading) {
-                CircularProgressIndicator(
-                    size = 18.dp,
-                    strokeWidth = 2.dp,
-                    colors = ProgressIndicatorDefaults.progressIndicatorColors(
-                        foregroundColor = MiuixTheme.colorScheme.onPrimary,
-                    ),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("查询中…")
-            } else {
-                Icon(
-                    imageVector = Icons.Outlined.Bolt,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("查询电费")
+            Crossfade(
+                targetState = ui.loading,
+                animationSpec = tween(ElecQueryLabelMillis),
+                label = "elecQueryLabel",
+            ) { loading ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            size = 18.dp,
+                            strokeWidth = 2.dp,
+                            colors = ProgressIndicatorDefaults.progressIndicatorColors(
+                                foregroundColor = MiuixTheme.colorScheme.onPrimary,
+                            ),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("查询中…")
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.Bolt,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("查询电费")
+                    }
+                }
             }
         }
     }
@@ -475,28 +478,32 @@ private fun ResultCard(
                     style = MiuixTheme.textStyles.footnote1,
                 )
                 if (dorm.isNotBlank()) {
-                    Text(
-                        text = dorm,
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = onContainer.copy(alpha = 0.75f),
-                    )
+                    BlurredValue(value = dorm) { text ->
+                        Text(
+                            text = text,
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = onContainer.copy(alpha = 0.75f),
+                        )
+                    }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
-        Row {
-            Text(
-                text = info?.let { formatKwh(it.remainingKwh) } ?: "—",
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.alignByBaseline(),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "度 (kWh)",
-                style = MiuixTheme.textStyles.body2,
-                modifier = Modifier.alignByBaseline(),
-            )
+        BlurredValue(value = info?.let { formatKwh(it.remainingKwh) } ?: "—") { kwh ->
+            Row {
+                Text(
+                    text = kwh,
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "度 (kWh)",
+                    style = MiuixTheme.textStyles.body2,
+                    modifier = Modifier.alignByBaseline(),
+                )
+            }
         }
         if (low) {
             Spacer(Modifier.height(8.dp))
@@ -518,13 +525,14 @@ private fun ResultCard(
         Spacer(Modifier.height(8.dp))
         val daily = stats.dailyUsageKwh
         val daysLeft = stats.daysLeft
-        InfoRow("抄表时间", info?.updatedAt ?: "—")
+        InfoRow("抄表时间", info?.updatedAt ?: "—", animateValue = true)
         InfoRow(
             "折合电费",
             info?.let { "≈ ${formatYuan(it.remainingKwh * ELEC_PRICE_PER_KWH)}" } ?: "—",
+            animateValue = true,
         )
-        InfoRow("近期日均", daily?.let { "${formatKwh(it)} 度" } ?: "—")
-        InfoRow("预计可用", daysLeft?.let { formatDays(it) } ?: "—")
+        InfoRow("近期日均", daily?.let { "${formatKwh(it)} 度" } ?: "—", animateValue = true)
+        InfoRow("预计可用", daysLeft?.let { formatDays(it) } ?: "—", animateValue = true)
         Spacer(Modifier.height(8.dp))
         Text(
             text = "折合电费按 0.63 元/度估算；日均与可用天数来自本机查询记录",
@@ -817,7 +825,7 @@ private fun RechargeAmountContent(
         }
     }
     Spacer(Modifier.height(12.dp))
-    TextField(
+    GlassTextField(
         value = amountField,
         onValueChange = { field ->
             val normalized = normalizeRechargeAmount(field.text)
@@ -831,8 +839,6 @@ private fun RechargeAmountContent(
             }
         },
         label = "充值金额（元）",
-        useLabelAsPlaceholder = true,
-        singleLine = true,
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Decimal,
             imeAction = ImeAction.Done,
@@ -1569,8 +1575,68 @@ private fun RemainingSparkline(values: List<Float>, modifier: Modifier = Modifie
     }
 }
 
+/**
+ * Holds the outgoing value briefly, then crossfades it with a Gaussian blur so
+ * refreshed readings do not snap. Only the value itself is blurred; the card
+ * surface and the static labels stay untouched.
+ */
 @Composable
-private fun InfoRow(label: String, value: String?) {
+private fun <T> BlurredValue(
+    value: T,
+    modifier: Modifier = Modifier,
+    content: @Composable (T) -> Unit,
+) {
+    var current by remember { mutableStateOf(value) }
+    var previous by remember { mutableStateOf<T?>(null) }
+    val progress = remember { Animatable(1f) }
+    LaunchedEffect(value) {
+        if (value == current) {
+            if (previous != null) {
+                progress.animateTo(1f, tween(ElecValueFadeMillis))
+                previous = null
+            }
+            return@LaunchedEffect
+        }
+        delay(ElecValueHoldMillis)
+        previous = current
+        current = value
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(ElecValueFadeMillis))
+        previous = null
+    }
+    Box(modifier = modifier.animateContentSize(tween(ElecValueFadeMillis))) {
+        Box(
+            modifier = Modifier
+                .alpha(progress.value)
+                .blur(
+                    radius = (ElecValueBlurDp * (1f - progress.value)).dp,
+                    edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                ),
+        ) {
+            content(current)
+        }
+        previous?.let { old ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .alpha(1f - progress.value)
+                    .blur(
+                        radius = (ElecValueBlurDp * progress.value).dp,
+                        edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                    ),
+            ) {
+                content(old)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String?,
+    animateValue: Boolean = false,
+) {
     if (value.isNullOrBlank()) return
     Row(
         modifier = Modifier
@@ -1585,10 +1651,20 @@ private fun InfoRow(label: String, value: String?) {
             color = LocalContentColor.current.copy(alpha = 0.7f),
         )
         Spacer(Modifier.width(16.dp))
-        Text(
-            text = value,
-            style = MiuixTheme.textStyles.body2,
-            fontWeight = FontWeight.Medium,
-        )
+        if (animateValue) {
+            BlurredValue(value = value) { text ->
+                Text(
+                    text = text,
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        } else {
+            Text(
+                text = value,
+                style = MiuixTheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
 }

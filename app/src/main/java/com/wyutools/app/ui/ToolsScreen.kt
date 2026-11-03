@@ -57,7 +57,6 @@ import com.wyutools.app.schedule.ScheduleFocus
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
@@ -82,10 +81,6 @@ fun ToolsContent(
             .padding(horizontal = 16.dp),
     ) {
         Spacer(Modifier.height(topInset + 4.dp))
-        SmallTitle(
-            text = "校园服务",
-            insideMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-        )
         ScheduleToolEntry(
             focus = scheduleFocus,
             week = scheduleWeek,

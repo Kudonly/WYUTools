@@ -3,6 +3,7 @@ package com.wyutools.app.elec
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -21,10 +22,11 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
+private const val MinQueryIndicatorMillis = 900L
+
 data class ElecUiState(
     val building: String = "",
     val room: String = "",
-    val remember: Boolean = false,
     val loading: Boolean = false,
     val result: ElecInfo? = null,
     val error: String? = null,
@@ -65,7 +67,6 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
         ElecUiState(
             building = prefs.getString("building", "").orEmpty(),
             room = prefs.getString("room", "").orEmpty(),
-            remember = prefs.getBoolean("remember", false),
             period = runCatching {
                 ElecPeriod.valueOf(prefs.getString("period", ElecPeriod.ALL.name).orEmpty())
             }.getOrDefault(ElecPeriod.ALL),
@@ -75,7 +76,7 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onEntered() {
         val state = _ui.value
-        if (!autoQueried && state.remember && state.building.isNotBlank() && state.room.isNotBlank()) {
+        if (!autoQueried && state.building.isNotBlank() && state.room.isNotBlank()) {
             autoQueried = true
             query()
         }
@@ -135,19 +136,6 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setRemember(value: Boolean) {
-        _ui.update { it.copy(remember = value) }
-        val editor = prefs.edit().putBoolean("remember", value)
-        if (value) {
-            val state = _ui.value
-            editor.putString("building", state.building.trim())
-                .putString("room", state.room.trim())
-                .apply()
-        } else {
-            editor.remove("building").remove("room").apply()
-        }
-    }
-
     fun query() {
         val state = _ui.value
         if (state.loading) return
@@ -161,9 +149,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(error = "请填写房间号") }
             return
         }
-        if (state.remember) {
-            prefs.edit().putString("building", building).putString("room", room).apply()
-        }
+        prefs.edit().putString("building", building).putString("room", room).apply()
+        val startedAt = SystemClock.elapsedRealtime()
         _ui.update {
             it.copy(
                 loading = true,
@@ -185,17 +172,24 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                 val stats = computeStats(history, info.remainingKwh)
                 _ui.update {
                     it.copy(
-                        loading = false,
                         result = info,
                         history = history,
                         stats = stats,
                     )
                 }
+                holdQueryIndicator(startedAt)
+                _ui.update { it.copy(loading = false) }
                 loadRecharge(building, room, _ui.value.period)
             } catch (e: Exception) {
+                holdQueryIndicator(startedAt)
                 _ui.update { it.copy(loading = false, error = friendlyMessage(e)) }
             }
         }
+    }
+
+    private suspend fun holdQueryIndicator(startedAt: Long) {
+        val remaining = MinQueryIndicatorMillis - (SystemClock.elapsedRealtime() - startedAt)
+        if (remaining > 0) delay(remaining)
     }
 
     fun setPeriod(period: ElecPeriod) {

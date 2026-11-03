@@ -1,6 +1,9 @@
 package com.wyutools.app.ui
 
 import android.widget.Toast
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -69,7 +73,6 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -246,7 +249,6 @@ private fun GymContent(
                         topInset = listTopInset,
                         onSelectDate = vm::selectDate,
                         onSelectSportFilter = vm::selectSportFilter,
-                        onSelectVenueTypeFilter = vm::selectVenueTypeFilter,
                         onRefresh = vm::refreshAll,
                         onSelectSlots = { slotPickerTarget = it },
                     )
@@ -324,6 +326,13 @@ private val GymTabsAreaHeight = 50.dp
 private val GymContentTopSpacer = WyuLargeTitleHeight + GymTabsAreaHeight - 6.dp
 private val GymTabTitles = listOf("场地预约", "我的预约")
 
+private const val VenueChipRevealMillis = 160
+private const val VenueChipStaggerMillis = 16L
+private const val VenueChipInitialScale = 0.9f
+private const val VenueCardEnterMillis = 300
+private const val VenueCardExitMillis = 160
+private const val VenueCardEnterScale = 0.92f
+
 /** Slim glass tabs floating over the pager; they ride up with the collapsing bar. */
 @Composable
 private fun GymTabsOverlay(
@@ -370,7 +379,6 @@ private fun VenueTab(
     topInset: Dp,
     onSelectDate: (LocalDate) -> Unit,
     onSelectSportFilter: (String) -> Unit,
-    onSelectVenueTypeFilter: (String) -> Unit,
     onRefresh: () -> Unit,
     onSelectSlots: (GymVenue) -> Unit,
 ) {
@@ -382,28 +390,35 @@ private fun VenueTab(
             .distinct()
             .sorted()
     }
-    val typeOptions = remember(ui.venues) {
-        ui.venues.mapNotNull { it.venueType?.trim()?.takeIf { name -> name.isNotEmpty() } }
-            .distinct()
-            .sorted()
-    }
     val sportFilter = ui.sportFilter
-    val typeFilter = ui.venueTypeFilter
 
     LaunchedEffect(sportOptions, sportFilter) {
         if (sportOptions.isNotEmpty() && sportFilter.isNotEmpty() && sportFilter !in sportOptions) {
             onSelectSportFilter("")
         }
     }
-    LaunchedEffect(typeOptions, typeFilter) {
-        if (typeOptions.isNotEmpty() && typeFilter.isNotEmpty() && typeFilter !in typeOptions) {
-            onSelectVenueTypeFilter("")
-        }
-    }
 
     val venues = bookable.filter { venue ->
-        (sportFilter.isEmpty() || venue.sportName == sportFilter) &&
-            (typeFilter.isEmpty() || venue.venueType == typeFilter)
+        sportFilter.isEmpty() || venue.sportName == sportFilter
+    }
+
+    // One shared reveal value drives every card layer, so first paint and
+    // date/filter switches use the same tween without recomposing the list.
+    val venuesSignature = remember(venues, ui.selectedDate, sportFilter) {
+        buildString {
+            append(ui.selectedDate.toEpochDay()).append('|').append(sportFilter)
+            venues.forEach { append('|').append(it.wid).append(it.name).append(it.slots.size) }
+        }
+    }
+    val cardProgress = remember(venuesSignature) { Animatable(0f) }
+    LaunchedEffect(cardProgress) {
+        cardProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = VenueCardEnterMillis,
+                easing = FastOutSlowInEasing,
+            ),
+        )
     }
 
     LazyColumn(
@@ -440,31 +455,9 @@ private fun VenueTab(
                 )
             }
         }
-        if (typeOptions.size > 1) {
-            item {
-                VenueFilterRow(
-                    title = "场馆类型",
-                    options = typeOptions,
-                    selected = typeFilter,
-                    onSelect = onSelectVenueTypeFilter,
-                )
-            }
-        }
-        item {
-            Text(
-                text = "每人每天限预约一场，预约成功后请按时到场。",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        }
-        if (ui.loadingVenues) {
-            item {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-        }
         if (ui.venuesLoaded && !ui.loadingVenues && venues.isEmpty()) {
             item {
-                val filtered = bookable.isNotEmpty()
+                val filtered = sportFilter.isNotEmpty()
                 EmptyHint(
                     message = if (filtered) {
                         "没有符合筛选条件的场地。"
@@ -472,10 +465,7 @@ private fun VenueTab(
                         "当天暂无可约场地，试试其他日期。"
                     },
                     onRetry = if (filtered) {
-                        {
-                            onSelectSportFilter("")
-                            onSelectVenueTypeFilter("")
-                        }
+                        { onSelectSportFilter("") }
                     } else {
                         onRefresh
                     },
@@ -484,11 +474,28 @@ private fun VenueTab(
             }
         }
         items(venues, key = { "${it.wid}|${it.name}" }) { venue ->
-            VenueCard(
-                venue = venue,
-                enabled = !ui.booking,
-                onSelectSlots = { onSelectSlots(venue) },
-            )
+            Box(
+                modifier = Modifier
+                    .animateItem(
+                        fadeInSpec = null,
+                        placementSpec = null,
+                        fadeOutSpec = tween(VenueCardExitMillis),
+                    )
+                    .graphicsLayer {
+                        val progress = cardProgress.value
+                        alpha = progress
+                        val scale = VenueCardEnterScale +
+                            (1f - VenueCardEnterScale) * progress
+                        scaleX = scale
+                        scaleY = scale
+                    },
+            ) {
+                VenueCard(
+                    venue = venue,
+                    enabled = !ui.booking,
+                    onSelectSlots = { onSelectSlots(venue) },
+                )
+            }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -543,20 +550,56 @@ private fun VenueFilterRow(
         Spacer(Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item(key = "all") {
-                ActionChip(
-                    text = "全部",
-                    onClick = { onSelect("") },
-                    primary = selected.isEmpty(),
-                )
+                VenueChipReveal(index = 0) {
+                    ActionChip(
+                        text = "全部",
+                        onClick = { onSelect("") },
+                        primary = selected.isEmpty(),
+                    )
+                }
             }
-            items(options, key = { "option|$it" }) { option ->
-                ActionChip(
-                    text = option,
-                    onClick = { onSelect(option) },
-                    primary = selected == option,
-                )
+            itemsIndexed(options, key = { _, option -> "option|$option" }) { index, option ->
+                VenueChipReveal(index = index + 1) {
+                    ActionChip(
+                        text = option,
+                        onClick = { onSelect(option) },
+                        primary = selected == option,
+                    )
+                }
             }
         }
+    }
+}
+
+/** Fades each chip in from transparent while it grows to full size. */
+@Composable
+private fun VenueChipReveal(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    var revealed by rememberSaveable { mutableStateOf(false) }
+    val progress = animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = VenueChipRevealMillis,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "venueChipReveal",
+    )
+    LaunchedEffect(Unit) {
+        if (index > 0) delay(index * VenueChipStaggerMillis)
+        revealed = true
+    }
+    Box(
+        modifier = Modifier.graphicsLayer {
+            val value = progress.value
+            alpha = value
+            val scale = VenueChipInitialScale + (1f - VenueChipInitialScale) * value
+            scaleX = scale
+            scaleY = scale
+        },
+    ) {
+        content()
     }
 }
 

@@ -32,7 +32,6 @@ data class GymUiState(
     val loginExpired: Boolean = false,
     val selectedDate: LocalDate = LocalDate.now(),
     val sportFilter: String = "",
-    val venueTypeFilter: String = "",
     val venues: List<GymVenue> = emptyList(),
     val loadingVenues: Boolean = false,
     val venuesLoaded: Boolean = false,
@@ -57,7 +56,6 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         GymUiState(
             savedPhone = prefs.getString("phone", "").orEmpty(),
             sportFilter = prefs.getString("filter_sport", "").orEmpty(),
-            venueTypeFilter = prefs.getString("filter_type", "").orEmpty(),
         ),
     )
     val ui: StateFlow<GymUiState> = _ui.asStateFlow()
@@ -172,7 +170,6 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
             GymUiState(
                 savedPhone = it.savedPhone,
                 sportFilter = it.sportFilter,
-                venueTypeFilter = it.venueTypeFilter,
                 checkingSession = false,
                 loginNeeded = true,
             )
@@ -183,12 +180,6 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         if (_ui.value.sportFilter == value) return
         prefs.edit().putString("filter_sport", value).apply()
         _ui.update { it.copy(sportFilter = value) }
-    }
-
-    fun selectVenueTypeFilter(value: String) {
-        if (_ui.value.venueTypeFilter == value) return
-        prefs.edit().putString("filter_type", value).apply()
-        _ui.update { it.copy(venueTypeFilter = value) }
     }
 
     fun selectDate(date: LocalDate) {

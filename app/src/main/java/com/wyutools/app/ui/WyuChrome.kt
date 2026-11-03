@@ -1322,6 +1322,9 @@ fun WyuNavigatorBar(
                             effects = {
                                 padding = maxOf(padding, 40.dp.toPx())
                                 vibrancy()
+                                // The 2dp radius would otherwise stay at full resolution;
+                                // 1/2 linear keeps its variance while quartering the work.
+                                forceDownscaleExp(1)
                                 blur(2.dp.toPx(), 2.dp.toPx())
                                 lens(
                                     refractionHeight = 28.dp.toPx(),

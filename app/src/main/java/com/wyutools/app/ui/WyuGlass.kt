@@ -3,6 +3,8 @@ package com.wyutools.app.ui
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -12,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -21,7 +24,11 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardColors
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
+import top.yukonga.miuix.kmp.basic.TextFieldColors
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -152,3 +159,84 @@ private fun ButtonColors.frosted(alpha: Float): ButtonColors = copy(
 
 private fun Color.glassTint(alpha: Float): Color =
     if (this.alpha >= 0.99f) copy(alpha = alpha) else this
+
+private const val InputBlurRadius = 46f
+
+/**
+ * Text field on a frosted surface. The fill sits a touch lighter than the
+ * card's glass tint so the field reads as an inset without breaking the
+ * surface; without a wallpaper backdrop it falls back to a quiet wash.
+ */
+@Composable
+fun GlassTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+) {
+    val glass = LocalWyuGlassBackdrop.current
+    val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
+    MiuixTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = if (glass != null) {
+            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
+        } else {
+            modifier
+        },
+        colors = glassTextFieldColors(glass != null),
+        label = label,
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        enabled = enabled,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+    )
+}
+
+@Composable
+fun GlassTextField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+) {
+    val glass = LocalWyuGlassBackdrop.current
+    val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
+    MiuixTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = if (glass != null) {
+            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
+        } else {
+            modifier
+        },
+        colors = glassTextFieldColors(glass != null),
+        label = label,
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        enabled = enabled,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+    )
+}
+
+@Composable
+private fun glassTextFieldColors(frosted: Boolean): TextFieldColors {
+    val scheme = MiuixTheme.colorScheme
+    return TextFieldDefaults.textFieldColors(
+        backgroundColor = if (frosted) {
+            scheme.surfaceContainer.copy(alpha = 0.45f)
+        } else {
+            scheme.onSurface.copy(alpha = 0.055f)
+        },
+        labelColor = scheme.onSurfaceVariantSummary,
+        borderColor = scheme.primary.copy(alpha = 0.4f),
+    )
+}
