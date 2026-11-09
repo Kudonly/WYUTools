@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +22,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +45,7 @@ import com.wyutools.app.ui.ElecScreen
 import com.wyutools.app.ui.GymScreen
 import com.wyutools.app.ui.HomeScreen
 import com.wyutools.app.ui.JxglWebScreen
+import com.wyutools.app.ui.LocalWyuDarkTheme
 import com.wyutools.app.ui.LxtBindScreen
 import com.wyutools.app.ui.LxtScreen
 import com.wyutools.app.ui.ScheduleScreen
@@ -68,6 +71,19 @@ class MainActivity : ComponentActivity() {
         ) ?: "home"
         setContent {
             WyuTheme {
+                val dark = LocalWyuDarkTheme.current
+                LaunchedEffect(dark) {
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.auto(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        ) { dark },
+                        navigationBarStyle = SystemBarStyle.auto(
+                            android.graphics.Color.argb(0xe6, 0xff, 0xff, 0xff),
+                            android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b),
+                        ) { dark },
+                    )
+                }
                 WyuApp(
                     initialRoute = initialRoute,
                     onExit = { finish() },

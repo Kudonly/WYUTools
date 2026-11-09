@@ -8,7 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,7 +127,7 @@ fun WyuOverlayDialog(
     val backdrop = WyuPageBackdrops.current
     val surface = MiuixTheme.colorScheme.background
     val cardColor = if (backdrop != null) surface.copy(alpha = DialogCardTint) else surface
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val frostModifier = if (backdrop != null) {
         Modifier.textureBlur(
             backdrop = backdrop,
@@ -261,7 +260,7 @@ fun WyuDialogButton(
     loading: Boolean = false,
     loadingText: String? = null,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val neutralFill = if (dark) {
         Color.White.copy(alpha = 0.12f)
     } else {

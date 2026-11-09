@@ -13,7 +13,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -82,15 +81,17 @@ fun SettingsScreen(
     val fraction = rememberWyuCollapseFraction(scroll)
     val demoMode by authVm.demoMode.collectAsState()
     val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val surface = MiuixTheme.colorScheme.surface
     val primary = MiuixTheme.colorScheme.primary
     val selected = LocalWyuWallpaper.current
+    val themeMode by WyuAppearance.themeMode.collectAsState()
     val hasCustom by WyuAppearance.hasCustomWallpaper.collectAsState()
     val customWallpaper by WyuAppearance.customWallpaper.collectAsState()
     val customBrightness by WyuAppearance.customBrightness.collectAsState()
-    val liquidGlass by WyuAppearance.liquidGlassNav.collectAsState()
-    val liquidGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
     val versionName = remember(context) { appVersionName(context) }
@@ -175,7 +176,7 @@ fun SettingsScreen(
                 },
             )
             Text(
-                text = "壁纸会应用到所有页面；预设壁纸会随系统深浅色调整，点按“相册”可以使用自己的图片。",
+                text = "壁纸会应用到所有页面；预设壁纸会随深浅色模式调整，点按“相册”可以使用自己的图片。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -187,6 +188,46 @@ fun SettingsScreen(
                     onChange = { WyuAppearance.setCustomBrightness(context, it) },
                 )
                 Spacer(Modifier.height(12.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            SmallTitle(
+                text = "外观",
+                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "深浅色模式",
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = "选择应用的显示模式",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectableGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        WyuThemeMode.entries.forEach { mode ->
+                            ThemeModeChip(
+                                label = mode.label,
+                                selected = themeMode == mode,
+                                onClick = { WyuAppearance.setThemeMode(context, mode) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             SmallTitle(
@@ -228,33 +269,41 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "液态玻璃底栏",
-                            style = MiuixTheme.textStyles.headline2,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = if (liquidGlassSupported) {
-                                "首页底栏使用实时折射与色散效果，默认关闭"
-                            } else {
-                                "需要 Android 13 及以上系统"
-                            },
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "柔光玻璃",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = if (softGlassSupported) {
+                                    "Beta 实验性功能，可能导致功耗增加、卡顿发热，请酌情开启"
+                                } else {
+                                    "Beta 实验性功能，需要 Android 13 及以上系统"
+                                },
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(
+                            checked = softGlass && softGlassSupported,
+                            onCheckedChange = { WyuAppearance.setSoftGlass(context, it) },
+                            enabled = softGlassSupported,
                         )
                     }
-                    Spacer(Modifier.width(16.dp))
-                    Switch(
-                        checked = liquidGlass && liquidGlassSupported,
-                        onCheckedChange = { WyuAppearance.setLiquidGlassNav(context, it) },
-                        enabled = liquidGlassSupported,
-                    )
+                    if (softGlass && softGlassSupported) {
+                        SoftGlassSliderRow(
+                            label = "模糊半径",
+                            valueText = "$softGlassBlur%",
+                            value = softGlassBlur.toFloat(),
+                            valueRange = 0f..100f,
+                            onChange = { WyuAppearance.setSoftGlassBlur(context, it.roundToInt()) },
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -394,6 +443,83 @@ private fun appVersionName(context: Context): String = runCatching {
 }.getOrNull().orEmpty().ifBlank { "1.0" }
 
 @Composable
+private fun SoftGlassSliderRow(
+    label: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+) {
+    Spacer(Modifier.height(6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = valueText,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
+    Slider(
+        value = value,
+        onValueChange = onChange,
+        valueRange = valueRange,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun ThemeModeChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val background by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.primary
+        } else {
+            MiuixTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(180),
+        label = "themeModeChipBackground",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.onPrimary
+        } else {
+            MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+        animationSpec = tween(180),
+        label = "themeModeChipContent",
+    )
+    Box(
+        modifier = modifier
+            .height(38.dp)
+            .clip(CircleShape)
+            .background(background)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            color = contentColor,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun CustomBrightnessCard(
     brightness: Float,
     dark: Boolean,
@@ -428,7 +554,7 @@ private fun CustomBrightnessCard(
             Slider(
                 value = brightness,
                 onValueChange = onChange,
-                valueRange = 0.2f..1f,
+                valueRange = 0.8f..1f,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(

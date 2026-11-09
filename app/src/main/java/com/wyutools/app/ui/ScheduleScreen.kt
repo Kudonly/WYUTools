@@ -6,7 +6,6 @@ import android.widget.Toast
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -955,8 +954,8 @@ private fun WeekTimeAxis(
 
 @Composable
 private fun courseColors(course: ScheduleCourse): Pair<Color, Color> {
-    val palette = if (isSystemInDarkTheme()) DarkCourseColors else LightCourseColors
-    val seed = "${course.name}|${course.dayOfWeek}|${course.startSection}|${course.endSection}"
+    val palette = if (LocalWyuDarkTheme.current) DarkCourseColors else LightCourseColors
+    val seed = course.name
     return palette[abs(seed.hashCode()) % palette.size]
 }
 

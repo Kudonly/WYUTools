@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -18,6 +20,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Button as MiuixButton
 import top.yukonga.miuix.kmp.basic.ButtonColors
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -33,6 +36,9 @@ import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 private const val CardGlassAlpha = 0.55f
+private const val CardSoftGlassAlpha = 0f
+private const val CardSoftGlassTintAlpha = 0.64f
+private const val CardSoftGlassBlurScale = 0.6f
 private const val ButtonGlassAlpha = 0.78f
 
 /**
@@ -70,16 +76,40 @@ fun Card(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glass = LocalWyuGlassBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    // Default containers keep the white/dark glass wash; custom containers
+    // (e.g. elec card primaryContainer) carry their own tint into the shader.
+    val softGlassCardTint = when {
+        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            colors.color.copy(alpha = CardSoftGlassTintAlpha)
+        dark -> Color.Transparent
+        else -> Color.White.copy(alpha = CardSoftGlassTintAlpha)
+    }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     MiuixCard(
-        modifier = if (glass != null) {
-            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
-        } else {
-            modifier
+        modifier = when {
+            glass == null -> modifier
+            softGlass && wyuSoftGlassSupported -> modifier.wyuSoftGlass(
+                backdrop = glass,
+                shape = shape,
+                glassShape = WyuSoftGlassShape.RoundedRect,
+                cornerRadius = cornerRadius,
+                blurScale = CardSoftGlassBlurScale,
+                blurPercent = softGlassBlur,
+                baseTint = softGlassCardTint,
+                bgSaturation = softGlassBgSaturation(dark),
+            )
+            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
         },
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
-        colors = if (glass != null) colors.frosted(CardGlassAlpha) else colors,
+        colors = if (glass != null) {
+            colors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
+        } else {
+            colors
+        },
         content = content,
     )
 }
@@ -98,16 +128,40 @@ fun Card(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glass = LocalWyuGlassBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    // Default containers keep the white/dark glass wash; custom containers
+    // (e.g. elec card primaryContainer) carry their own tint into the shader.
+    val softGlassCardTint = when {
+        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            colors.color.copy(alpha = CardSoftGlassTintAlpha)
+        dark -> Color.Transparent
+        else -> Color.White.copy(alpha = CardSoftGlassTintAlpha)
+    }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     MiuixCard(
-        modifier = if (glass != null) {
-            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
-        } else {
-            modifier
+        modifier = when {
+            glass == null -> modifier
+            softGlass && wyuSoftGlassSupported -> modifier.wyuSoftGlass(
+                backdrop = glass,
+                shape = shape,
+                glassShape = WyuSoftGlassShape.RoundedRect,
+                cornerRadius = cornerRadius,
+                blurScale = CardSoftGlassBlurScale,
+                blurPercent = softGlassBlur,
+                baseTint = softGlassCardTint,
+                bgSaturation = softGlassBgSaturation(dark),
+            )
+            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
         },
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
-        colors = if (glass != null) colors.frosted(CardGlassAlpha) else colors,
+        colors = if (glass != null) {
+            colors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
+        } else {
+            colors
+        },
         pressFeedbackType = pressFeedbackType,
         showIndication = showIndication,
         holdDownState = holdDownState,

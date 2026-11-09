@@ -2,7 +2,6 @@ package com.wyutools.app.ui
 
 import android.graphics.Rect
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
@@ -59,13 +58,12 @@ fun HomeScreen(
     val page = pager.currentPage
     val activeFraction = if (page == 0) toolsFraction else meFraction
     val contentBottom = bottomMargin + WyuNavigatorBarHeight + 24.dp
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val surface = MiuixTheme.colorScheme.surface
     val primary = MiuixTheme.colorScheme.primary
     val wallpaper = LocalWyuWallpaper.current
     val scheduleUi by scheduleVm.ui.collectAsState()
     val authUi by authVm.ui.collectAsState()
-    val liquidGlassSetting by WyuAppearance.liquidGlassNav.collectAsState()
     val now = rememberCurrentMinute()
     val scheduleData = scheduleUi.data
     val scheduleFocus = scheduleData?.focusCourse(scheduleUi.weekAnchor, now)
@@ -107,7 +105,6 @@ fun HomeScreen(
                                 }
                             }
                         },
-                        liquidGlassEnabled = liquidGlassSetting,
                     )
                 }
             },

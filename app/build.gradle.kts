@@ -13,8 +13,8 @@ android {
         applicationId = "com.wyutools.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "2.2"
+        versionCode = 5
+        versionName = "2.3"
     }
 
     buildTypes {
@@ -57,6 +57,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
+    implementation("com.materialkolor:material-color-utilities:5.0.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(files("libs/core-3.5.3.jar"))
     implementation(files("libs/sharedview-kit-1.0.0.5.aar"))

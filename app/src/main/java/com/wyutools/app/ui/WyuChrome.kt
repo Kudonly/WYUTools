@@ -22,7 +22,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -226,7 +225,7 @@ fun WyuPageScaffold(
 ) {
     val surface = MiuixTheme.colorScheme.surface
     val wallpaper = LocalWyuWallpaper.current
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val wallpaperBrush = remember(wallpaper, dark, surface) {
         wallpaper.background(dark, surface)
     }
@@ -540,6 +539,11 @@ fun WyuActionBar(
     }
 }
 
+// A 44dp disc is barely wider than the captured backdrop padding, so the
+// card-sized offsets clamp at the layer boundary and fringe the rim highlight.
+private const val TopBarGlassRefractionPx = 56f
+private const val TopBarGlassReflectionPx = 96f
+
 /**
  * Icon-only top bar button. Expanded: bare icon over the content. Collapsed: a
  * frosted glass disc fades in behind the icon, following the clock's two states.
@@ -553,9 +557,12 @@ private fun WyuTopBarGlassButton(
     enabled: Boolean = true,
     iconSize: Dp = 24.dp,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val onSurface = MiuixTheme.colorScheme.onSurface
     val backdrop = LocalWyuPageBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val useSoftGlass = softGlass && wyuSoftGlassSupported
     val fraction = LocalWyuTopBarFraction.current
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
@@ -605,22 +612,37 @@ private fun WyuTopBarGlassButton(
                     spotColor = Color.Black.copy(alpha = 0.16f),
                 )
                 .then(
-                    if (backdrop != null) {
-                        Modifier.textureBlur(
+                    when {
+                        backdrop == null -> Modifier
+                        useSoftGlass -> Modifier.wyuSoftGlass(
+                            backdrop = backdrop,
+                            shape = CircleShape,
+                            glassShape = WyuSoftGlassShape.Circle,
+                            blurPercent = softGlassBlur,
+                            refractionThicknessPx = TopBarGlassRefractionPx,
+                            reflectionThicknessPx = TopBarGlassReflectionPx,
+                            bgSaturation = softGlassBgSaturation(dark),
+                        )
+
+                        else -> Modifier.textureBlur(
                             backdrop = backdrop,
                             shape = CircleShape,
                             blurRadius = 24f,
                         )
-                    } else {
-                        Modifier
                     },
                 )
                 .clip(CircleShape)
-                .background(
-                    if (dark) {
-                        Color.White.copy(alpha = 0.16f)
+                .then(
+                    if (useSoftGlass) {
+                        Modifier
                     } else {
-                        Color.White.copy(alpha = 0.55f)
+                        Modifier.background(
+                            if (dark) {
+                                Color.White.copy(alpha = 0.16f)
+                            } else {
+                                Color.White.copy(alpha = 0.55f)
+                            },
+                        )
                     },
                 )
                 .border(
@@ -694,7 +716,7 @@ fun WyuFloatingTabs(
     selectionFraction: (() -> Float)? = null,
 ) {
     if (options.isEmpty()) return
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val backdrop = LocalWyuPageBackdrop.current
@@ -1209,15 +1231,12 @@ fun WyuNavigatorBar(
     selectionFraction: () -> Float,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    liquidGlassEnabled: Boolean = false,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalWyuDarkTheme.current
     val bottomMargin = rememberWyuNavigatorBottomMargin()
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val backdrop = LocalWyuPageBackdrop.current
-    val shaderSupported = remember { isRuntimeShaderSupported() }
-    val liquidGlass = liquidGlassEnabled && backdrop != null && shaderSupported
     val lastIndex = WyuNavTabs.lastIndex
     val cellWidth = 88.dp
     val inset = 3.dp
@@ -1229,15 +1248,8 @@ fun WyuNavigatorBar(
     } else {
         Color.Black.copy(alpha = 0.10f)
     }
-    val glass = backdrop != null
-    val pillColor = if (dark) {
-        Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
-    } else {
-        Color.White.copy(alpha = if (glass) 0.58f else 1f)
-    }
-    val pillBorder = if (dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.04f)
     val glassContainerColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
-    val glassBackdrop = if (liquidGlass) backdrop else null
+    val glassBackdrop = backdrop
     val barBackdrop = rememberLayerBackdrop()
     val thumbBackdrop = if (glassBackdrop != null) {
         rememberWyuCombinedBackdrop(glassBackdrop, barBackdrop)
@@ -1355,22 +1367,12 @@ fun WyuNavigatorBar(
                     },
                 )
                 .then(
+                    // Pre-33 devices have no runtime shader; keep a plain pill
+                    // so the bar stays legible.
                     if (glassBackdrop == null) {
                         Modifier
-                            .then(
-                                if (backdrop != null) {
-                                    Modifier.textureBlur(
-                                        backdrop = backdrop,
-                                        shape = pillShape,
-                                        blurRadius = 30f,
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            )
                             .clip(pillShape)
-                            .background(pillColor)
-                            .border(0.5.dp, pillBorder, pillShape)
+                            .background(MiuixTheme.colorScheme.surfaceContainer)
                     } else {
                         Modifier
                     },

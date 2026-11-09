@@ -82,6 +82,12 @@ enum class WyuWallpaper(val label: String) {
     }
 }
 
+enum class WyuThemeMode(val label: String) {
+    Dark("深色"),
+    Light("浅色"),
+    System("跟随系统"),
+}
+
 fun wyuHomeBackgroundStops(
     dark: Boolean,
     surface: Color,
@@ -120,20 +126,28 @@ fun DrawScope.drawWyuImageCover(image: ImageBitmap, dim: Float = 0f) {
     }
 }
 
-/** Dark theme always adds a floor, so a custom photo can never stay glaringly bright. */
+/** Slider percentage is the wallpaper's actual brightness; dark theme still adds a floor. */
 fun wyuCustomWallpaperDim(brightness: Float, dark: Boolean): Float =
-    ((1f - brightness.coerceIn(0f, 1f)) + if (dark) 0.35f else 0f).coerceIn(0f, 0.92f)
+    ((1f - brightness.coerceIn(0.8f, 1f)) + if (dark) 0.35f else 0f).coerceIn(0f, 0.92f)
 
 object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
+    private const val KeyThemeMode = "theme_mode"
     private const val KeyCustomBrightness = "custom_brightness"
-    private const val KeyLiquidGlassNav = "liquid_glass_nav"
+    private const val KeySoftGlass = "soft_glass"
+    private const val KeySoftGlassBlur = "soft_glass_blur_radius"
+    private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
+    private const val SoftGlassDefaultsVersion = 2
+    private const val KeyMonetSeed = "monet_seed"
     private const val CustomFileName = "custom_wallpaper.jpg"
     private const val MaxWallpaperSide = 2560
 
     private val _wallpaper = MutableStateFlow(WyuWallpaper.Default)
     val wallpaper: StateFlow<WyuWallpaper> = _wallpaper.asStateFlow()
+
+    private val _themeMode = MutableStateFlow(WyuThemeMode.System)
+    val themeMode: StateFlow<WyuThemeMode> = _themeMode.asStateFlow()
 
     private val _customWallpaper = MutableStateFlow<ImageBitmap?>(null)
     val customWallpaper: StateFlow<ImageBitmap?> = _customWallpaper.asStateFlow()
@@ -144,8 +158,14 @@ object WyuAppearance {
     private val _customBrightness = MutableStateFlow(1f)
     val customBrightness: StateFlow<Float> = _customBrightness.asStateFlow()
 
-    private val _liquidGlassNav = MutableStateFlow(false)
-    val liquidGlassNav: StateFlow<Boolean> = _liquidGlassNav.asStateFlow()
+    private val _softGlass = MutableStateFlow(false)
+    val softGlass: StateFlow<Boolean> = _softGlass.asStateFlow()
+
+    private val _softGlassBlur = MutableStateFlow(20)
+    val softGlassBlur: StateFlow<Int> = _softGlassBlur.asStateFlow()
+
+    private val _monetSeed = MutableStateFlow<Int?>(null)
+    val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
 
     private var prefs: SharedPreferences? = null
     @Volatile
@@ -156,9 +176,19 @@ object WyuAppearance {
         val appContext = context.applicationContext
         val loaded = appContext.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
         prefs = loaded
+        if (loaded.getInt(KeySoftGlassDefaultsVersion, 0) < SoftGlassDefaultsVersion) {
+            val brightness = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.8f, 1f)
+            loaded.edit()
+                .putInt(KeySoftGlassBlur, 20)
+                .putFloat(KeyCustomBrightness, brightness)
+                .putInt(KeySoftGlassDefaultsVersion, SoftGlassDefaultsVersion)
+                .apply()
+        }
         _hasCustomWallpaper.value = customFile(appContext).let { it.isFile && it.length() > 0L }
-        _customBrightness.value = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.2f, 1f)
-        _liquidGlassNav.value = loaded.getBoolean(KeyLiquidGlassNav, false)
+        _customBrightness.value = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.8f, 1f)
+        _softGlass.value = loaded.getBoolean(KeySoftGlass, false)
+        _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, 20).coerceIn(0, 100)
+        _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         val saved = WyuWallpaper.entries
             .firstOrNull { it.name == loaded.getString(KeyWallpaper, null) }
         _wallpaper.value = when {
@@ -166,6 +196,16 @@ object WyuAppearance {
             saved != null -> saved
             else -> WyuWallpaper.Default
         }
+        _themeMode.value = WyuThemeMode.entries
+            .firstOrNull { it.name == loaded.getString(KeyThemeMode, null) }
+            ?: WyuThemeMode.System
+    }
+
+    fun setThemeMode(context: Context, mode: WyuThemeMode) {
+        ensureLoaded(context)
+        if (_themeMode.value == mode) return
+        _themeMode.value = mode
+        prefs?.edit()?.putString(KeyThemeMode, mode.name)?.apply()
     }
 
     fun setWallpaper(context: Context, wallpaper: WyuWallpaper) {
@@ -178,17 +218,25 @@ object WyuAppearance {
 
     fun setCustomBrightness(context: Context, brightness: Float) {
         ensureLoaded(context)
-        val clamped = brightness.coerceIn(0.2f, 1f)
+        val clamped = brightness.coerceIn(0.8f, 1f)
         if (_customBrightness.value == clamped) return
         _customBrightness.value = clamped
         prefs?.edit()?.putFloat(KeyCustomBrightness, clamped)?.apply()
     }
 
-    fun setLiquidGlassNav(context: Context, enabled: Boolean) {
+    fun setSoftGlassBlur(context: Context, percent: Int) {
         ensureLoaded(context)
-        if (_liquidGlassNav.value == enabled) return
-        _liquidGlassNav.value = enabled
-        prefs?.edit()?.putBoolean(KeyLiquidGlassNav, enabled)?.apply()
+        val clamped = percent.coerceIn(0, 100)
+        if (_softGlassBlur.value == clamped) return
+        _softGlassBlur.value = clamped
+        prefs?.edit()?.putInt(KeySoftGlassBlur, clamped)?.apply()
+    }
+
+    fun setSoftGlass(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        if (_softGlass.value == enabled) return
+        _softGlass.value = enabled
+        prefs?.edit()?.putBoolean(KeySoftGlass, enabled)?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {
@@ -201,13 +249,16 @@ object WyuAppearance {
         }
         loadingCustom = true
         try {
-            val image = withContext(Dispatchers.IO) {
+            val loaded = withContext(Dispatchers.IO) {
                 runCatching {
-                    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                    val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@runCatching null
+                    val seed = WyuMonet.seedFromBitmap(bitmap)
+                    bitmap.asImageBitmap() to seed
                 }.getOrNull()
             }
-            if (image != null) {
-                _customWallpaper.value = image
+            if (loaded != null) {
+                _customWallpaper.value = loaded.first
+                applyMonetSeed(loaded.second)
             } else {
                 _hasCustomWallpaper.value = false
                 if (_wallpaper.value == WyuWallpaper.Custom) {
@@ -236,15 +287,25 @@ object WyuAppearance {
         } ?: return false
 
         val saved = withContext(Dispatchers.IO) {
-            runCatching { saveCustomWallpaper(appContext, bitmap) }.getOrDefault(false)
+            runCatching {
+                val seed = WyuMonet.seedFromBitmap(bitmap)
+                saveCustomWallpaper(appContext, bitmap) to seed
+            }.getOrNull()
         }
-        if (!saved) return false
+        if (saved == null || !saved.first) return false
 
         _customWallpaper.value = bitmap.asImageBitmap()
         _hasCustomWallpaper.value = true
         prefs?.edit()?.putString(KeyWallpaper, WyuWallpaper.Custom.name)?.apply()
         _wallpaper.value = WyuWallpaper.Custom
+        applyMonetSeed(saved.second)
         return true
+    }
+
+    private fun applyMonetSeed(seed: Int?) {
+        if (_monetSeed.value == seed) return
+        _monetSeed.value = seed
+        prefs?.edit()?.putInt(KeyMonetSeed, seed ?: 0)?.apply()
     }
 
     private fun customFile(context: Context): File =
@@ -366,3 +427,4 @@ object WyuAppearance {
 
 val LocalWyuWallpaper = staticCompositionLocalOf { WyuWallpaper.Default }
 val LocalWyuCustomWallpaper = staticCompositionLocalOf<ImageBitmap?> { null }
+val LocalWyuDarkTheme = staticCompositionLocalOf { false }
