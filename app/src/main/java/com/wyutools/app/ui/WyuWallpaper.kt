@@ -167,6 +167,11 @@ object WyuAppearance {
     private val _monetSeed = MutableStateFlow<Int?>(null)
     val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
 
+    private val _customWallpaperResolved = MutableStateFlow(false)
+
+    /** True once the custom wallpaper bitmap is available (or known absent). */
+    val customWallpaperResolved: StateFlow<Boolean> = _customWallpaperResolved.asStateFlow()
+
     private var prefs: SharedPreferences? = null
     @Volatile
     private var loadingCustom = false
@@ -185,6 +190,7 @@ object WyuAppearance {
                 .apply()
         }
         _hasCustomWallpaper.value = customFile(appContext).let { it.isFile && it.length() > 0L }
+        if (!_hasCustomWallpaper.value) _customWallpaperResolved.value = true
         _customBrightness.value = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.8f, 1f)
         _softGlass.value = loaded.getBoolean(KeySoftGlass, false)
         _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, 20).coerceIn(0, 100)
@@ -240,61 +246,84 @@ object WyuAppearance {
     }
 
     suspend fun loadCustomWallpaper(context: Context) {
-        if (_customWallpaper.value != null || loadingCustom) return
+        if (_customWallpaper.value != null) {
+            _customWallpaperResolved.value = true
+            return
+        }
+        if (loadingCustom) return
         val appContext = context.applicationContext
         val file = customFile(appContext)
         if (!file.isFile) {
             _hasCustomWallpaper.value = false
+            _customWallpaperResolved.value = true
             return
         }
         loadingCustom = true
         try {
-            val loaded = withContext(Dispatchers.IO) {
-                runCatching {
-                    val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@runCatching null
-                    val seed = WyuMonet.seedFromBitmap(bitmap)
-                    bitmap.asImageBitmap() to seed
-                }.getOrNull()
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
             }
-            if (loaded != null) {
-                _customWallpaper.value = loaded.first
-                applyMonetSeed(loaded.second)
-            } else {
+            if (bitmap == null) {
                 _hasCustomWallpaper.value = false
                 if (_wallpaper.value == WyuWallpaper.Custom) {
                     prefs?.edit()?.putString(KeyWallpaper, WyuWallpaper.Default.name)?.apply()
                     _wallpaper.value = WyuWallpaper.Default
                 }
+                return
+            }
+            // Publish the decoded frame before quantizing: the seed is normally
+            // already restored from prefs and only tints the theme, so it must
+            // not hold the wallpaper back during startup.
+            _customWallpaper.value = bitmap.asImageBitmap()
+            _customWallpaperResolved.value = true
+            if (_monetSeed.value == null) {
+                val seed = withContext(Dispatchers.IO) {
+                    runCatching { WyuMonet.seedFromBitmap(bitmap) }.getOrNull()
+                }
+                if (seed != null) applyMonetSeed(seed)
             }
         } finally {
             loadingCustom = false
+            _customWallpaperResolved.value = true
         }
     }
 
-    suspend fun importCustomWallpaper(context: Context, uri: Uri): Boolean {
+    suspend fun decodeWallpaperForCrop(context: Context, uri: Uri): Bitmap? {
+        val appContext = context.applicationContext
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    decodeModern(appContext, uri)
+                } else {
+                    decodeLegacy(appContext, uri)
+                }
+            }.getOrNull()
+        }
+    }
+
+    suspend fun applyCustomWallpaper(context: Context, source: Bitmap, crop: Rect): Boolean {
         ensureLoaded(context)
         val appContext = context.applicationContext
         val metrics = appContext.resources.displayMetrics
         val bitmap = withContext(Dispatchers.IO) {
             runCatching {
-                val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    decodeModern(appContext, uri)
-                } else {
-                    decodeLegacy(appContext, uri)
-                }
-                cropToScreen(decoded, metrics.widthPixels, metrics.heightPixels)
+                cropToScreen(source, crop, metrics.widthPixels, metrics.heightPixels)
             }.getOrNull()
         } ?: return false
+        return publishCustomWallpaper(appContext, bitmap)
+    }
 
+    private suspend fun publishCustomWallpaper(context: Context, bitmap: Bitmap): Boolean {
         val saved = withContext(Dispatchers.IO) {
             runCatching {
                 val seed = WyuMonet.seedFromBitmap(bitmap)
-                saveCustomWallpaper(appContext, bitmap) to seed
+                saveCustomWallpaper(context, bitmap) to seed
             }.getOrNull()
         }
         if (saved == null || !saved.first) return false
 
         _customWallpaper.value = bitmap.asImageBitmap()
+        _customWallpaperResolved.value = true
         _hasCustomWallpaper.value = true
         prefs?.edit()?.putString(KeyWallpaper, WyuWallpaper.Custom.name)?.apply()
         _wallpaper.value = WyuWallpaper.Custom
@@ -396,27 +425,17 @@ object WyuAppearance {
         }.getOrDefault(source)
     }
 
-    private fun cropToScreen(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+    private fun cropToScreen(source: Bitmap, crop: Rect, targetWidth: Int, targetHeight: Int): Bitmap {
         if (targetWidth <= 0 || targetHeight <= 0) return source
-        val targetAspect = targetWidth.toFloat() / targetHeight
-        val sourceAspect = source.width.toFloat() / source.height
-        val cropWidth: Int
-        val cropHeight: Int
-        if (sourceAspect > targetAspect) {
-            cropHeight = source.height
-            cropWidth = (cropHeight * targetAspect).roundToInt().coerceIn(1, source.width)
-        } else {
-            cropWidth = source.width
-            cropHeight = (cropWidth / targetAspect).roundToInt().coerceIn(1, source.height)
-        }
-        val left = (source.width - cropWidth) / 2
-        val top = (source.height - cropHeight) / 2
+        val src = Rect(crop)
+        src.intersect(0, 0, source.width, source.height)
+        require(!src.isEmpty)
         val result = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
         canvas.drawBitmap(
             source,
-            Rect(left, top, left + cropWidth, top + cropHeight),
+            src,
             Rect(0, 0, targetWidth, targetHeight),
             paint,
         )

@@ -39,6 +39,10 @@ private const val CardGlassAlpha = 0.55f
 private const val CardSoftGlassAlpha = 0f
 private const val CardSoftGlassTintAlpha = 0.64f
 private const val CardSoftGlassBlurScale = 0.6f
+// Cards are the largest glass surfaces, so they take one sampling step below
+// the small top-bar buttons, which now run at full resolution. miuix-blur only
+// supports 1/2/4/8/16, so 2 is the next step above the default 1.
+private const val CardSoftGlassDownscale = 2
 private const val ButtonGlassAlpha = 0.78f
 
 /**
@@ -98,6 +102,7 @@ fun Card(
                 cornerRadius = cornerRadius,
                 blurScale = CardSoftGlassBlurScale,
                 blurPercent = softGlassBlur,
+                downscale = CardSoftGlassDownscale,
                 baseTint = softGlassCardTint,
                 bgSaturation = softGlassBgSaturation(dark),
             )
@@ -150,6 +155,7 @@ fun Card(
                 cornerRadius = cornerRadius,
                 blurScale = CardSoftGlassBlurScale,
                 blurPercent = softGlassBlur,
+                downscale = CardSoftGlassDownscale,
                 baseTint = softGlassCardTint,
                 bgSaturation = softGlassBgSaturation(dark),
             )

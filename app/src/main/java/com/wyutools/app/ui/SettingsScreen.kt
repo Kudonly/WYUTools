@@ -1,6 +1,7 @@
 package com.wyutools.app.ui
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -94,6 +95,7 @@ fun SettingsScreen(
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
+    var cropSource by remember { mutableStateOf<Bitmap?>(null) }
     val versionName = remember(context) { appVersionName(context) }
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateResult by remember { mutableStateOf<UpdateResult?>(null) }
@@ -119,13 +121,33 @@ fun SettingsScreen(
         if (uri != null) {
             scope.launch {
                 importing = true
-                val imported = WyuAppearance.importCustomWallpaper(context, uri)
+                val bitmap = WyuAppearance.decodeWallpaperForCrop(context, uri)
                 importing = false
-                if (!imported) {
+                if (bitmap == null) {
                     Toast.makeText(context, "无法读取所选图片", Toast.LENGTH_SHORT).show()
+                } else {
+                    cropSource = bitmap
                 }
             }
         }
+    }
+
+    cropSource?.let { source ->
+        WyuWallpaperCropDialog(
+            bitmap = source,
+            onCancel = { cropSource = null },
+            onConfirm = { crop ->
+                cropSource = null
+                scope.launch {
+                    importing = true
+                    val saved = WyuAppearance.applyCustomWallpaper(context, source, crop)
+                    importing = false
+                    if (!saved) {
+                        Toast.makeText(context, "无法保存所选图片", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+        )
     }
 
     WyuPageScaffold(
@@ -176,7 +198,7 @@ fun SettingsScreen(
                 },
             )
             Text(
-                text = "壁纸会应用到所有页面；预设壁纸会随深浅色模式调整，点按“相册”可以使用自己的图片。",
+                text = "“相册”可自定义壁纸，建议使用低明暗对比度壁纸。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),

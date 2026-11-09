@@ -52,6 +52,7 @@ import com.wyutools.app.ui.ScheduleScreen
 import com.wyutools.app.ui.SettingsScreen
 import com.wyutools.app.ui.WyuMorphPageState
 import com.wyutools.app.ui.WyuPageEffects
+import com.wyutools.app.ui.WyuLaunchSplash
 import com.wyutools.app.ui.capturePageBitmap
 import com.wyutools.app.ui.createBlurBackdrop
 import kotlinx.coroutines.Dispatchers
@@ -71,23 +72,28 @@ class MainActivity : ComponentActivity() {
         ) ?: "home"
         setContent {
             WyuTheme {
-                val dark = LocalWyuDarkTheme.current
-                LaunchedEffect(dark) {
-                    enableEdgeToEdge(
-                        statusBarStyle = SystemBarStyle.auto(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT,
-                        ) { dark },
-                        navigationBarStyle = SystemBarStyle.auto(
-                            android.graphics.Color.argb(0xe6, 0xff, 0xff, 0xff),
-                            android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b),
-                        ) { dark },
+                Box(Modifier.fillMaxSize()) {
+                    val dark = LocalWyuDarkTheme.current
+                    LaunchedEffect(dark) {
+                        enableEdgeToEdge(
+                            statusBarStyle = SystemBarStyle.auto(
+                                android.graphics.Color.TRANSPARENT,
+                                android.graphics.Color.TRANSPARENT,
+                            ) { dark },
+                            navigationBarStyle = SystemBarStyle.auto(
+                                android.graphics.Color.argb(0xe6, 0xff, 0xff, 0xff),
+                                android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b),
+                            ) { dark },
+                        )
+                    }
+                    WyuApp(
+                        initialRoute = initialRoute,
+                        onExit = { finish() },
                     )
+                    // The page composes and the wallpaper decodes in parallel;
+                    // this mask covers the wait and fades out per AOSP.
+                    WyuLaunchSplash()
                 }
-                WyuApp(
-                    initialRoute = initialRoute,
-                    onExit = { finish() },
-                )
             }
         }
     }

@@ -93,11 +93,8 @@ fun GymScreen(
     val ui by vm.ui.collectAsState()
     val authUi by authVm.ui.collectAsState()
     var ssoAttempted by rememberSaveable { mutableStateOf(false) }
-    var loginNavigated by rememberSaveable { mutableStateOf(false) }
-    var autoLoginSuppressed by rememberSaveable { mutableStateOf(false) }
 
     val openNativeLogin: () -> Unit = {
-        loginNavigated = true
         ssoAttempted = false
         onLogin()
     }
@@ -117,11 +114,10 @@ fun GymScreen(
 
     LaunchedEffect(ui.loginNeeded, authUi.restoring, authUi.loggedIn, authUi.loggingOut) {
         if (!ui.loginNeeded || authUi.restoring || authUi.loggingOut) return@LaunchedEffect
-        if (!authUi.loggedIn) {
-            if (!loginNavigated && !autoLoginSuppressed) openNativeLogin()
-        } else if (!ssoAttempted) {
-            continueWithSso()
-        }
+        // Login stays manual: the auth-required screen waits for the button
+        // tap instead of jumping to the login page. A remembered SSO session
+        // still continues automatically.
+        if (authUi.loggedIn && !ssoAttempted) continueWithSso()
     }
 
     when {
@@ -130,7 +126,6 @@ fun GymScreen(
             ui = ui,
             onBack = onBack,
             onLogout = {
-                autoLoginSuppressed = true
                 vm.logout()
                 authVm.logout()
             },

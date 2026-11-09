@@ -275,7 +275,10 @@ private const val RawBgSaturation = 1.1f
 private const val RawReflectionStrength = 0f
 private const val RawRefractionIor = 6.1f
 private const val RawBlurPercent = 20
-private const val RawDownscale = 2
+private const val RawDownscale = 1
+// HyperLight's px geometry targets a ~3x baseline; low-density panels need it
+// scaled down so the glass rim keeps the same proportions in dp.
+private const val ReferenceDensity = 3f
 
 // HyperLight-style default: vivid in light mode, gentler in dark mode.
 internal fun softGlassBgSaturation(dark: Boolean): Float = if (dark) RawBgSaturation else 2f
@@ -294,12 +297,14 @@ private class WyuSoftGlassEffects(
     private val bgSaturation: Float,
     private val reflectionStrength: Float,
     private val refractionIor: Float,
+    private val downscale: Int,
 ) : (BackdropEffectScope) -> Unit {
     private var cached: RenderEffect? = null
     private var cachedW = -1f
     private var cachedH = -1f
     private var cachedPad = -1f
     private var cachedCorner = -1f
+    private var cachedDensity = -1f
 
     override fun invoke(scope: BackdropEffectScope) {
         val density = scope.density
@@ -313,26 +318,40 @@ private class WyuSoftGlassEffects(
             return
         }
         val pad = min(min(w, h), 128f).roundToInt().toFloat().coerceAtLeast(1f)
+        // miuix-blur only implements 1/2/4/8/16; anything else throws inside
+        // its draw pass, so snap arbitrary values onto a supported step.
+        val factor = when {
+            downscale <= 1 -> 1
+            downscale <= 2 -> 2
+            downscale <= 4 -> 4
+            downscale <= 8 -> 8
+            else -> 16
+        }
         scope.padding = pad
-        scope.downscaleFactor = RawDownscale
+        scope.downscaleFactor = factor
         scope.noiseCoefficient = 0f
+        val densityScale = (density / ReferenceDensity).coerceIn(0.5f, 1f)
         val cornerPx = if (glassShape == WyuSoftGlassShape.Circle) {
             min(w, h) * 0.5f
         } else {
             (cornerRadiusDp * density).coerceAtLeast(1f)
         }
-        if (cached != null && cachedW == w && cachedH == h && cachedPad == pad && cachedCorner == cornerPx) {
+        if (cached != null && cachedW == w && cachedH == h && cachedPad == pad &&
+            cachedCorner == cornerPx && cachedDensity == density
+        ) {
             scope.renderEffect = cached
             return
         }
         cached = if (!wyuSoftGlassSupported) {
             null
         } else {
-            val inv = 1f / RawDownscale
+            val inv = 1f / factor
             val layerW = (w + pad * 2f) * inv
             val layerH = (h + pad * 2f) * inv
-            val edgePx = shapeEdgePx.coerceAtLeast(0.5f)
+            val edgePx = (shapeEdgePx * densityScale).coerceAtLeast(0.5f)
             val edgePow = shapeEdgePow.coerceAtLeast(0.05f)
+            val refractionPx = (refractionThicknessPx * densityScale).coerceAtLeast(0f)
+            val reflectionPx = (reflectionThicknessPx * densityScale).coerceAtLeast(0f)
             val shader = android.graphics.RuntimeShader(WyuSoftGlassShader).apply {
                 setFloatUniform("uGeoPx_pos_size", 0f, 0f, layerW, layerH)
                 setFloatUniform("uRot_Scale", 1f, 0f, 1f, 1f)
@@ -343,8 +362,8 @@ private class WyuSoftGlassEffects(
                     "uAlpha_shapeEdgeThickReflect",
                     1f,
                     edgePx * inv,
-                    refractionThicknessPx * inv,
-                    reflectionThicknessPx * inv,
+                    refractionPx * inv,
+                    reflectionPx * inv,
                 )
                 // HyperLight "clarity" (平衡可读玻璃) preset, resolved to shader uniforms.
                 setFloatUniform("uRefractIORStrengthLight_clrpow", refractionIor, reflectionStrength, reflectionLighten, 1f)
@@ -376,6 +395,7 @@ private class WyuSoftGlassEffects(
         cachedH = h
         cachedPad = pad
         cachedCorner = cornerPx
+        cachedDensity = density
         scope.renderEffect = cached
     }
 }
@@ -400,6 +420,7 @@ fun Modifier.wyuSoftGlass(
     cornerRadius: Dp = 0.dp,
     blurScale: Float = 1f,
     blurPercent: Int = RawBlurPercent,
+    downscale: Int = RawDownscale,
     baseTint: Color = Color.Transparent,
     shapeEdgePx: Float = RawShapeEdgePx,
     shapeEdgePow: Float = RawShapeEdgePow,
@@ -417,6 +438,7 @@ fun Modifier.wyuSoftGlass(
         cornerRadius,
         blurScale,
         blurPercent,
+        downscale,
         baseTint,
         shapeEdgePx,
         shapeEdgePow,
@@ -441,6 +463,7 @@ fun Modifier.wyuSoftGlass(
             bgSaturation = bgSaturation,
             reflectionStrength = reflectionStrength,
             refractionIor = refractionIor,
+            downscale = downscale,
         )
     }
     val backdropModifier = remember(backdrop, shape, effects) {

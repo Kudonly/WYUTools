@@ -1237,6 +1237,8 @@ fun WyuNavigatorBar(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val backdrop = LocalWyuPageBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val lastIndex = WyuNavTabs.lastIndex
     val cellWidth = 88.dp
     val inset = 3.dp
@@ -1337,7 +1339,13 @@ fun WyuNavigatorBar(
                                 // The 2dp radius would otherwise stay at full resolution;
                                 // 1/2 linear keeps its variance while quartering the work.
                                 forceDownscaleExp(1)
-                                blur(2.dp.toPx(), 2.dp.toPx())
+                                // Follow the soft-glass blur setting: the tuned 20%
+                                // default keeps today's 2dp radius and scales linearly
+                                // up to 10dp at 100%. With soft glass off the slider
+                                // is hidden, so the bar uses its full 100% radius.
+                                val blurPercent = if (softGlass) softGlassBlur else 100
+                                val blurRadius = 2.dp.toPx() * blurPercent / 20f
+                                if (blurRadius > 0.5f) blur(blurRadius, blurRadius)
                                 lens(
                                     refractionHeight = 28.dp.toPx(),
                                     refractionAmount = 40.dp.toPx(),
