@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,11 +69,18 @@ import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 private val DialogCardCorner = 32.dp
 private val DialogScreenMargin = 16.dp
 private const val DialogCardTint = 0.62f
+// Dialogs keep their own fixed blur instead of following the soft-glass slider;
+// the dark sheet can carry 50%, while light mode stays at 20% to keep the
+// white-tinted card readable.
+private const val DialogSoftGlassBlurPercentLight = 20
+private const val DialogSoftGlassBlurPercentDark = 50
 
 /**
  * Every dialog goes through here. The card itself is frosted glass: it samples
  * the current page's backdrop and draws it blurred under a translucent tint.
- * The page behind stays sharp; only the standard window dim applies.
+ * With soft glass enabled the blur becomes the same glass material as cards,
+ * at a fixed radius that is lower in light mode. The page behind stays sharp;
+ * only the standard window dim applies.
  */
 @Composable
 fun WyuOverlayDialog(
@@ -126,14 +134,41 @@ fun WyuOverlayDialog(
     }
     val backdrop = WyuPageBackdrops.current
     val surface = MiuixTheme.colorScheme.background
-    val cardColor = if (backdrop != null) surface.copy(alpha = DialogCardTint) else surface
     val dark = LocalWyuDarkTheme.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
+    val cardColor = when {
+        backdrop == null -> surface
+        useSoftGlass -> Color.Transparent
+        else -> surface.copy(alpha = DialogCardTint)
+    }
+    val dialogShape = remember { WyuSquircleShape(DialogCardCorner) }
     val frostModifier = if (backdrop != null) {
-        Modifier.textureBlur(
-            backdrop = backdrop,
-            shape = RectangleShape,
-            blurRadius = 44f,
-        )
+        if (useSoftGlass) {
+            Modifier.wyuSoftGlass(
+                backdrop = backdrop,
+                shape = dialogShape,
+                glassShape = WyuSoftGlassShape.RoundedRect,
+                cornerRadius = DialogCardCorner,
+                blurPercent = if (dark) {
+                    DialogSoftGlassBlurPercentDark
+                } else {
+                    DialogSoftGlassBlurPercentLight
+                },
+                baseTint = if (dark) {
+                    Color.Transparent
+                } else {
+                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                },
+                bgSaturation = softGlassBgSaturation(dark),
+            )
+        } else {
+            Modifier.textureBlur(
+                backdrop = backdrop,
+                shape = RectangleShape,
+                blurRadius = 44f,
+            )
+        }
     } else {
         Modifier
     }

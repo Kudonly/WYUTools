@@ -544,8 +544,8 @@ private fun DailyTab(
     val courses = remember(dayCourses, nowMinutes) {
         dayCourses.filterNot { it.hasEndedAt(nowMinutes) }
     }
-    val nextCourse = if (dayCourses.none { it.isOngoingAt(nowMinutes) }) {
-        courses.firstOrNull()
+    val nextCourseId = if (dayCourses.none { it.isOngoingAt(nowMinutes) }) {
+        courses.firstOrNull()?.id
     } else {
         null
     }
@@ -581,11 +581,6 @@ private fun DailyTab(
                 )
             }
         }
-        nextCourse?.let { course ->
-            item(key = "schedule-daily-next") {
-                DailyNextCourseBanner(course = course, week = currentWeek)
-            }
-        }
         if (courses.isEmpty()) {
             item(key = "schedule-daily-empty") {
                 Box(
@@ -608,6 +603,7 @@ private fun DailyTab(
                     course = course,
                     week = currentWeek,
                     ongoing = course.isOngoingAt(nowMinutes),
+                    upcoming = course.id == nextCourseId,
                     onClick = { onCourseClick(course) },
                 )
             }
@@ -619,58 +615,11 @@ private fun DailyTab(
 }
 
 @Composable
-private fun DailyNextCourseBanner(course: ScheduleCourse, week: Int) {
-    val primary = MiuixTheme.colorScheme.primary
-    val secondary = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    val detail = buildList {
-        add(course.compactTimeText())
-        val room = course.roomForWeek(week)
-        if (room.isNotBlank()) add(room)
-    }.filter { it.isNotBlank() }.joinToString(" · ")
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(primary),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "接下来",
-                style = MiuixTheme.textStyles.footnote1,
-                fontWeight = FontWeight.SemiBold,
-                color = primary,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = course.name,
-                modifier = Modifier.weight(1f),
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = detail,
-            modifier = Modifier.padding(start = 12.dp),
-            style = MiuixTheme.textStyles.footnote1,
-            color = secondary,
-        )
-    }
-}
-
-@Composable
 private fun DailyCourseCard(
     course: ScheduleCourse,
     week: Int,
     ongoing: Boolean,
+    upcoming: Boolean,
     onClick: () -> Unit,
 ) {
     val room = course.roomForWeek(week)
@@ -681,6 +630,14 @@ private fun DailyCourseCard(
         onPrimary.copy(alpha = 0.82f)
     } else {
         MiuixTheme.colorScheme.onSurfaceVariantSummary
+    }
+    val statusLabel = when {
+        ongoing -> "正在上课"
+        upcoming -> "接下来"
+        else -> null
+    }
+    val startTimeText = course.startTime.ifBlank {
+        ScheduleSections.defaultStart(course.startSection).orEmpty()
     }
     Card(
         onClick = onClick,
@@ -693,13 +650,24 @@ private fun DailyCourseCard(
         },
     ) {
         Column(Modifier.fillMaxWidth()) {
-            if (ongoing) {
-                Text(
-                    text = "正在上课",
-                    style = MiuixTheme.textStyles.footnote1,
-                    fontWeight = FontWeight.Medium,
-                    color = secondary,
-                )
+            if (statusLabel != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = statusLabel,
+                        style = MiuixTheme.textStyles.footnote1,
+                        fontWeight = FontWeight.Medium,
+                        color = secondary,
+                    )
+                    if (upcoming && startTimeText.isNotBlank()) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = startTimeText,
+                            style = MiuixTheme.textStyles.footnote1,
+                            fontWeight = FontWeight.Medium,
+                            color = secondary,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
             }
             Text(

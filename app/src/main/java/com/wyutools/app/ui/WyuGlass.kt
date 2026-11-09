@@ -50,7 +50,7 @@ private const val ButtonGlassAlpha = 0.78f
  * so the blur underneath must share that silhouette; a plain rounded rect
  * leaves visible slivers at the four corners.
  */
-private class WyuSquircleShape(private val cornerRadius: Dp) : Shape {
+internal class WyuSquircleShape(private val cornerRadius: Dp) : Shape {
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
