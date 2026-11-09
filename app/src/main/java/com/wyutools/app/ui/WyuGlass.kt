@@ -37,7 +37,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 private const val CardGlassAlpha = 0.55f
 private const val CardSoftGlassAlpha = 0f
-private const val CardSoftGlassTintAlpha = 0.64f
+internal const val SoftGlassWhiteTintAlpha = 0.64f
 private const val CardSoftGlassBlurScale = 0.6f
 // Cards are the largest glass surfaces, so they take one sampling step below
 // the small top-bar buttons, which now run at full resolution. miuix-blur only
@@ -77,9 +77,14 @@ fun Card(
     cornerRadius: Dp = CardDefaults.CornerRadius,
     insideMargin: PaddingValues = CardDefaults.InsideMargin,
     colors: CardColors = CardDefaults.defaultColors(),
+    samplePageContent: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val glass = LocalWyuGlassBackdrop.current
+    val glass = if (samplePageContent) {
+        LocalWyuPageBackdrop.current
+    } else {
+        LocalWyuGlassBackdrop.current
+    }
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val dark = LocalWyuDarkTheme.current
@@ -87,9 +92,9 @@ fun Card(
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
     val softGlassCardTint = when {
         colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = CardSoftGlassTintAlpha)
+            colors.color.copy(alpha = SoftGlassWhiteTintAlpha)
         dark -> Color.Transparent
-        else -> Color.White.copy(alpha = CardSoftGlassTintAlpha)
+        else -> Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     MiuixCard(
@@ -140,9 +145,9 @@ fun Card(
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
     val softGlassCardTint = when {
         colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = CardSoftGlassTintAlpha)
+            colors.color.copy(alpha = SoftGlassWhiteTintAlpha)
         dark -> Color.Transparent
-        else -> Color.White.copy(alpha = CardSoftGlassTintAlpha)
+        else -> Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     MiuixCard(

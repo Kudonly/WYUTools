@@ -218,6 +218,7 @@ private fun ScheduleContent(
     WyuPageScaffold(
         progress = { collapseFraction.value },
         maskCollapseHeight = WyuLargeTitleHeight,
+        maskExtension = 34.dp,
         overlay = {
             ScheduleOverlay(
                 pagerState = pagerState,
@@ -231,7 +232,7 @@ private fun ScheduleContent(
                         scope.launch {
                             pagerState.animateScrollToPage(
                                 page = index,
-                                animationSpec = tween(350, easing = WyuDecelerateEasing),
+                                animationSpec = tween(450, easing = WyuDecelerateEasing),
                             )
                         }
                     }
@@ -410,6 +411,7 @@ private fun ScheduleWeekHeader(
             .height(ScheduleWeekHeaderHeight),
         cornerRadius = 22.dp,
         insideMargin = PaddingValues(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
+        samplePageContent = true,
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(

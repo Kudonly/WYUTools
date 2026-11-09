@@ -137,7 +137,7 @@ val WyuNavigatorBarHeight: Dp = 58.dp
 private val WyuCollapsedBarHeight = 56.dp
 internal val WyuLargeTitleHeight = 46.dp
 
-private val LocalWyuPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+internal val LocalWyuPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
 /** Wallpaper-only backdrop, so cards and buttons frost the photo without sampling themselves. */
 internal val LocalWyuGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
@@ -217,6 +217,7 @@ fun WyuPageScaffold(
     progress: () -> Float,
     snackbarHost: @Composable () -> Unit = {},
     maskCollapseHeight: Dp = 0.dp,
+    maskExtension: Dp = 0.dp,
     maskBaseAlpha: Float = 0f,
     backgroundBrush: Brush? = null,
     overlay: @Composable (LayerBackdrop?) -> Unit = {},
@@ -334,7 +335,8 @@ fun WyuPageScaffold(
                 val fadePx = 10.dp.roundToPx()
                 val fraction = maxOf(currentProgress.value(), pull.collapseBoost)
                     .coerceIn(0f, 1f)
-                val maxMaskHeight = (topHeight + fadePx).coerceAtMost(constraints.maxHeight)
+                val maxMaskHeight = (topHeight + fadePx + maskExtension.roundToPx())
+                    .coerceAtMost(constraints.maxHeight)
                 val collapsePx = maskCollapseHeight.roundToPx()
                     .coerceAtMost(topHeight)
                 val maskHeight = (maxMaskHeight - (collapsePx * fraction).roundToInt())
@@ -544,9 +546,15 @@ fun WyuActionBar(
 private const val TopBarGlassRefractionPx = 56f
 private const val TopBarGlassReflectionPx = 96f
 
+// The tab pill is only 38dp tall, so card-sized edge and refraction values
+// exceed its 114px capture padding and leave the top rim looking unfilled.
+private const val TabsGlassEdgePx = 40f
+private const val TabsGlassEdgePow = 2.2f
+private const val TabsGlassRefractionPx = 56f
+
 /**
- * Icon-only top bar button. Expanded: bare icon over the content. Collapsed: a
- * frosted glass disc fades in behind the icon, following the clock's two states.
+ * Icon-only top bar button. The frosted glass disc stays behind the icon in
+ * both the expanded and collapsed states.
  */
 @Composable
 private fun WyuTopBarGlassButton(
@@ -563,7 +571,6 @@ private fun WyuTopBarGlassButton(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val useSoftGlass = softGlass && wyuSoftGlassSupported
-    val fraction = LocalWyuTopBarFraction.current
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -597,13 +604,6 @@ private fun WyuTopBarGlassButton(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .graphicsLayer {
-                    val reveal = fraction().coerceIn(0f, 1f)
-                    alpha = reveal
-                    val scale = 0.82f + 0.18f * reveal
-                    scaleX = scale
-                    scaleY = scale
-                }
                 .shadow(
                     elevation = 3.dp,
                     shape = CircleShape,
@@ -619,6 +619,11 @@ private fun WyuTopBarGlassButton(
                             shape = CircleShape,
                             glassShape = WyuSoftGlassShape.Circle,
                             blurPercent = softGlassBlur,
+                            baseTint = if (dark) {
+                                Color.Transparent
+                            } else {
+                                Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                            },
                             refractionThicknessPx = TopBarGlassRefractionPx,
                             reflectionThicknessPx = TopBarGlassReflectionPx,
                             bgSaturation = softGlassBgSaturation(dark),
@@ -633,7 +638,7 @@ private fun WyuTopBarGlassButton(
                 )
                 .clip(CircleShape)
                 .then(
-                    if (useSoftGlass) {
+                    if (useSoftGlass && backdrop != null) {
                         Modifier
                     } else {
                         Modifier.background(
@@ -703,9 +708,9 @@ fun WyuTopBarAction(
 
 /**
  * Slim frosted pill tab row: drag-to-switch with tick haptics, tap debounce and
- * the floating navigator's 350 ms decelerate motion. When [selectionFraction]
- * is supplied the indicator mirrors it (pager driven) instead of running its own
- * selection animation.
+ * the floating navigator's damped press-follow spring on the sliding thumb.
+ * When [selectionFraction] is supplied the thumb mirrors it (pager driven)
+ * instead of running its own selection animation.
  */
 @Composable
 fun WyuFloatingTabs(
@@ -722,7 +727,15 @@ fun WyuFloatingTabs(
     val backdrop = LocalWyuPageBackdrop.current
     val lastIndex = options.lastIndex
     val initialFraction = selectedIndex.coerceIn(0, lastIndex).toFloat()
-    val indicator = remember { Animatable(initialFraction) }
+    val damped = remember(lastIndex) {
+        WyuDampedDragAnimation(
+            animationScope = scope,
+            initialValue = initialFraction,
+            valueRange = 0f..lastIndex.toFloat(),
+            visibilityThreshold = 0.001f,
+            pressedScale = 0.96f,
+        )
+    }
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(initialFraction) }
     var interacting by remember { mutableStateOf(false) }
@@ -739,23 +752,23 @@ fun WyuFloatingTabs(
             val target = value.coerceIn(0f, lastIndex.toFloat())
             if (interacting) {
                 // Keep the pressed preview in place until the pager lands on it.
-                if (abs(target - indicator.value) < 0.01f) interacting = false
+                if (abs(target - damped.value) < 0.01f) interacting = false
             } else {
-                indicator.snapTo(target)
+                damped.snapToValue(target)
             }
         }
     }
     LaunchedEffect(selectedIndex, selectionFraction) {
         if (selectionFraction == null) {
-            indicator.animateTo(
-                selectedIndex.coerceIn(0, lastIndex).toFloat(),
-                tween(350, easing = WyuDecelerateEasing),
-            )
+            damped.updateValue(selectedIndex.coerceIn(0, lastIndex).toFloat())
         }
     }
 
     val shape = RoundedCornerShape(percent = 50)
     val glass = backdrop != null
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val containerColor = if (dark) {
         Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
     } else {
@@ -786,28 +799,53 @@ fun WyuFloatingTabs(
                 spotColor = Color.Black.copy(alpha = 0.16f),
             )
             .then(
-                if (backdrop != null) {
-                    Modifier.textureBlur(
+                when {
+                    backdrop == null -> Modifier
+                    useSoftGlass -> Modifier.wyuSoftGlass(
+                        backdrop = backdrop,
+                        shape = shape,
+                        glassShape = WyuSoftGlassShape.RoundedRect,
+                        cornerRadius = 19.dp,
+                        blurPercent = softGlassBlur,
+                        baseTint = if (dark) {
+                            Color.Transparent
+                        } else {
+                            Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                        },
+                        shapeEdgePx = TabsGlassEdgePx,
+                        shapeEdgePow = TabsGlassEdgePow,
+                        refractionThicknessPx = TabsGlassRefractionPx,
+                        bgSaturation = softGlassBgSaturation(dark),
+                    )
+
+                    else -> Modifier.textureBlur(
                         backdrop = backdrop,
                         shape = shape,
                         blurRadius = 30f,
                     )
-                } else {
-                    Modifier
                 },
             )
             .clip(shape)
-            .background(containerColor)
+            .background(if (useSoftGlass) Color.Transparent else containerColor)
             .border(0.5.dp, borderColor, shape)
             .padding(3.dp)
             .pointerInput(options.size, lastIndex) {
                 fun revertPreview(target: Int) {
                     scope.launch {
-                        indicator.animateTo(
-                            target.toFloat(),
-                            tween(160, easing = WyuDecelerateEasing),
-                        )
+                        damped.animateToValue(target.toFloat())
                         interacting = false
+                    }
+                }
+                fun releasePreviewAfterLanding() {
+                    val gen = interactionGen
+                    scope.launch {
+                        delay(450)
+                        if (gen == interactionGen &&
+                            pressedIndex < 0 &&
+                            !dragging
+                        ) {
+                            interacting = false
+                        }
                     }
                 }
                 awaitEachGesture {
@@ -816,16 +854,12 @@ fun WyuFloatingTabs(
                     val startSelected = currentSelected
                     val downIndex = (down.position.x / cellPx).toInt().coerceIn(0, lastIndex)
                     pressedIndex = downIndex
+                    damped.press()
                     if (downIndex != startSelected) {
                         // Slide the thumb under the finger immediately on press.
                         interactionGen++
                         interacting = true
-                        scope.launch {
-                            indicator.animateTo(
-                                downIndex.toFloat(),
-                                tween(160, easing = WyuDecelerateEasing),
-                            )
-                        }
+                        damped.updateValue(downIndex.toFloat())
                     }
                     val startFraction = if (dragging) dragFraction else downIndex.toFloat()
                     var totalX = 0f
@@ -861,6 +895,7 @@ fun WyuFloatingTabs(
                                 dragFraction = (startFraction + totalX / cellPx)
                                     .coerceIn(0f, lastIndex.toFloat())
                                 lastTick = dragFraction.roundToInt()
+                                damped.updateValue(dragFraction)
                                 change.consume()
                             } else if (abs(totalY) > viewConfiguration.touchSlop) {
                                 cancelled = true
@@ -872,6 +907,7 @@ fun WyuFloatingTabs(
                                 change.consume()
                                 dragFraction = (dragFraction + dx / cellPx)
                                     .coerceIn(0f, lastIndex.toFloat())
+                                damped.updateValue(dragFraction)
                                 val tick = dragFraction.roundToInt()
                                 if (tick != lastTick) {
                                     lastTick = tick
@@ -882,21 +918,15 @@ fun WyuFloatingTabs(
                     }
                     pressedIndex = -1
                     if (dragActive) {
-                        val released = dragFraction
-                        val target = released.roundToInt().coerceIn(0, lastIndex)
-                        scope.launch {
-                            indicator.snapTo(released)
-                            dragging = false
-                            indicator.animateTo(
-                                target.toFloat(),
-                                tween(350, easing = WyuDecelerateEasing),
-                            )
-                            interacting = false
-                        }
+                        val target = dragFraction.roundToInt().coerceIn(0, lastIndex)
+                        dragging = false
+                        damped.updateValue(target.toFloat())
+                        damped.release()
                         if (target != startSelected) {
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             currentOnSelect(target)
                         }
+                        releasePreviewAfterLanding()
                     } else if (!cancelled) {
                         val now = SystemClock.uptimeMillis()
                         if (now - lastSelectAt >= 200L) {
@@ -906,32 +936,23 @@ fun WyuFloatingTabs(
                                 currentOnSelect(downIndex)
                                 // Release the preview if the pager transition is
                                 // interrupted before it lands.
-                                val gen = interactionGen
-                                scope.launch {
-                                    delay(450)
-                                    if (gen == interactionGen &&
-                                        pressedIndex < 0 &&
-                                        !dragging
-                                    ) {
-                                        interacting = false
-                                    }
-                                }
+                                releasePreviewAfterLanding()
                             }
                             if (selectionFraction == null) {
-                                scope.launch {
-                                    interacting = true
-                                    indicator.animateTo(
-                                        downIndex.toFloat(),
-                                        tween(350, easing = WyuDecelerateEasing),
-                                    )
-                                    interacting = false
-                                }
+                                damped.updateValue(downIndex.toFloat())
                             }
+                            damped.release()
                         } else if (downIndex != startSelected) {
                             revertPreview(startSelected)
+                            damped.release()
+                        } else {
+                            damped.release()
                         }
-                    } else if (downIndex != startSelected) {
-                        revertPreview(startSelected)
+                    } else {
+                        damped.release()
+                        if (downIndex != startSelected) {
+                            revertPreview(startSelected)
+                        }
                     }
                 }
             },
@@ -942,8 +963,12 @@ fun WyuFloatingTabs(
                 .width(cellWidth)
                 .fillMaxHeight()
                 .graphicsLayer {
-                    val fraction = if (dragging) dragFraction else indicator.value
-                    translationX = fraction * size.width
+                    val velocity = damped.velocity / 10f
+                    translationX = damped.value * size.width
+                    scaleX = damped.scaleX /
+                        (1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f))
+                    scaleY = damped.scaleY *
+                        (1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f))
                 }
                 .clip(shape)
                 .background(indicatorColor),

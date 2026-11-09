@@ -188,6 +188,7 @@ private fun GymContent(
     WyuPageScaffold(
         progress = { collapseFraction.value },
         maskCollapseHeight = WyuLargeTitleHeight,
+        maskExtension = 34.dp,
         overlay = {
             GymTabsOverlay(
                 pagerState = pagerState,
@@ -197,7 +198,7 @@ private fun GymContent(
                         scope.launch {
                             pagerState.animateScrollToPage(
                                 page = index,
-                                animationSpec = tween(350, easing = WyuDecelerateEasing),
+                                animationSpec = tween(450, easing = WyuDecelerateEasing),
                             )
                         }
                     }
