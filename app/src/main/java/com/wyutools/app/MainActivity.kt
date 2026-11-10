@@ -33,6 +33,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -167,7 +168,6 @@ fun WyuApp(
     val homeSharpSnapshots = remember { mutableMapOf<String, Bitmap>() }
     var cardMorph by remember { mutableStateOf<CardMorph?>(null) }
     var returnMorph by remember { mutableStateOf<CardReturn?>(null) }
-    val morphRunning = remember { mutableStateOf(false) }
     val returnRunning = remember { mutableStateOf(false) }
     val openPending = remember { mutableStateOf(false) }
     val openCancel = remember { mutableStateOf(false) }
@@ -199,7 +199,6 @@ fun WyuApp(
 
     suspend fun recordNavHostPage(): Bitmap? {
         withFrameNanos { }
-        pageCaptureDone[0] = false
         pageCaptureRequested = true
         var frames = 0
         while (!pageCaptureDone[0] && frames < 100) {
@@ -227,6 +226,12 @@ fun WyuApp(
             activity != null
         ) {
             returnReopen.value = false
+            // Freeze the title's current visible geometry (collapsed or expanded)
+            // before hiding it, so the return flight leaves from where the title
+            // actually sits instead of snapping to the expanded large-title spot.
+            val titleStartBounds = WyuMorphPageState.exitTitleBounds
+            val titleStartFontPx = WyuMorphPageState.exitTitleFontPx
+            val titleStartLinePx = WyuMorphPageState.exitTitleLinePx
             // Hide the live title before recording: the overlay's flying title
             // sits over the same spot from this frame on, so the page snapshot
             // comes out clean and the page itself never visibly loses it.
@@ -238,6 +243,9 @@ fun WyuApp(
                 snapshot,
                 null,
                 homeSharpSnapshots[toolRoute],
+                titleStartBounds = titleStartBounds,
+                titleStartFontPx = titleStartFontPx,
+                titleStartLinePx = titleStartLinePx,
             )
             scope.launch {
                 val page = recordNavHostPage()
@@ -298,7 +306,6 @@ fun WyuApp(
                             // The page composes at once; only its data refresh
                             // waits for the morph, so nothing lands mid-animation.
                             WyuMorphPageState.morphSettled = false
-                            morphRunning.value = true
                             cardMorph = CardMorph(toolRoute, card, captured)
                         } else {
                             nav.navigate(toolRoute)
@@ -336,7 +343,7 @@ fun WyuApp(
             enterTransition = {
                 // A page re-entering underneath a running return overlay must
                 // not slide; the overlay is the only thing in motion.
-                if (morphRunning.value || returnRunning.value) {
+                if (cardMorph != null || returnRunning.value) {
                     EnterTransition.None
                 } else {
                     // The pushed page is a full-width sheet sliding in from
@@ -347,7 +354,7 @@ fun WyuApp(
                 }
             },
             exitTransition = {
-                if (morphRunning.value || returnRunning.value) {
+                if (cardMorph != null || returnRunning.value) {
                     ExitTransition.None
                 } else {
                     // The page underneath is nudged left and pressed down a
@@ -611,7 +618,6 @@ fun WyuApp(
                     }
                 },
                 onFinished = {
-                    morphRunning.value = false
                     openCancel.value = false
                     cardMorph = null
                     settleMorphState()
@@ -639,7 +645,6 @@ fun WyuApp(
                         withFrameNanos { }
                         withFrameNanos { }
                         cardMorph = null
-                        morphRunning.value = false
                         openCancel.value = false
                         settleMorphState()
                         homeSharpSnapshots.remove(morph.route)
@@ -654,6 +659,9 @@ fun WyuApp(
                 pageBlur = morph.pageBlur,
                 sharpHome = morph.sharpHome,
                 reopenRequested = returnReopen.value,
+                titleStartBounds = morph.titleStartBounds,
+                titleStartFontPx = morph.titleStartFontPx,
+                titleStartLinePx = morph.titleStartLinePx,
                 onTap = { returnReopen.value = true },
                 onSwap = {
                     // Normally already popped when the return started; this is
@@ -666,9 +674,7 @@ fun WyuApp(
                     // page state would otherwise pile up, so drop it.
                     nav.clearBackStack(morph.route)
                     returnMorph = null
-                    returnRunning.value = false
                     returnReopen.value = false
-                    WyuMorphPageState.returnSettling = true
                     settleMorphState()
                     cardSnapshots.remove(morph.route)
                     homeSharpSnapshots.remove(morph.route)
@@ -695,9 +701,7 @@ fun WyuApp(
                         withFrameNanos { }
                         withFrameNanos { }
                         returnMorph = null
-                        returnRunning.value = false
                         returnReopen.value = false
-                        WyuMorphPageState.returnSettling = true
                         settleMorphState()
                         delay(50)
                         WyuMorphPageState.returnSettling = false
@@ -751,6 +755,9 @@ private data class CardReturn(
     val page: Bitmap?,
     val sharpHome: Bitmap?,
     val pageBlur: Bitmap? = null,
+    val titleStartBounds: Rect? = null,
+    val titleStartFontPx: Float = 0f,
+    val titleStartLinePx: Float = 0f,
 )
 
 private suspend fun captureWindow(activity: Activity): Bitmap? =

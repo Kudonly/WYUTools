@@ -35,10 +35,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.FilterQuality
@@ -54,7 +52,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -64,7 +61,6 @@ import com.wyutools.app.SharedCardSnapshot
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -240,13 +236,6 @@ private fun rememberStartBounds(snapshot: SharedCardSnapshot): Rect {
     }
 }
 
-private fun Rect.lerpTo(target: Rect, fraction: Float): Rect = Rect(
-    left + (target.left - left) * fraction,
-    top + (target.top - top) * fraction,
-    right + (target.right - right) * fraction,
-    bottom + (target.bottom - bottom) * fraction,
-)
-
 private fun roundedPath(rect: Rect, radius: Float): Path = Path().apply {
     addRoundRect(
         RoundRect(
@@ -256,30 +245,6 @@ private fun roundedPath(rect: Rect, radius: Float): Path = Path().apply {
             rect.bottom,
             CornerRadius(radius, radius),
         ),
-    )
-}
-
-private fun DrawScope.drawImageContained(
-    image: ImageBitmap,
-    rect: Rect,
-    alpha: Float,
-    scaleBoost: Float = 1f,
-) {
-    if (alpha <= 0f || rect.width <= 0f || rect.height <= 0f) return
-    val scale = min(rect.width / image.width, rect.height / image.height) * scaleBoost
-    val width = image.width * scale
-    val height = image.height * scale
-    drawImage(
-        image = image,
-        srcOffset = IntOffset.Zero,
-        srcSize = IntSize(image.width, image.height),
-        dstOffset = IntOffset(
-            (rect.center.x - width / 2f).roundToInt(),
-            (rect.center.y - height / 2f).roundToInt(),
-        ),
-        dstSize = IntSize(width.roundToInt(), height.roundToInt()),
-        alpha = alpha,
-        filterQuality = FilterQuality.Medium,
     )
 }
 
@@ -622,6 +587,9 @@ fun CardReturnOverlay(
     onTap: () -> Unit,
     onSwap: () -> Unit,
     onReopened: () -> Unit,
+    titleStartBounds: Rect? = null,
+    titleStartFontPx: Float = 0f,
+    titleStartLinePx: Float = 0f,
 ) {
     val raw = remember(snapshot, page) { Animatable(0f) }
     val cardImage = remember(snapshot) { snapshot.bitmap.asImageBitmap() }
@@ -751,6 +719,9 @@ fun CardReturnOverlay(
             snapshot = snapshot,
             progress = { raw.value },
             forward = false,
+            returnStartBounds = titleStartBounds,
+            returnStartFontPx = titleStartFontPx,
+            returnStartLinePx = titleStartLinePx,
         )
         if (page != null && !landed) {
             // Only the returning card's landing spot is intercepted: a tap
@@ -782,6 +753,9 @@ private fun FlightTitle(
     snapshot: SharedCardSnapshot,
     progress: () -> Float,
     forward: Boolean,
+    returnStartBounds: Rect? = null,
+    returnStartFontPx: Float = 0f,
+    returnStartLinePx: Float = 0f,
 ) {
     val title = snapshot.title ?: return
     val rawTitleBounds = snapshot.titleBounds ?: return
@@ -812,11 +786,11 @@ private fun FlightTitle(
     val progressValue = progress()
     // The title rides the same eased progress as the container, so it lands with it.
     val fraction = progressValue
-    val from = if (forward) startBounds else targetBounds
+    val from = if (forward) startBounds else (returnStartBounds ?: targetBounds)
     val to = if (forward) targetBounds else startBounds
-    val fromFont = if (forward) startFontPx else targetFontPx
+    val fromFont = if (forward) startFontPx else (returnStartFontPx.takeIf { it > 0f } ?: targetFontPx)
     val toFont = if (forward) targetFontPx else startFontPx
-    val fromLine = if (forward) startLinePx else targetLinePx
+    val fromLine = if (forward) startLinePx else (returnStartLinePx.takeIf { it > 0f } ?: targetLinePx)
     val toLine = if (forward) targetLinePx else startLinePx
 
     val x = lerp(from.left, to.left, fraction)

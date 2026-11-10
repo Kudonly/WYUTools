@@ -530,9 +530,8 @@ fun Modifier.wyuSoftGlass(
     bgSaturation: Float = RawBgSaturation,
     reflectionStrength: Float = RawReflectionStrength,
     refractionIor: Float = RawRefractionIor,
-    enabled: Boolean = true,
 ): Modifier {
-    if (backdrop == null || !enabled || !wyuSoftGlassSupported) return this
+    if (backdrop == null || !wyuSoftGlassSupported) return this
     val effects = remember(
         glassShape,
         cornerRadius,

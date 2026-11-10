@@ -90,6 +90,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
@@ -144,8 +145,6 @@ internal val LocalWyuPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { n
 /** Wallpaper-only backdrop, so cards and buttons frost the photo without sampling themselves. */
 internal val LocalWyuGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
-private val LocalWyuTopBarFraction = staticCompositionLocalOf<() -> Float> { { 0f } }
-
 /** Extra 0..1 collapse driven by overscroll drag on pages that cannot scroll. */
 internal val LocalWyuCollapseBoost = staticCompositionLocalOf<() -> Float> { { 0f } }
 
@@ -162,6 +161,15 @@ internal object WyuMorphPageState {
 
     const val ContentShrink = 0.04f
     val ContentLift = 16.dp
+
+    /** Current visible page-title geometry in window coordinates, captured by
+     *  the top bar from its current collapse fraction. Plain fields on purpose:
+     *  writing them must not trigger recomposition. The return morph reads them
+     *  so the flying title leaves from where it actually sits (collapsed or
+     *  expanded) instead of snapping to the expanded large-title spot first. */
+    var exitTitleBounds: Rect? = null
+    var exitTitleFontPx = 0f
+    var exitTitleLinePx = 0f
 
     /** True from the start of a return until 50ms after it lands. A card tap
      *  waits on it so its snapshot is never taken from the pulled-back home,
@@ -582,96 +590,128 @@ fun WyuActionBar(
             color = onSurface,
         )
     }
+    val density = LocalDensity.current
+    val largeFontPx = with(density) { largeStyle.fontSize.toPx() }
+    val largeLinePx = with(density) { largeStyle.lineHeight.toPx() }
+    val collapsedFontPx = with(density) { collapsedStyle.fontSize.toPx() }
+    val collapsedLinePx = with(density) { collapsedStyle.lineHeight.toPx() }
+    // Snapshot state on purpose: a settled page never re-runs its layer block,
+    // so first layout must itself be able to finish the capture below.
+    val largeTitleBounds = remember { mutableStateOf<Rect?>(null) }
+    val collapsedTitleBounds = remember { mutableStateOf<Rect?>(null) }
     val boost = LocalWyuCollapseBoost.current
     val effectiveFraction: () -> Float = {
         (collapsedFraction() + boost()).coerceIn(0f, 1f)
     }
-    CompositionLocalProvider(
-        LocalWyuTopBarFraction provides effectiveFraction,
-    ) {
-        Box(modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth()) {
-                Spacer(Modifier.height(statusTop))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(WyuCollapsedBarHeight)
-                        .padding(
-                            start = if (navigationIcon != null) 16.dp else 28.dp,
-                            end = 10.dp,
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
+    // Records where the title actually sits right now (expanded, collapsed or
+    // in between), so the return morph leaves from the visible geometry. Both
+    // the layout callbacks and the draw phase call it: layout settles the very
+    // first frame, while draw keeps the value fresh as the fraction moves.
+    fun captureExitTitle() {
+        val large = largeTitleBounds.value ?: return
+        val collapsed = collapsedTitleBounds.value ?: return
+        val f = effectiveFraction()
+        WyuMorphPageState.exitTitleBounds = Rect(
+            lerp(large.left, collapsed.left, f),
+            lerp(large.top, collapsed.top, f),
+            lerp(large.right, collapsed.right, f),
+            lerp(large.bottom, collapsed.bottom, f),
+        )
+        WyuMorphPageState.exitTitleFontPx = lerp(largeFontPx, collapsedFontPx, f)
+        WyuMorphPageState.exitTitleLinePx = lerp(largeLinePx, collapsedLinePx, f)
+    }
+    Box(modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.height(statusTop))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(WyuCollapsedBarHeight)
+                    .padding(
+                        start = if (navigationIcon != null) 16.dp else 28.dp,
+                        end = 10.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (navigationIcon != null) {
+                    navigationIcon()
+                    Spacer(Modifier.width(2.dp))
+                }
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                    if (navigationIcon != null) {
-                        navigationIcon()
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        WyuSwitchingTitle(
-                            primary = title,
-                            secondary = altTitle,
-                            fraction = altFraction,
-                            style = collapsedStyle,
-                            baseAlpha = {
-                                // Read at draw time: the host subcomposition can miss this
-                                // state change, but layer invalidation never does.
-                                if (WyuMorphPageState.titleHidden) {
-                                    0f
-                                } else if (largeTitle) {
-                                    effectiveFraction()
-                                } else {
-                                    1f
-                                }
-                            },
-                        )
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        content = actions,
+                    WyuSwitchingTitle(
+                        primary = title,
+                        secondary = altTitle,
+                        fraction = altFraction,
+                        style = collapsedStyle,
+                        baseAlpha = {
+                            // Read at draw time: the host subcomposition can miss this
+                            // state change, but layer invalidation never does.
+                            if (WyuMorphPageState.titleHidden) {
+                                0f
+                            } else if (largeTitle) {
+                                effectiveFraction()
+                            } else {
+                                1f
+                            }
+                        },
+                        onBounds = {
+                            collapsedTitleBounds.value = it
+                            captureExitTitle()
+                        },
                     )
                 }
-                if (largeTitle) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(WyuLargeTitleHeight)
-                            .padding(start = 28.dp, end = 24.dp),
-                    ) {
-                        WyuSwitchingTitle(
-                            primary = title,
-                            secondary = altTitle,
-                            fraction = altFraction,
-                            style = largeStyle,
-                            baseAlpha = {
-                                if (WyuMorphPageState.titleHidden) 0f else 1f - effectiveFraction()
-                            },
-                            modifier = Modifier.graphicsLayer {
-                                translationY = -effectiveFraction() * 10.dp.toPx()
-                            },
-                        )
-                    }
-                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = actions,
+                )
             }
-            if (largeTitle && floatingAction != null) {
+            if (largeTitle) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(
-                            top = statusTop + WyuCollapsedBarHeight - 1.dp,
-                            end = 10.dp,
-                        )
-                        .graphicsLayer {
-                            // 51.dp carries the action from the large-title centre up
-                            // into the collapsed row as the page scrolls.
-                            translationY = -effectiveFraction() * 51.dp.toPx()
-                        },
+                        .fillMaxWidth()
+                        .height(WyuLargeTitleHeight)
+                        .padding(start = 28.dp, end = 24.dp),
                 ) {
-                    floatingAction()
+                    WyuSwitchingTitle(
+                        primary = title,
+                        secondary = altTitle,
+                        fraction = altFraction,
+                        style = largeStyle,
+                        baseAlpha = {
+                            if (WyuMorphPageState.titleHidden) 0f else 1f - effectiveFraction()
+                        },
+                        onBounds = {
+                            largeTitleBounds.value = it
+                            captureExitTitle()
+                        },
+                        modifier = Modifier.graphicsLayer {
+                            val f = effectiveFraction()
+                            translationY = -f * 10.dp.toPx()
+                            captureExitTitle()
+                        },
+                    )
                 }
+            }
+        }
+        if (largeTitle && floatingAction != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(
+                        top = statusTop + WyuCollapsedBarHeight - 1.dp,
+                        end = 10.dp,
+                    )
+                    .graphicsLayer {
+                        // 51.dp carries the action from the large-title centre up
+                        // into the collapsed row as the page scrolls.
+                        translationY = -effectiveFraction() * 51.dp.toPx()
+                    },
+            ) {
+                floatingAction()
             }
         }
     }
@@ -687,9 +727,18 @@ private fun WyuSwitchingTitle(
     style: TextStyle,
     baseAlpha: () -> Float,
     modifier: Modifier = Modifier,
+    onBounds: ((Rect) -> Unit)? = null,
 ) {
     val blurPx = with(LocalDensity.current) { 10.dp.toPx() }
-    Box(modifier) {
+    Box(
+        modifier.then(
+            if (onBounds != null) {
+                Modifier.onGloballyPositioned { onBounds(it.boundsInWindow()) }
+            } else {
+                Modifier
+            },
+        ),
+    ) {
         Text(
             text = primary,
             style = style,
