@@ -71,6 +71,7 @@ import com.wyutools.app.ui.WyuWindowBackdrop
 import com.wyutools.app.ui.capturePageBitmap
 import com.wyutools.app.ui.createBlurBackdrop
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -171,10 +172,6 @@ fun WyuApp(
     val openPending = remember { mutableStateOf(false) }
     val openCancel = remember { mutableStateOf(false) }
     val returnReopen = remember { mutableStateOf(false) }
-    // True from the moment the return overlay is dismissed until home has
-    // drawn its settled frame. Capturing the window in this gap would freeze
-    // the return's last (pulled-back) frame into the next morph's backdrop.
-    val returnSettling = remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun settleMorphState() {
         WyuMorphPageState.titleHidden = cardMorph != null || returnMorph != null
@@ -197,16 +194,6 @@ fun WyuApp(
         withFrameNanos { }
         withFrameNanos { }
         coldStart.value = false
-    }
-    LaunchedEffect(returnSettling.value) {
-        if (returnSettling.value) {
-            // The return overlay leaves composition on the next frame; give
-            // the home one more drawn frame so a window copy taken afterwards
-            // is guaranteed to be the clean, settled page.
-            withFrameNanos { }
-            withFrameNanos { }
-            returnSettling.value = false
-        }
     }
     val pageStartsSharp = coldStart.value || cardMorph != null || returnMorph != null
 
@@ -245,6 +232,7 @@ fun WyuApp(
             // comes out clean and the page itself never visibly loses it.
             WyuMorphPageState.titleHidden = true
             returnRunning.value = true
+            WyuMorphPageState.returnSettling = true
             returnMorph = CardReturn(
                 toolRoute,
                 snapshot,
@@ -273,6 +261,7 @@ fun WyuApp(
                 } else {
                     returnMorph = null
                     returnRunning.value = false
+                    WyuMorphPageState.returnSettling = false
                     WyuMorphPageState.titleHidden = false
                     if (nav.currentBackStackEntry?.destination?.route == toolRoute) {
                         nav.popBackStack()
@@ -295,7 +284,7 @@ fun WyuApp(
                         // the window — otherwise the return's pulled-back last
                         // frame ends up inside the new backdrop.
                         var waits = 0
-                        while ((returnMorph != null || returnSettling.value) && waits < 90) {
+                        while ((returnMorph != null || WyuMorphPageState.returnSettling) && waits < 90) {
                             withFrameNanos { }
                             waits++
                         }
@@ -679,10 +668,16 @@ fun WyuApp(
                     returnMorph = null
                     returnRunning.value = false
                     returnReopen.value = false
-                    returnSettling.value = true
+                    WyuMorphPageState.returnSettling = true
                     settleMorphState()
                     cardSnapshots.remove(morph.route)
                     homeSharpSnapshots.remove(morph.route)
+                    // Keep card taps waiting for a 50ms margin after the window
+                    // lands, so the next snapshot comes from the settled home.
+                    scope.launch {
+                        delay(50)
+                        WyuMorphPageState.returnSettling = false
+                    }
                 },
                 onReopened = {
                     // The page was popped when the return started; bring it
@@ -702,8 +697,10 @@ fun WyuApp(
                         returnMorph = null
                         returnRunning.value = false
                         returnReopen.value = false
-                        returnSettling.value = true
+                        WyuMorphPageState.returnSettling = true
                         settleMorphState()
+                        delay(50)
+                        WyuMorphPageState.returnSettling = false
                     }
                 },
             )

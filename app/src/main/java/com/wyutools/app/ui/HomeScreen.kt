@@ -192,6 +192,7 @@ private fun SettingsEntry(onOpen: (SharedCardSnapshot?) -> Unit) {
         } else {
             launching = true
             scope.launch {
+                WyuMorphPageState.awaitReturnSettled()
                 val bitmap = runCatching {
                     graphicsLayer.toImageBitmap().asAndroidBitmap()
                 }.getOrNull()

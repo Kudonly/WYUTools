@@ -163,6 +163,16 @@ internal object WyuMorphPageState {
     const val ContentShrink = 0.04f
     val ContentLift = 16.dp
 
+    /** True from the start of a return until 50ms after it lands. A card tap
+     *  waits on it so its snapshot is never taken from the pulled-back home,
+     *  which would otherwise open the next morph from a shrunk, shifted card. */
+    var returnSettling by mutableStateOf(false)
+
+    /** Suspends until the return has landed and its 50ms margin has elapsed. */
+    suspend fun awaitReturnSettled() {
+        if (returnSettling) snapshotFlow { returnSettling }.first { !it }
+    }
+
     /** Returns once no open morph is running, so refreshes never land mid-animation. */
     suspend fun awaitSettled() {
         if (!morphSettled) snapshotFlow { morphSettled }.first { it }

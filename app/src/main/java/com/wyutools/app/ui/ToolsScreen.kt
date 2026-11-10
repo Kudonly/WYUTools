@@ -176,6 +176,10 @@ private fun ToolCard(
         } else {
             launching = true
             scope.launch {
+                // A return may still be pulling the home back; wait until it
+                // lands plus its 50ms margin so the snapshot is never taken
+                // from a shrunk, shifted card.
+                WyuMorphPageState.awaitReturnSettled()
                 val bitmap = runCatching {
                     graphicsLayer.toImageBitmap().asAndroidBitmap()
                 }.getOrNull()
