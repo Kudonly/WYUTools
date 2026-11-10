@@ -1,10 +1,14 @@
 package com.wyutools.app.ui
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.School
@@ -49,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,11 +63,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.gym.GymRecord
@@ -70,13 +79,13 @@ import com.wyutools.app.gym.GymVenue
 import com.wyutools.app.gym.GymViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -112,6 +121,30 @@ fun GymScreen(
         if (ui.user != null) ssoAttempted = false
     }
 
+    // A manual (or silent) login success re-arms the SSO hand-off, so the gym
+    // session is picked up without the user tapping anything else.
+    LaunchedEffect(authUi.loginSuccessCount) {
+        if (authUi.loginSuccessCount > 0) ssoAttempted = false
+    }
+
+    // The account is remembered on this device but the SSO session may simply
+    // not have come up yet (cold start, silent re-login in flight). That is not
+    // a reason to ask for a login: wait, try silently, and only show the prompt
+    // once a login has actually failed.
+    val hasSavedAccount = authVm.hasSavedAccount && !authUi.loggedOut
+    val loginFailed = ui.loginError != null ||
+        ui.loginExpired ||
+        authUi.loginError != null
+    var silentLoginTried by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(ui.user, ui.loginNeeded, authUi.restoring, authUi.loggedIn, authUi.loggedOut) {
+        if (ui.user != null || !ui.loginNeeded) return@LaunchedEffect
+        if (authUi.restoring || authUi.loggedIn || authUi.loggedOut) return@LaunchedEffect
+        if (!hasSavedAccount || silentLoginTried || authUi.autoLoggingIn) return@LaunchedEffect
+        silentLoginTried = true
+        authVm.trySilentLogin()
+    }
+
     LaunchedEffect(ui.loginNeeded, authUi.restoring, authUi.loggedIn, authUi.loggingOut) {
         if (!ui.loginNeeded || authUi.restoring || authUi.loggingOut) return@LaunchedEffect
         // Login stays manual: the auth-required screen waits for the button
@@ -120,8 +153,27 @@ fun GymScreen(
         if (authUi.loggedIn && !ssoAttempted) continueWithSso()
     }
 
+    // The gym session is a copy of the SSO cookie, so signing out of SSO has to
+    // take the gym side with it. Without this the copied cookie and the cached
+    // user survive a logout and the page keeps rendering a session that is
+    // already gone. Guarded on `loggedOut` (not on "not logged in") so a plain
+    // cold start never wipes a healthy gym session.
+    val signedOut = authUi.loggedOut
+    LaunchedEffect(signedOut) {
+        if (signedOut) vm.logout()
+    }
+
+    // A loading page is only honest while a session hand-off is actually in
+    // flight: the device remembers an account *and* still holds a local login
+    // (either confirmed, or a stored session that is being revalidated right
+    // now). Merely remembering an account — after a logout, or with no session
+    // left on this device — is not a reason to spin: show the prompt instead.
+    val waitingForSession = hasSavedAccount &&
+        (authUi.loggedIn || authUi.restoring) &&
+        !loginFailed
+
     when {
-        ui.user != null -> GymContent(
+        ui.user != null && !signedOut -> GymContent(
             vm = vm,
             ui = ui,
             onBack = onBack,
@@ -131,8 +183,8 @@ fun GymScreen(
             },
         )
 
-        ui.loginNeeded -> {
-            if (authUi.restoring || authUi.loggingOut) {
+        ui.loginNeeded || signedOut -> {
+            if (waitingForSession) {
                 GymLoadingScreen(onBack = onBack)
             } else {
                 GymAuthRequiredScreen(
@@ -141,6 +193,7 @@ fun GymScreen(
                     onLogin = openNativeLogin,
                     onSsoLogin = continueWithSso,
                     onBack = onBack,
+                    authError = authUi.loginError,
                 )
             }
         }
@@ -333,6 +386,39 @@ private const val VenueChipInitialScale = 0.9f
 private const val VenueCardEnterMillis = 300
 private const val VenueCardExitMillis = 160
 private const val VenueCardEnterScale = 0.92f
+
+// Semester deck: the container unfolds at a calm pace and each card gets its
+// own beat, so a long semester reads as a stack being dealt instead of one
+// block appearing. Folding back is the opposite: the old cards fade out while
+// the container gives its height back straight away, so the semesters below
+// climb the moment the title is tapped.
+private const val SemesterExpandMillis = 300
+private const val SemesterCollapseMillis = 200
+private const val SemesterCardMillis = 300
+private const val SemesterCardFoldMillis = 120
+private const val SemesterCardStaggerMillis = 55
+private const val SemesterCardInitialScale = 0.94f
+private val SemesterCardGap = 3.dp
+private val SemesterDeckEasing = CubicBezierEasing(0.24f, 0f, 0.18f, 1f)
+
+// What the semesters under a closing deck do. They are not given a placement
+// animation on purpose: a placement spec is retargeted on every frame of the
+// collapse, so its overshoot phase never gets to play — by the time the layout
+// stops moving there is no distance left to overshoot. Instead every block
+// below rides the collapse frame for frame (they all shift by the same amount,
+// so the pace is identical no matter how far down the list a block sits), and
+// the rebound is added on top by hand: a short hop past the landing spot while
+// the deck is still folding, then a soft settle back down. The lift is smaller
+// than the 12dp gap between blocks, so a bouncing block never overlaps its
+// neighbour above.
+private const val SemesterReboundLeadMillis = 130
+private const val SemesterReboundRiseMillis = 110
+private const val SemesterReboundFallMillis = 300
+private const val SemesterReboundMillis =
+    SemesterReboundLeadMillis + SemesterReboundRiseMillis + SemesterReboundFallMillis
+private val SemesterReboundLift = 9.dp
+private val SemesterReboundFallEasing = CubicBezierEasing(0.25f, 0.55f, 0.3f, 1f)
+private const val SemesterChevronMillis = 220
 
 /** Slim glass tabs floating over the pager; they ride up with the collapsing bar. */
 @Composable
@@ -732,6 +818,30 @@ private fun RecordsTab(
     onCancel: (GymRecord) -> Unit,
 ) {
     val groups = remember(ui.records) { groupRecordsBySemester(ui.records) }
+    // Any number of semesters can stay unfolded: each title toggles only its
+    // own deck, so records from two terms can be compared side by side. The
+    // open labels survive rotation.
+    var openSemesters by rememberSaveable(
+        stateSaver = listSaver(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf(setOf<String>()) }
+    // Which semester is folding right now, and a counter that ticks once per
+    // fold. Only the blocks *below* the folding one rebound: they are the ones
+    // the collapse drags upwards. Expanding leaves them alone — a block hopping
+    // around while a deck opens above it would only get in the way.
+    var foldingLabel by remember { mutableStateOf<String?>(null) }
+    var foldTick by remember { mutableStateOf(0) }
+    LaunchedEffect(foldingLabel) {
+        if (foldingLabel != null) {
+            // Long enough for the collapse *and* the rebound to finish, so the
+            // hop is never cut in half by this label going back to null.
+            delay(SemesterReboundMillis.toLong() + 80)
+            foldingLabel = null
+        }
+    }
+    val foldingIndex = groups.indexOfFirst { it.label == foldingLabel }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
@@ -763,41 +873,101 @@ private fun RecordsTab(
                 EmptyHint(message = "还没有预约记录。")
             }
         }
-        groups.forEach { group ->
+        groups.forEachIndexed { index, group ->
+            val open = group.label in openSemesters
+            val ridesUp = foldingIndex >= 0 && index > foldingIndex
             item(key = "semester|${group.label}") {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = group.label,
-                            style = MiuixTheme.textStyles.title4,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "${group.records.size} 场",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "已使用时长 ${group.totalMinutes} 分钟 · 抵消 " +
-                            "${offsetKm(group.totalMinutes)} 公里",
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                // The hop past the landing spot. Layout handles the travel (the
+                // block simply follows the shrinking deck), this only adds the
+                // bounce on top, which is why the upward overshoot is actually
+                // visible here instead of being swallowed by a retargeted
+                // placement animation.
+                val rebound = remember { Animatable(0f) }
+                val lift = with(LocalDensity.current) { SemesterReboundLift.toPx() }
+                LaunchedEffect(foldTick) {
+                    if (foldTick == 0) return@LaunchedEffect
+                    rebound.snapTo(0f)
+                    if (!ridesUp) return@LaunchedEffect
+                    delay(SemesterReboundLeadMillis.toLong())
+                    rebound.animateTo(
+                        targetValue = -lift,
+                        animationSpec = tween(
+                            durationMillis = SemesterReboundRiseMillis,
+                            easing = FastOutSlowInEasing,
+                        ),
+                    )
+                    rebound.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(
+                            durationMillis = SemesterReboundFallMillis,
+                            easing = SemesterReboundFallEasing,
+                        ),
                     )
                 }
-            }
-            items(
-                group.records,
-                key = { it.recordId ?: "${it.wid}|${it.dateRaw}|${it.slot}" },
-            ) { record ->
-                RecordCard(
-                    record = record,
-                    cancelling = ui.cancellingWid == record.wid,
-                    onCancel = { onCancel(record) },
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset(0, rebound.value.roundToInt()) },
+                ) {
+                    SemesterHeader(
+                        group = group,
+                        expanded = open,
+                        onClick = {
+                            if (open) {
+                                openSemesters = openSemesters - group.label
+                                foldingLabel = group.label
+                                foldTick++
+                            } else {
+                                openSemesters = openSemesters + group.label
+                            }
+                        },
+                    )
+                    // The deck unfolds from under the header: the container
+                    // gains height while the cards cascade in one after the
+                    // other, top to bottom.
+                    AnimatedVisibility(
+                        visible = open,
+                        enter = expandVertically(
+                            animationSpec = tween(
+                                durationMillis = SemesterExpandMillis,
+                                easing = SemesterDeckEasing,
+                            ),
+                            expandFrom = Alignment.Top,
+                        ),
+                        // No delay on the way back: a fold must free the space
+                        // immediately, so whatever sits below starts rising on
+                        // the same frame as the tap.
+                        exit = shrinkVertically(
+                            animationSpec = tween(
+                                durationMillis = SemesterCollapseMillis,
+                                easing = SemesterDeckEasing,
+                            ),
+                            shrinkTowards = Alignment.Top,
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp),
+                            // Stacked: cards sit right under each other with a
+                            // hairline gap, so an open semester reads as a deck.
+                            verticalArrangement = Arrangement.spacedBy(SemesterCardGap),
+                        ) {
+                            group.records.forEachIndexed { index, record ->
+                                SemesterDeckCard(
+                                    index = index,
+                                    open = open,
+                                ) {
+                                    RecordCard(
+                                        record = record,
+                                        cancelling = ui.cancellingWid == record.wid,
+                                        onCancel = { onCancel(record) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -809,6 +979,109 @@ private data class SemesterGroup(
     val records: List<GymRecord>,
     val totalMinutes: Int,
 )
+
+/**
+ * One card of a semester deck.
+ *
+ * Opening: waits [index] beats, then fades in while growing from
+ * [SemesterCardInitialScale] to full size, so the deck lands top card first.
+ * Closing: no beats and no wait — every card leaves on the same frame, so the
+ * container can give its space back at once. The alpha/scale live on a graphics
+ * layer, so the stagger costs no layout and the cards never jitter each other.
+ */
+@Composable
+private fun SemesterDeckCard(
+    index: Int,
+    open: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(open) {
+        progress.animateTo(
+            targetValue = if (open) 1f else 0f,
+            animationSpec = if (open) {
+                tween(
+                    durationMillis = SemesterCardMillis,
+                    delayMillis = index * SemesterCardStaggerMillis,
+                    easing = SemesterDeckEasing,
+                )
+            } else {
+                tween(
+                    durationMillis = SemesterCardFoldMillis,
+                    easing = SemesterDeckEasing,
+                )
+            },
+        )
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val p = progress.value
+                alpha = p
+                val scale = SemesterCardInitialScale + (1f - SemesterCardInitialScale) * p
+                scaleX = scale
+                scaleY = scale
+            },
+    ) {
+        content()
+    }
+}
+
+/**
+ * Folded semester title: the tap target for the deck below it, carrying the
+ * count and the converted distance so a folded semester still reads at a glance.
+ */
+@Composable
+private fun SemesterHeader(
+    group: SemesterGroup,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    val chevron by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(durationMillis = SemesterChevronMillis),
+        label = "semesterChevron",
+    )
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = group.label,
+                    style = MiuixTheme.textStyles.title4,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "已使用时长 ${group.totalMinutes} 分钟 · 抵消 " +
+                        "${offsetKm(group.totalMinutes)} 公里",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "${group.records.size} 场",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowDown,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier
+                    .size(20.dp)
+                    .graphicsLayer { rotationZ = chevron },
+            )
+        }
+    }
+}
 
 private fun groupRecordsBySemester(records: List<GymRecord>): List<SemesterGroup> =
     records.groupBy { semesterLabel(it) }
@@ -1066,6 +1339,7 @@ private fun GymAuthRequiredScreen(
     onLogin: () -> Unit,
     onSsoLogin: () -> Unit,
     onBack: () -> Unit,
+    authError: String? = null,
 ) {
     WyuPageScaffold(
         progress = { 0f },
@@ -1134,7 +1408,9 @@ private fun GymAuthRequiredScreen(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             } else {
-                val loginError = ui.loginError
+                // A silent login failure is the reason this screen exists, so
+                // it has to say why instead of asking again out of nowhere.
+                val loginError = ui.loginError ?: authError
                 if (loginError != null) {
                     Spacer(Modifier.height(16.dp))
                     Text(

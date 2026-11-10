@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.wyutools.app.gym.GymSessionStore
 import com.wyutools.app.security.PasswordVault
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,9 @@ data class MeUiState(
     val loggingIn: Boolean = false,
     val autoLoggingIn: Boolean = false,
     val loginError: String? = null,
+    /** True after the user signed out on purpose; pages that would otherwise
+     *  wait for a silent login must ask for a login instead. */
+    val loggedOut: Boolean = false,
     val loginSuccessCount: Int = 0,
     val loggingOut: Boolean = false,
     val captcha: SliderChallenge? = null,
@@ -58,6 +62,41 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     val savedPassword: String
         get() = PasswordVault.load(getApplication(), KEY_PASSWORD)
+
+    /** The device remembers an account, so a missing session alone is not a
+     *  reason to ask for credentials — a silent attempt gets to try first. */
+    val hasSavedAccount: Boolean
+        get() = savedUsername.isNotEmpty()
+
+    /**
+     * Signs back in without user input. Pages that sit behind the SSO session
+     * (gym, schedule) call this while the account is remembered but the session
+     * has not come up yet, so opening them right after a cold start does not
+     * flash a "please log in" prompt at a user who never signed out. A failure
+     * lands in [MeUiState.loginError], and that is the only state that may ask
+     * for a real login.
+     */
+    fun trySilentLogin() {
+        val current = _ui.value
+        if (current.restoring || current.loggedIn || current.loggingIn ||
+            current.autoLoggingIn || current.loggingOut || current.loggedOut ||
+            current.captcha != null
+        ) {
+            return
+        }
+        if (autoLoginJob?.isActive == true) return
+        val username = savedUsername
+        val password = savedPassword
+        if (username.isEmpty() || password.isEmpty() || autoLoginAttempted) {
+            _ui.update {
+                it.copy(loginError = it.loginError ?: "请重新登录统一身份认证。")
+            }
+            return
+        }
+        autoLoginAttempted = true
+        _ui.update { it.copy(autoLoggingIn = true, loginError = null) }
+        autoLoginJob = viewModelScope.launch { performAutoLogin(username, password) }
+    }
 
     init {
         restoreSession()
@@ -218,7 +257,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             api.logout()
             clearLocalSession()
-            _ui.value = MeUiState(restoring = false, notice = "已退出登录。")
+            // The gym session is a copy of the cookie just thrown away, so it
+            // has to go too — otherwise a restart restores a user from a dead
+            // session and the gym page never asks to log in again.
+            GymSessionStore.clear(getApplication())
+            _ui.value = MeUiState(restoring = false, loggedOut = true, notice = "已退出登录。")
         }
     }
 
@@ -309,6 +352,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     loggedIn = true,
                     loggingIn = false,
+                    autoLoggingIn = false,
+                    loggedOut = false,
                     loginError = null,
                     loginSuccessCount = it.loginSuccessCount + 1,
                     captcha = null,

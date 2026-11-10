@@ -33,12 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -96,6 +96,9 @@ fun SliderCaptchaDialog(
     var offset by remember(challenge) { mutableStateOf(0f) }
     var dragging by remember(challenge) { mutableStateOf(false) }
     val tracker = remember(challenge) { SliderDragTracker() }
+    // The handle is positioned in dp, but drag deltas arrive in pixels. Without
+    // this conversion the handle crawls at 1/density of the finger's speed.
+    val density = LocalDensity.current
 
     LaunchedEffect(error) {
         if (error != null) {
@@ -115,7 +118,8 @@ fun SliderCaptchaDialog(
                 },
                 onHorizontalDrag = { change, dragAmount ->
                     change.consume()
-                    val next = (offset + dragAmount).coerceIn(0f, MaxOffset)
+                    val deltaDp = with(density) { dragAmount.toDp().value }
+                    val next = (offset + deltaDp).coerceIn(0f, MaxOffset)
                     offset = next
                     tracker.sample(next.roundToInt(), System.currentTimeMillis())
                 },

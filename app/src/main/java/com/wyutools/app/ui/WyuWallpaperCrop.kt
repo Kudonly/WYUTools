@@ -231,7 +231,7 @@ fun WyuWallpaperCropDialog(
                         text = "取消",
                         style = TextStyle(fontSize = 16.sp, color = Color.White),
                         modifier = Modifier
-                            .clickable(onClick = onCancel)
+                            .clickable(onClick = hapticClick(action = onCancel))
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                     )
                     Spacer(Modifier.weight(1f))

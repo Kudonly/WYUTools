@@ -13,6 +13,7 @@ data class ReleaseInfo(
     val tag: String,
     val name: String,
     val notes: String,
+    /** APK 直链（Release 资产的 browser_download_url）；没有 apk 资产时回退到发布页。 */
     val url: String,
 )
 
@@ -62,12 +63,16 @@ object UpdateChecker {
                     return@withContext UpdateResult.Failed("更新信息缺少版本号。")
                 }
                 val version = tag.removePrefix("v").removePrefix("V")
+                val page = root.optString("html_url").trim().ifEmpty { RELEASES_PAGE }
                 val release = ReleaseInfo(
                     version = version,
                     tag = tag,
                     name = root.optString("name").trim().ifEmpty { tag },
                     notes = root.optString("body").trim(),
-                    url = root.optString("html_url").trim().ifEmpty { RELEASES_PAGE },
+                    // Hand the browser the asset itself instead of the release
+                    // page: "前往下载" then starts the download straight away
+                    // and nobody has to hunt for the apk in the asset list.
+                    url = pickApkDownloadUrl(root, page),
                 )
                 if (compareVersions(version, currentVersion) > 0) {
                     UpdateResult.Available(release)
@@ -80,6 +85,25 @@ object UpdateChecker {
         } catch (error: Exception) {
             UpdateResult.Failed("检查更新失败，请稍后重试。")
         }
+    }
+
+    /**
+     * Release 里的 apk 资产直链。优先名字带 release 的正式包，跳过 debug 包；
+     * 只有 debug 包时也退而取它，一个 apk 都没有才回落到发布页。
+     */
+    private fun pickApkDownloadUrl(root: JSONObject, fallback: String): String {
+        val assets = root.optJSONArray("assets") ?: return fallback
+        var anyApk: String? = null
+        for (index in 0 until assets.length()) {
+            val asset = assets.optJSONObject(index) ?: continue
+            val fileName = asset.optString("name").trim().lowercase()
+            val downloadUrl = asset.optString("browser_download_url").trim()
+            if (downloadUrl.isEmpty() || !fileName.endsWith(".apk")) continue
+            if ("debug" in fileName) continue
+            if (anyApk == null) anyApk = downloadUrl
+            if ("release" in fileName) return downloadUrl
+        }
+        return anyApk ?: fallback
     }
 
     private fun compareVersions(latest: String, current: String): Int {

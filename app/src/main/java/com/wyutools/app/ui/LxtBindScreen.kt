@@ -38,7 +38,6 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private val LevelTitles = listOf("选择校区", "选择楼栋", "选择楼层", "选择宿舍")
@@ -184,7 +183,7 @@ fun LxtBindScreen(
                                                 )
                                             }
                                         },
-                                        onClick = { vm.chooseBindItem(node) },
+                                        onClick = hapticClick { vm.chooseBindItem(node) },
                                     )
                                 }
                             }

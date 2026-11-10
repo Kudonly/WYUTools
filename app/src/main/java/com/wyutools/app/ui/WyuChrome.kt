@@ -1,7 +1,9 @@
 package com.wyutools.app.ui
 
+import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
+import android.view.RoundedCorner
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -1302,8 +1304,42 @@ val WyuTabEasing = CubicBezierEasing(0.25f, 0f, 0.02f, 1f)
 const val WyuNavParentShiftFraction = 0.06f
 const val WyuNavParentScale = 0.94f
 
-/** Corner radius the moving sheet wears while it travels. */
-private val WyuNavPageCorner = 48.dp
+/** Corner used when the display does not report a physical radius. */
+private val WyuNavPageCornerFallback = 48.dp
+
+/**
+ * Corner radius the moving sheet wears while it travels.
+ *
+ * Taken from the display itself, so the travelling page has the same curve as
+ * the phone's own glass: on a body with tighter or rounder corners the sheet
+ * now lands flush instead of guessing a fixed 48dp (which showed a wedge of
+ * wallpaper in the corners on devices with a smaller radius).
+ */
+@Composable
+private fun rememberWyuNavPageCorner(): Dp {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    return remember(view, density) {
+        val radiusPx = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            0
+        } else {
+            runCatching {
+                val display = view.display
+                if (display == null) {
+                    0
+                } else {
+                    intArrayOf(
+                        RoundedCorner.POSITION_TOP_LEFT,
+                        RoundedCorner.POSITION_TOP_RIGHT,
+                        RoundedCorner.POSITION_BOTTOM_LEFT,
+                        RoundedCorner.POSITION_BOTTOM_RIGHT,
+                    ).maxOfOrNull { display.getRoundedCorner(it)?.radius ?: 0 } ?: 0
+                }
+            }.getOrDefault(0)
+        }
+        if (radiusPx > 0) with(density) { radiusPx.toDp() } else WyuNavPageCornerFallback
+    }
+}
 
 /** Black scrim laid over the page underneath a pushed page. */
 const val WyuPageCoveredScrim = 0.40f
@@ -1333,11 +1369,12 @@ fun WyuPageEffects(
     startDimmed: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val corner = remember {
-        Animatable(if (startSharp) 0f else WyuNavPageCorner.value)
+    val pageCorner = rememberWyuNavPageCorner()
+    val corner = remember(pageCorner) {
+        Animatable(if (startSharp) 0f else pageCorner.value)
     }
     val dim = remember { Animatable(if (startDimmed) WyuPageCoveredScrim else 0f) }
-    LaunchedEffect(active, covered, leaving) {
+    LaunchedEffect(active, covered, leaving, pageCorner) {
         launch {
             dim.animateTo(
                 targetValue = if (covered) WyuPageCoveredScrim else 0f,
@@ -1351,7 +1388,7 @@ fun WyuPageEffects(
             // Detaching for a pop: the sheet picks its card corners back up
             // as it starts to move.
             leaving -> corner.animateTo(
-                targetValue = WyuNavPageCorner.value,
+                targetValue = pageCorner.value,
                 animationSpec = tween(WyuNavExitMillis / 2, easing = WyuNavEasing),
             )
             // Landing from a push: hold the corners through the travel and

@@ -367,6 +367,7 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun clearStoredSession() {
+        GymSessionStore.clear(getApplication())
         prefs.edit().remove("cookie").remove("name").remove("account").apply()
     }
 

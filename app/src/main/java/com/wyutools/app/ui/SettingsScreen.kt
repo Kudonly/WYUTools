@@ -554,7 +554,7 @@ private fun ThemeModeChip(
             .selectable(
                 selected = selected,
                 role = Role.RadioButton,
-                onClick = onClick,
+                onClick = hapticClick(enabled = !selected, action = onClick),
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -719,6 +719,7 @@ private fun WallpaperTile(
         animationSpec = tween(180),
         label = "wallpaperLabel",
     )
+    val tap = hapticClick(enabled = !selected) { onClick() }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -729,12 +730,12 @@ private fun WallpaperTile(
                     Modifier.selectable(
                         selected = selected,
                         role = role,
-                        onClick = onClick,
+                        onClick = tap,
                     )
                 } else {
                     Modifier.clickable(
                         role = role,
-                        onClick = onClick,
+                        onClick = tap,
                     )
                 },
             )

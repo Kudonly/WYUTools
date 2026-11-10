@@ -27,6 +27,8 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardColors
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
 import top.yukonga.miuix.kmp.basic.TextFieldColors
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
@@ -195,6 +197,9 @@ fun Card(
         else -> Color.White.copy(alpha = tuning.cardTintAlphaLight)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    // Cards stay silent on purpose: they are large surfaces (tool tiles,
+    // semester headers, list rows) where a tick reads as noise. Only real
+    // buttons answer with a haptic.
     MiuixCard(
         modifier = when {
             glass == null -> modifier
@@ -246,7 +251,11 @@ fun Card(
         pressFeedbackType = pressFeedbackType,
         showIndication = showIndication,
         holdDownState = holdDownState,
-        onClick = onClick,
+        onClick = if (onClick != null) {
+            { onClick.invoke() }
+        } else {
+            null
+        },
         onLongPress = onLongPress,
         content = content,
     )
@@ -267,8 +276,11 @@ fun Button(
     val glass = LocalWyuGlassBackdrop.current
     val useGlass = glass != null && colors.color.alpha > 0.01f
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    // Every button in the app is one of these, so the tap tick lives here
+    // instead of at each call site.
+    val tap = hapticClick(enabled) { onClick() }
     MiuixButton(
-        onClick = onClick,
+        onClick = tap,
         modifier = if (useGlass) {
             modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = ButtonBlurRadius)
         } else {
@@ -280,6 +292,41 @@ fun Button(
         minHeight = minHeight,
         colors = if (useGlass) colors.frosted(ButtonGlassAlpha) else colors,
         insideMargin = insideMargin,
+        content = content,
+    )
+}
+
+/**
+ * Text-only button, same tick as [Button]. Declared here (instead of importing
+ * the Miuix one at every call site) so no click path can skip the haptic.
+ */
+@Composable
+fun TextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    MiuixTextButton(
+        text = text,
+        onClick = hapticClick(enabled, onClick),
+        modifier = modifier,
+        enabled = enabled,
+    )
+}
+
+/** Icon-only button, same tick as [Button]. */
+@Composable
+fun IconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    MiuixIconButton(
+        onClick = hapticClick(enabled, onClick),
+        modifier = modifier,
+        enabled = enabled,
         content = content,
     )
 }

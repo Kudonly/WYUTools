@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,10 +63,8 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.Locale
@@ -210,6 +209,10 @@ fun LxtScreen(
 @Composable
 private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
     var passwordVisible by remember { mutableStateOf(false) }
+    val rememberToggle = hapticClick(enabled = !ui.loginBusy) {
+        vm.setRememberPassword(!ui.rememberPassword)
+    }
+    val reloadCaptcha = hapticClick { vm.loadCaptcha() }
     Card(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
@@ -275,8 +278,12 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !ui.loginBusy) {
-                    vm.setRememberPassword(!ui.rememberPassword)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = !ui.loginBusy,
+                ) {
+                    rememberToggle()
                 }
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +317,7 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
                         color = MiuixTheme.colorScheme.outline.copy(alpha = 0.4f),
                         shape = RoundedCornerShape(10.dp),
                     )
-                    .clickable(onClick = vm::loadCaptcha),
+                    .clickable(onClick = reloadCaptcha),
                 contentAlignment = Alignment.Center,
             ) {
                 when {

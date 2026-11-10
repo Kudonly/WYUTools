@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,7 +48,6 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -67,6 +67,9 @@ fun AuthLoginScreen(vm: AuthViewModel, onBack: () -> Unit) {
     val toggleRememberPassword: (Boolean) -> Unit = { checked ->
         rememberPassword = checked
         vm.setRememberPasswordOption(checked)
+    }
+    val rememberToggle = hapticClick(enabled = !ui.loggingIn) {
+        toggleRememberPassword(!rememberPassword)
     }
 
     val baselineSuccessCount = remember { ui.loginSuccessCount }
@@ -193,7 +196,11 @@ fun AuthLoginScreen(vm: AuthViewModel, onBack: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(role = Role.Checkbox) { toggleRememberPassword(!rememberPassword) }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Checkbox,
+                    ) { rememberToggle() }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

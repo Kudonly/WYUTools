@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -79,7 +81,6 @@ import com.wyutools.app.schedule.ScheduleUiState
 import com.wyutools.app.schedule.ScheduleViewModel
 import com.wyutools.app.schedule.scheduleWeekdayLabels
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
@@ -100,7 +101,10 @@ import kotlin.math.roundToInt
 private val ScheduleTabTitles = listOf("壹日", "邑周")
 private val ScheduleTabsAreaHeight = 50.dp
 private val ScheduleContentTopSpacer = WyuLargeTitleHeight + ScheduleTabsAreaHeight - 6.dp
-private val ScheduleWeekHeaderHeight = 118.dp
+// Slider (30) + 2 + weekday row (36) + breathing room above the track (4) + 6dp
+// inside margins: the week number moved into the axis column, so the header no
+// longer needs a title row.
+private val ScheduleWeekHeaderHeight = 84.dp
 private val ScheduleWeeklyTopSpacer =
     ScheduleContentTopSpacer + ScheduleWeekHeaderHeight + 16.dp
 private val ScheduleWeekRowHeight = 64.dp
@@ -157,6 +161,8 @@ fun ScheduleScreen(
 
     val data = ui.data
     when {
+        // Cached timetable wins over everything: a missing session must never
+        // replace data that is already on this device with a login prompt.
         data != null -> ScheduleContent(
             vm = vm,
             ui = ui,
@@ -166,7 +172,10 @@ fun ScheduleScreen(
             onLogin = onLogin,
         )
 
-        authUi.restoring -> ScheduleLoadingScreen(onBack = onBack)
+        // A silent re-login is still running; ask for a login only once it has
+        // actually failed.
+        authUi.restoring || authUi.autoLoggingIn || authUi.loggingOut ->
+            ScheduleLoadingScreen(onBack = onBack)
 
         !authUi.loggedIn -> ScheduleLoginScreen(
             error = ui.error,
@@ -413,52 +422,11 @@ private fun ScheduleWeekHeader(
         modifier = Modifier
             .fillMaxWidth()
             .height(ScheduleWeekHeaderHeight),
-        insideMargin = PaddingValues(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
+        insideMargin = PaddingValues(start = 10.dp, top = 6.dp, end = 12.dp, bottom = 6.dp),
         samplePageContent = true,
     ) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(30.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "第 ${selectedWeek} 周",
-                    style = MiuixTheme.textStyles.headline2,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (selectedWeek == currentWeek) {
-                    Spacer(Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(MiuixTheme.colorScheme.primaryContainer)
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = "本周",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                if (selectedWeek != currentWeek) {
-                    Button(
-                        onClick = { onSelectWeek(currentWeek) },
-                        minWidth = 0.dp,
-                        minHeight = 28.dp,
-                        cornerRadius = 14.dp,
-                        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
-                    ) {
-                        Text(
-                            text = "回到本周",
-                            style = MiuixTheme.textStyles.footnote2,
-                        )
-                    }
-                }
-            }
+            Spacer(Modifier.height(4.dp))
             Slider(
                 value = selectedWeek.toFloat(),
                 onValueChange = { value ->
@@ -476,8 +444,11 @@ private fun ScheduleWeekHeader(
                     onSelectWeek(week)
                 },
                 valueRange = 1f..data.maxWeek.toFloat(),
+                // Inset the track from the card's rounded ends so the thumb
+                // does not ride into the corner radius.
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 6.dp)
                     .height(30.dp),
             )
             Spacer(Modifier.height(2.dp))
@@ -487,7 +458,11 @@ private fun ScheduleWeekHeader(
                     .height(ScheduleWeekdayHeaderHeight),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(Modifier.width(ScheduleAxisWidth))
+                ScheduleWeekAxisCell(
+                    week = selectedWeek,
+                    isCurrentWeek = selectedWeek == currentWeek,
+                    onReturnToCurrentWeek = { onSelectWeek(currentWeek) },
+                )
                 for (day in 1..dayCount) {
                     ScheduleWeekdayHeaderCell(
                         day = day,
@@ -497,6 +472,65 @@ private fun ScheduleWeekHeader(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Week number and the way back to it, sitting in the axis column to the left of
+ * the dates: N周 on top, 本周 (already there) or a tappable 返回本周 under it.
+ * The label is allowed to spill past the narrow axis column: "返回本周" is four
+ * glyphs wide and clipping it made the last character unreadable.
+ */
+@Composable
+private fun ScheduleWeekAxisCell(
+    week: Int,
+    isCurrentWeek: Boolean,
+    onReturnToCurrentWeek: () -> Unit,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val returnTap = hapticClick(action = onReturnToCurrentWeek)
+    Column(
+        modifier = Modifier
+            .width(ScheduleAxisWidth)
+            .then(
+                if (isCurrentWeek) {
+                    Modifier
+                } else {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = returnTap,
+                    )
+                },
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "${week}周",
+            style = TextStyle(fontSize = 12.sp, lineHeight = 15.sp),
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            color = if (isCurrentWeek) primary else MiuixTheme.colorScheme.onSurface,
+        )
+        if (isCurrentWeek) {
+            Text(
+                text = "本周",
+                style = TextStyle(fontSize = 9.sp, lineHeight = 11.sp),
+                color = primary,
+            )
+        } else {
+            Text(
+                text = "返回本周",
+                style = TextStyle(fontSize = 9.sp, lineHeight = 11.sp),
+                color = primary,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Visible,
+                modifier = Modifier
+                    .wrapContentWidth(unbounded = true, align = Alignment.CenterHorizontally),
+            )
         }
     }
 }
