@@ -2,11 +2,9 @@ package com.wyutools.app.ui
 
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Easing
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -43,6 +41,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,14 +69,15 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -90,9 +90,12 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -109,11 +112,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -128,9 +133,6 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-/** DecelerateInterpolator, matching the clock's fixed 350 ms page switch. */
-val WyuDecelerateEasing = Easing { t -> 1f - (1f - t) * (1f - t) }
 
 val WyuNavigatorBarHeight: Dp = 58.dp
 
@@ -236,8 +238,131 @@ fun WyuPageScaffold(
     } else {
         null
     }
-    val customBrightness by WyuAppearance.customBrightness.collectAsState()
-    val customDim = wyuCustomWallpaperDim(customBrightness, dark)
+    val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
+    val brightnessDark by WyuAppearance.customBrightnessDark.collectAsState()
+    val customDim = wyuCustomWallpaperDim(if (dark) brightnessDark else brightnessLight)
+    val softGlassEnabled by WyuAppearance.softGlass.collectAsState()
+    val softGlassPercent by WyuAppearance.softGlassBlur.collectAsState()
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val windowSize = LocalWindowInfo.current.containerSize
+    // Seed with the window size so the first glass frame can be composed
+    // without waiting for layout; onGloballyPositioned corrects it if needed.
+    val pageBounds = remember(configuration, density) {
+        val w = if (windowSize.width > 0) {
+            windowSize.width
+        } else {
+            (configuration.screenWidthDp * density.density).roundToInt()
+        }
+        val h = if (windowSize.height > 0) {
+            windowSize.height
+        } else {
+            (configuration.screenHeightDp * density.density).roundToInt()
+        }
+        mutableStateOf(
+            if (w > 0 && h > 0) Rect(Offset.Zero, Size(w.toFloat(), h.toFloat())) else null,
+        )
+    }
+    // Cards draw the soft glass straight from this pre-blurred wallpaper copy;
+    // only the bars, tiny buttons and the week header keep live backdrops.
+    val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
+    val bounds = pageBounds.value
+    val glassUnderlay = if (softGlassEnabled && customWallpaper != null && bounds != null) {
+        val current = glassUnderlayState.value
+        if (current == null || current.source !== customWallpaper) {
+            // The first frame of a scaffold must already show the static
+            // material; deferring it would draw live blur first and swap,
+            // which reads as a blur flash. The cache makes this a cheap hit
+            // for every scaffold after the first.
+            wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = wyuSoftGlassScreenBlurPx(softGlassPercent),
+                widthPx = bounds.width.roundToInt(),
+                heightPx = bounds.height.roundToInt(),
+                origin = bounds.topLeft,
+            ).also { glassUnderlayState.value = it }
+        } else {
+            current
+        }
+    } else {
+        null
+    }
+    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, softGlassPercent, bounds) {
+        if (!softGlassEnabled || customWallpaper == null) {
+            glassUnderlayState.value = null
+            return@LaunchedEffect
+        }
+        val b = bounds ?: return@LaunchedEffect
+        val w = b.width.roundToInt()
+        val h = b.height.roundToInt()
+        val sigma = wyuSoftGlassScreenBlurPx(softGlassPercent)
+        val current = glassUnderlayState.value
+        if (current != null && current.matches(customWallpaper, customDim, sigma, w, h)) {
+            return@LaunchedEffect
+        }
+        // Coalesce slider drags; the previous underlay stays on screen until
+        // the new one is ready.
+        delay(120)
+        glassUnderlayState.value = withContext(Dispatchers.Default) {
+            wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = sigma,
+                widthPx = w,
+                heightPx = h,
+                origin = b.topLeft,
+            )
+        }
+    }
+    // Soft glass off falls back to a Gaussian blur of the same static
+    // wallpaper; bake it once per wallpaper/dim instead of replaying the live
+    // textureBlur pipeline for every card on every frame.
+    val gaussianSigmaPx = remember(density) { wyuGaussianSigmaPx(CardBlurRadius, density.density) }
+    val gaussianUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
+    val gaussianUnderlay = if (!softGlassEnabled && customWallpaper != null && bounds != null) {
+        val current = gaussianUnderlayState.value
+        if (current == null || current.source !== customWallpaper) {
+            wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = gaussianSigmaPx,
+                widthPx = bounds.width.roundToInt(),
+                heightPx = bounds.height.roundToInt(),
+                origin = bounds.topLeft,
+            ).also { gaussianUnderlayState.value = it }
+        } else {
+            current
+        }
+    } else {
+        null
+    }
+    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, gaussianSigmaPx, bounds) {
+        if (softGlassEnabled || customWallpaper == null) {
+            gaussianUnderlayState.value = null
+            return@LaunchedEffect
+        }
+        val b = bounds ?: return@LaunchedEffect
+        val w = b.width.roundToInt()
+        val h = b.height.roundToInt()
+        val current = gaussianUnderlayState.value
+        if (current != null &&
+            current.matches(customWallpaper, customDim, gaussianSigmaPx, w, h)
+        ) {
+            return@LaunchedEffect
+        }
+        delay(120)
+        gaussianUnderlayState.value = withContext(Dispatchers.Default) {
+            wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = gaussianSigmaPx,
+                widthPx = w,
+                heightPx = h,
+                origin = b.topLeft,
+            )
+        }
+    }
     val blurSupported = remember { isRuntimeShaderSupported() }
     val backdrop = if (blurSupported) {
         rememberLayerBackdrop {
@@ -264,8 +389,6 @@ fun WyuPageScaffold(
     }
     val currentProgress = rememberUpdatedState(progress)
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
     val stretchRangePx = with(density) { configuration.screenHeightDp.dp.toPx() }
     val collapseRangePx = with(density) { 64.dp.toPx() }
     val pull = remember(stretchRangePx, collapseRangePx, scope) {
@@ -279,6 +402,16 @@ fun WyuPageScaffold(
     Box(
         Modifier
             .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                val next = Rect(
+                    coordinates.positionInRoot(),
+                    Size(
+                        coordinates.size.width.toFloat(),
+                        coordinates.size.height.toFloat(),
+                    ),
+                )
+                if (pageBounds.value != next) pageBounds.value = next
+            }
             .then(
                 when {
                     pageBrush != null -> Modifier.background(pageBrush)
@@ -297,6 +430,8 @@ fun WyuPageScaffold(
             LocalOverscrollFactory provides WyuNoOpOverscrollFactory,
             LocalWyuPageBackdrop provides backdrop,
             LocalWyuGlassBackdrop provides glassBackdrop,
+            LocalWyuGlassUnderlay provides glassUnderlay,
+            LocalWyuGaussianUnderlay provides gaussianUnderlay,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
@@ -414,6 +549,8 @@ fun WyuActionBar(
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     floatingAction: (@Composable () -> Unit)? = null,
+    altTitle: String? = null,
+    altFraction: () -> Float = { 0f },
 ) {
     val onSurface = MiuixTheme.colorScheme.onSurface
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -463,14 +600,15 @@ fun WyuActionBar(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                        Crossfade(
-                            targetState = title,
-                            animationSpec = tween(180),
-                            label = "wyuCollapsedTitle",
-                            modifier = Modifier.graphicsLayer {
+                        WyuSwitchingTitle(
+                            primary = title,
+                            secondary = altTitle,
+                            fraction = altFraction,
+                            style = collapsedStyle,
+                            baseAlpha = {
                                 // Read at draw time: the host subcomposition can miss this
                                 // state change, but layer invalidation never does.
-                                alpha = if (WyuMorphPageState.titleHidden) {
+                                if (WyuMorphPageState.titleHidden) {
                                     0f
                                 } else if (largeTitle) {
                                     effectiveFraction()
@@ -478,14 +616,7 @@ fun WyuActionBar(
                                     1f
                                 }
                             },
-                        ) { current ->
-                            Text(
-                                text = current,
-                                style = collapsedStyle,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                        )
                     }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -500,23 +631,18 @@ fun WyuActionBar(
                             .height(WyuLargeTitleHeight)
                             .padding(start = 28.dp, end = 24.dp),
                     ) {
-                        Crossfade(
-                            targetState = title,
-                            animationSpec = tween(180),
-                            label = "wyuLargeTitle",
-                            modifier = Modifier.graphicsLayer {
-                                val fraction = effectiveFraction()
-                                alpha = if (WyuMorphPageState.titleHidden) 0f else 1f - fraction
-                                translationY = -fraction * 10.dp.toPx()
+                        WyuSwitchingTitle(
+                            primary = title,
+                            secondary = altTitle,
+                            fraction = altFraction,
+                            style = largeStyle,
+                            baseAlpha = {
+                                if (WyuMorphPageState.titleHidden) 0f else 1f - effectiveFraction()
                             },
-                        ) { current ->
-                            Text(
-                                text = current,
-                                style = largeStyle,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                            modifier = Modifier.graphicsLayer {
+                                translationY = -effectiveFraction() * 10.dp.toPx()
+                            },
+                        )
                     }
                 }
             }
@@ -537,6 +663,54 @@ fun WyuActionBar(
                     floatingAction()
                 }
             }
+        }
+    }
+}
+
+// Cross-fades the two page titles as the pager moves, blurring each side as
+// it leaves the centre so the swap reads as a soft gradient instead of a cut.
+@Composable
+private fun WyuSwitchingTitle(
+    primary: String,
+    secondary: String?,
+    fraction: () -> Float,
+    style: TextStyle,
+    baseAlpha: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    val blurPx = with(LocalDensity.current) { 10.dp.toPx() }
+    Box(modifier) {
+        Text(
+            text = primary,
+            style = style,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.graphicsLayer {
+                val f = if (secondary == null) 0f else fraction().coerceIn(0f, 1f)
+                alpha = baseAlpha() * (1f - f)
+                renderEffect = if (f > 0.01f && f < 0.99f) {
+                    BlurEffect(f * blurPx, f * blurPx)
+                } else {
+                    null
+                }
+            },
+        )
+        if (secondary != null) {
+            Text(
+                text = secondary,
+                style = style,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer {
+                    val f = fraction().coerceIn(0f, 1f)
+                    alpha = baseAlpha() * f
+                    renderEffect = if (f > 0.01f && f < 0.99f) {
+                        BlurEffect((1f - f) * blurPx, (1f - f) * blurPx)
+                    } else {
+                        null
+                    }
+                },
+            )
         }
     }
 }
@@ -570,6 +744,7 @@ private fun WyuTopBarGlassButton(
     val backdrop = LocalWyuPageBackdrop.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
     val useSoftGlass = softGlass && wyuSoftGlassSupported
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
@@ -626,7 +801,12 @@ private fun WyuTopBarGlassButton(
                             },
                             refractionThicknessPx = TopBarGlassRefractionPx,
                             reflectionThicknessPx = TopBarGlassReflectionPx,
-                            bgSaturation = softGlassBgSaturation(dark),
+                            shapeEdgePx = softGlassTuning.shapeEdgePx,
+                            shapeEdgePow = softGlassTuning.shapeEdgePow,
+                            reflectionLighten = softGlassTuning.reflectLighten,
+                            bgSaturation = softGlassTuning.saturation(dark),
+                            reflectionStrength = softGlassTuning.reflectionStrength,
+                            refractionIor = softGlassTuning.refractionIor,
                         )
 
                         else -> Modifier.textureBlur(
@@ -768,6 +948,7 @@ fun WyuFloatingTabs(
     val glass = backdrop != null
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
     val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val containerColor = if (dark) {
         Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
@@ -815,7 +996,10 @@ fun WyuFloatingTabs(
                         shapeEdgePx = TabsGlassEdgePx,
                         shapeEdgePow = TabsGlassEdgePow,
                         refractionThicknessPx = TabsGlassRefractionPx,
-                        bgSaturation = softGlassBgSaturation(dark),
+                        reflectionLighten = softGlassTuning.reflectLighten,
+                        bgSaturation = softGlassTuning.saturation(dark),
+                        reflectionStrength = softGlassTuning.reflectionStrength,
+                        refractionIor = softGlassTuning.refractionIor,
                     )
 
                     else -> Modifier.textureBlur(
@@ -1030,44 +1214,163 @@ fun WyuFloatingTabs(
     }
 }
 
-@Composable
+/**
+ * Page transition timings: the pushed page is a full-width sheet that slides
+ * in from the right over 400ms while the page underneath is nudged left and
+ * pressed down a touch; a pop slides the sheet back out, pushing the revealed
+ * page right as it lifts back up and brightens.
+ */
+const val WyuNavEnterMillis = 400
+const val WyuNavExitMillis = 400
+
+/**
+ * Accelerate-then-decelerate ease-in-out with a slightly longer deceleration
+ * tail: cubic-bezier(0.4, 0, 0.1, 1). Zero velocity at both ends; the peak
+ * arrives at ~27% of the duration, so the slowdown half is longer and both
+ * velocity ramps are steeper than the Material standard curve.
+ */
+val WyuNavEasing = CubicBezierEasing(0.4f, 0f, 0.1f, 1f)
+
+/**
+ * Tab pager slide easing: same accelerate-then-decelerate shape as
+ * [WyuNavEasing] but with a steeper ramp-in and a tighter stop,
+ * cubic-bezier(0.25, 0, 0.02, 1) — peak speed arrives at ~15% of the
+ * duration and the long tail is pure deceleration.
+ */
+val WyuTabEasing = CubicBezierEasing(0.25f, 0f, 0.02f, 1f)
+
+/** How the covered page recedes under a push. */
+const val WyuNavParentShiftFraction = 0.06f
+const val WyuNavParentScale = 0.94f
+
+/** Corner radius the moving sheet wears while it travels. */
+private val WyuNavPageCorner = 48.dp
+
+/** Black scrim laid over the page underneath a pushed page. */
+const val WyuPageCoveredScrim = 0.40f
+const val WyuPageDimInMillis = 400
+const val WyuPageDimOutMillis = 400
+
+/**
+ * Hosts one navigation destination.
+ *
+ * A pushed page enters as a full-width sheet sliding in from the right,
+ * holding large corners while it travels and squaring off in the landing
+ * tail; the page underneath is nudged left, pressed down a touch and dims
+ * under a 40% scrim. A pop slides the sheet back out, pushing the revealed
+ * page right as it lifts back up, its dim scrim brightening away. All
+ * animated values are read in the draw phase, so a transition never
+ * recomposes page content. [startSharp] and [startDimmed] mark pages that
+ * appear without a slide (cold start, card morphs, or a page revealed by a
+ * pop), so they never flash rounded corners and a revealed page starts out
+ * dimmed like the page it was under.
+ */@Composable
 fun WyuPageEffects(
     modifier: Modifier = Modifier,
     active: Boolean = true,
-    startBlurred: Boolean = true,
+    covered: Boolean = false,
+    leaving: Boolean = false,
+    startSharp: Boolean = false,
+    startDimmed: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val blurRadius = remember { Animatable(if (startBlurred) 12f else 0f) }
-
-    LaunchedEffect(active) {
-        blurRadius.animateTo(
-            targetValue = if (active) 0f else 12f,
-            animationSpec = tween(
-                durationMillis = if (active) 300 else 220,
-                easing = FastOutSlowInEasing,
-            ),
-        )
+    val corner = remember {
+        Animatable(if (startSharp) 0f else WyuNavPageCorner.value)
     }
-
-    Box(modifier = modifier.fillMaxSize()) {
-        val radius = blurRadius.value
+    val dim = remember { Animatable(if (startDimmed) WyuPageCoveredScrim else 0f) }
+    LaunchedEffect(active, covered, leaving) {
+        launch {
+            dim.animateTo(
+                targetValue = if (covered) WyuPageCoveredScrim else 0f,
+                animationSpec = tween(
+                    durationMillis = if (covered) WyuPageDimInMillis else WyuPageDimOutMillis,
+                    easing = WyuNavEasing,
+                ),
+            )
+        }
+        when {
+            // Detaching for a pop: the sheet picks its card corners back up
+            // as it starts to move.
+            leaving -> corner.animateTo(
+                targetValue = WyuNavPageCorner.value,
+                animationSpec = tween(WyuNavExitMillis / 2, easing = WyuNavEasing),
+            )
+            // Landing from a push: hold the corners through the travel and
+            // melt them away only in the final approach.
+            active -> corner.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(
+                    durationMillis = WyuNavEnterMillis / 2,
+                    delayMillis = WyuNavEnterMillis / 2,
+                    easing = WyuNavEasing,
+                ),
+            )
+            // Covered pages keep a square shape: the page underneath never
+            // moves, so nothing should peek through its corners.
+            else -> corner.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(WyuNavEnterMillis / 2, easing = WyuNavEasing),
+            )
+        }
+    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val cornerPx = corner.value.dp.toPx()
+                shape = RoundedCornerShape(cornerPx)
+                clip = cornerPx > 0.5f
+            },
+    ) {
+        content()
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (radius > 0.05f) {
-                        Modifier.blur(
-                            radius = radius.dp,
-                            edgeTreatment = BlurredEdgeTreatment.Rectangle,
-                        )
-                    } else {
-                        Modifier
-                    },
-                ),
-        ) {
-            content()
-        }
+                .drawBehind {
+                    val alpha = dim.value
+                    if (alpha > 0.001f) {
+                        drawRect(Color.Black, alpha = alpha)
+                    }
+                },
+        )
     }
+}
+
+/**
+ * Paints the window behind the NavHost with the same wallpaper the pages use,
+ * so the sliver a page fades or slides over reads as the app's own background
+ * instead of the raw white or black window colour.
+ */
+@Composable
+fun WyuWindowBackdrop(modifier: Modifier = Modifier) {
+    val surface = MiuixTheme.colorScheme.surface
+    val wallpaper = LocalWyuWallpaper.current
+    val dark = LocalWyuDarkTheme.current
+    val wallpaperBrush = remember(wallpaper, dark, surface) {
+        wallpaper.background(dark, surface)
+    }
+    val customWallpaper = if (wallpaper == WyuWallpaper.Custom) {
+        LocalWyuCustomWallpaper.current
+    } else {
+        null
+    }
+    val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
+    val brightnessDark by WyuAppearance.customBrightnessDark.collectAsState()
+    val customDim = wyuCustomWallpaperDim(if (dark) brightnessDark else brightnessLight)
+    Box(
+        modifier
+            .fillMaxSize()
+            .then(
+                when {
+                    customWallpaper != null -> Modifier.drawBehind {
+                        drawWyuImageCover(customWallpaper, customDim)
+                    }
+
+                    wallpaperBrush != null -> Modifier.background(wallpaperBrush)
+                    else -> Modifier.background(surface)
+                },
+            ),
+    )
 }
 
 @Composable
@@ -1089,6 +1392,27 @@ fun rememberWyuCollapseFraction(listState: LazyListState): State<Float> {
                 (listState.firstVisibleItemScrollOffset / rangePx).coerceIn(0f, 1f)
             }
         }
+    }
+}
+
+/**
+ * Collapse fraction for a two-page pager whose pages each drive their own
+ * fraction: blends the two fractions by the pager's continuous position, so
+ * the top bar slides between the collapsed and expanded poses together with
+ * the pages instead of snapping when the current page flips mid-swipe.
+ */
+@Composable
+fun rememberWyuPagerCollapseFraction(
+    pagerState: PagerState,
+    firstFraction: State<Float>,
+    secondFraction: State<Float>,
+): State<Float> = remember(pagerState, firstFraction, secondFraction) {
+    derivedStateOf {
+        val position = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+            .coerceIn(0f, 1f)
+        val first = firstFraction.value
+        val second = secondFraction.value
+        first + (second - first) * position
     }
 }
 
@@ -1364,12 +1688,12 @@ fun WyuNavigatorBar(
                                 // The 2dp radius would otherwise stay at full resolution;
                                 // 1/2 linear keeps its variance while quartering the work.
                                 forceDownscaleExp(1)
-                                // Follow the soft-glass blur setting: the tuned 20%
-                                // default keeps today's 2dp radius and scales linearly
-                                // up to 10dp at 100%. With soft glass off the slider
-                                // is hidden, so the bar uses its full 100% radius.
-                                val blurPercent = if (softGlass) softGlassBlur else 100
-                                val blurRadius = 2.dp.toPx() * blurPercent / 20f
+                                // Match the card glass blur exactly so the bar and
+                                // cards stay in sync; with soft glass off the
+                                // slider is hidden, so use the full radius.
+                                val blurRadius = wyuSoftGlassScreenBlurPx(
+                                    if (softGlass) softGlassBlur else 100,
+                                )
                                 if (blurRadius > 0.5f) blur(blurRadius, blurRadius)
                                 lens(
                                     refractionHeight = 28.dp.toPx(),

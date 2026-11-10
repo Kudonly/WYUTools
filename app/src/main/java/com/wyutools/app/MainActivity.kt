@@ -13,16 +13,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,10 +31,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.zIndex
+import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -50,9 +55,19 @@ import com.wyutools.app.ui.LxtBindScreen
 import com.wyutools.app.ui.LxtScreen
 import com.wyutools.app.ui.ScheduleScreen
 import com.wyutools.app.ui.SettingsScreen
+import com.wyutools.app.ui.SoftGlassAdvancedScreen
 import com.wyutools.app.ui.WyuMorphPageState
+import com.wyutools.app.ui.WyuNavEasing
+import com.wyutools.app.ui.WyuNavEnterMillis
+import com.wyutools.app.ui.WyuNavExitMillis
+import com.wyutools.app.ui.WyuNavParentScale
+import com.wyutools.app.ui.WyuNavParentShiftFraction
+import com.wyutools.app.ui.WyuPageCoveredScrim
+import com.wyutools.app.ui.WyuPageDimInMillis
+import com.wyutools.app.ui.WyuPageDimOutMillis
 import com.wyutools.app.ui.WyuPageEffects
 import com.wyutools.app.ui.WyuLaunchSplash
+import com.wyutools.app.ui.WyuWindowBackdrop
 import com.wyutools.app.ui.capturePageBitmap
 import com.wyutools.app.ui.createBlurBackdrop
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +76,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 import kotlin.coroutines.resume
 
 class MainActivity : ComponentActivity() {
@@ -75,16 +91,24 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize()) {
                     val dark = LocalWyuDarkTheme.current
                     LaunchedEffect(dark) {
+                        // Android 15+ draws its own 90% white contrast scrim behind
+                        // the 3-button nav bar for auto styles. An explicit light
+                        // style registers transparent protections instead and turns
+                        // the system contrast off; icons are themed manually.
                         enableEdgeToEdge(
                             statusBarStyle = SystemBarStyle.auto(
                                 android.graphics.Color.TRANSPARENT,
                                 android.graphics.Color.TRANSPARENT,
                             ) { dark },
-                            navigationBarStyle = SystemBarStyle.auto(
-                                android.graphics.Color.argb(0xe6, 0xff, 0xff, 0xff),
-                                android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b),
-                            ) { dark },
+                            navigationBarStyle = SystemBarStyle.light(
+                                android.graphics.Color.TRANSPARENT,
+                                android.graphics.Color.TRANSPARENT,
+                            ),
                         )
+                        WindowCompat.getInsetsController(window, window.decorView).apply {
+                            isAppearanceLightStatusBars = !dark
+                            isAppearanceLightNavigationBars = !dark
+                        }
                     }
                     WyuApp(
                         initialRoute = initialRoute,
@@ -111,6 +135,31 @@ fun WyuApp(
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val currentRoute = route ?: initialRoute
+    // A page that is no longer in the back stack is playing its exit
+    // transition; a page still in it but not on top is covered by a pushed
+    // page. WyuPageEffects renders the two cases differently.
+    val stackEntries by nav.currentBackStack.collectAsState()
+    val stackRoutes = stackEntries.mapNotNull { it.destination.route }
+    // A destination revealed by a pop composes anew underneath the leaving
+    // sheet; it must appear square instead of replaying the pushed-sheet
+    // corners, so pages revealed by a shrunk back stack start sharp.
+    val navCount = remember { intArrayOf(stackRoutes.size) }
+    val pageRevealSharp = stackRoutes.size < navCount[0]
+    navCount[0] = stackRoutes.size
+    // Backdrop scrim for the strips a receded page bares around itself: the
+    // page's own scrim is clipped to its shape, so without this the wallpaper
+    // edges stay bright while the page under a push dims.
+    val childPageOnTop = stackRoutes.size > 1
+    val backdropDim = remember { Animatable(0f) }
+    LaunchedEffect(childPageOnTop) {
+        backdropDim.animateTo(
+            targetValue = if (childPageOnTop) WyuPageCoveredScrim else 0f,
+            animationSpec = tween(
+                durationMillis = if (childPageOnTop) WyuPageDimInMillis else WyuPageDimOutMillis,
+                easing = WyuNavEasing,
+            ),
+        )
+    }
     val authVm = app.authViewModel
 
     val cardSnapshots = remember { mutableMapOf<String, SharedCardSnapshot>() }
@@ -122,12 +171,44 @@ fun WyuApp(
     val openPending = remember { mutableStateOf(false) }
     val openCancel = remember { mutableStateOf(false) }
     val returnReopen = remember { mutableStateOf(false) }
+    // True from the moment the return overlay is dismissed until home has
+    // drawn its settled frame. Capturing the window in this gap would freeze
+    // the return's last (pulled-back) frame into the next morph's backdrop.
+    val returnSettling = remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    fun settleMorphState() {
+        WyuMorphPageState.titleHidden = cardMorph != null || returnMorph != null
+        if (cardMorph == null && returnMorph == null) {
+            WyuMorphPageState.contentProgress = 1f
+        }
+        WyuMorphPageState.morphSettled = cardMorph == null
+        returnRunning.value = returnMorph != null
+    }
     // Exit snapshots are recorded from the NavHost layer while the live page
     // hides its title, so no title pixels have to be painted out afterwards.
     val pageLayer = rememberGraphicsLayer()
     var pageCaptureRequested by remember { mutableStateOf(false) }
     val pageCaptureDone = remember { booleanArrayOf(false) }
+    // Pages first composed during the cold start appear without a slide, so
+    // the page-card corners must not play for them. Pages composed underneath
+    // a card morph are covered by the overlay and must start square too.
+    val coldStart = remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        withFrameNanos { }
+        coldStart.value = false
+    }
+    LaunchedEffect(returnSettling.value) {
+        if (returnSettling.value) {
+            // The return overlay leaves composition on the next frame; give
+            // the home one more drawn frame so a window copy taken afterwards
+            // is guaranteed to be the clean, settled page.
+            withFrameNanos { }
+            withFrameNanos { }
+            returnSettling.value = false
+        }
+    }
+    val pageStartsSharp = coldStart.value || cardMorph != null || returnMorph != null
 
     suspend fun recordNavHostPage(): Bitmap? {
         withFrameNanos { }
@@ -173,7 +254,16 @@ fun WyuApp(
             scope.launch {
                 val page = recordNavHostPage()
                 if (page != null) {
+                    // The overlay paints the window from this snapshot from the
+                    // first animation frame on, so the real page can leave the
+                    // host right away: home composes and lays out during the
+                    // whole return and is interactive the instant the window
+                    // lands. Its state is saved so an interrupted return can
+                    // re-navigate straight back into the same page.
                     returnMorph = returnMorph?.copy(page = page)
+                    if (nav.currentBackStackEntry?.destination?.route == toolRoute) {
+                        nav.popBackStack(toolRoute, inclusive = true, saveState = true)
+                    }
                     val blurred = withContext(Dispatchers.Default) {
                         runCatching { createBlurBackdrop(page, scale = 10) }.getOrNull()
                     }
@@ -194,11 +284,21 @@ fun WyuApp(
         }
     }
     val openTool: (String, SharedCardSnapshot?) -> Unit = { toolRoute, card ->
-        if (!openPending.value && cardMorph == null && returnMorph == null) {
+        if (!openPending.value && cardMorph == null) {
             if (!SharedViewTransition.launchTool(activity, toolRoute, card)) {
                 if (card != null && activity != null) {
                     openPending.value = true
                     scope.launch {
+                        // A return may still be finishing underneath (a tap in
+                        // its last frames reaches home directly); let it clear,
+                        // and let home draw its settled frame, before freezing
+                        // the window — otherwise the return's pulled-back last
+                        // frame ends up inside the new backdrop.
+                        var waits = 0
+                        while ((returnMorph != null || returnSettling.value) && waits < 90) {
+                            withFrameNanos { }
+                            waits++
+                        }
                         val captured = captureWindow(activity)
                         openPending.value = false
                         cardSnapshots[toolRoute] = card
@@ -223,6 +323,15 @@ fun WyuApp(
     }
 
     Box(Modifier.fillMaxSize()) {
+        WyuWindowBackdrop()
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    val alpha = backdropDim.value
+                    if (alpha > 0.001f) drawRect(Color.Black, alpha = alpha)
+                },
+        )
         NavHost(
             navController = nav,
             startDestination = initialRoute,
@@ -236,35 +345,57 @@ fun WyuApp(
                     drawContent()
                 },
             enterTransition = {
-                if (morphRunning.value) {
+                // A page re-entering underneath a running return overlay must
+                // not slide; the overlay is the only thing in motion.
+                if (morphRunning.value || returnRunning.value) {
                     EnterTransition.None
                 } else {
-                    slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 3 } +
-                        fadeIn(tween(220))
+                    // The pushed page is a full-width sheet sliding in from
+                    // the right, corners and all.
+                    slideInHorizontally(
+                        animationSpec = tween(WyuNavEnterMillis, easing = WyuNavEasing),
+                    ) { it }
                 }
             },
             exitTransition = {
-                if (morphRunning.value) {
+                if (morphRunning.value || returnRunning.value) {
                     ExitTransition.None
                 } else {
-                    slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 6 } +
-                        fadeOut(tween(180))
+                    // The page underneath is nudged left and pressed down a
+                    // touch while the sheet slides over it.
+                    slideOutHorizontally(
+                        animationSpec = tween(WyuNavEnterMillis, easing = WyuNavEasing),
+                    ) { -(it * WyuNavParentShiftFraction).roundToInt() } +
+                        scaleOut(
+                            animationSpec = tween(WyuNavEnterMillis, easing = WyuNavEasing),
+                            targetScale = WyuNavParentScale,
+                        )
                 }
             },
             popEnterTransition = {
                 if (returnRunning.value) {
                     EnterTransition.None
                 } else {
-                    slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 6 } +
-                        fadeIn(tween(220))
+                    // Popping pushes the revealed page right and lifts it back
+                    // up while its dim scrim brightens.
+                    slideInHorizontally(
+                        animationSpec = tween(WyuNavExitMillis, easing = WyuNavEasing),
+                    ) { -(it * WyuNavParentShiftFraction).roundToInt() } +
+                        scaleIn(
+                            animationSpec = tween(WyuNavExitMillis, easing = WyuNavEasing),
+                            initialScale = WyuNavParentScale,
+                        )
                 }
             },
             popExitTransition = {
                 if (returnRunning.value) {
                     ExitTransition.None
                 } else {
-                    slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 3 } +
-                        fadeOut(tween(180))
+                    // The sheet slides back off to the right over the page it
+                    // was covering.
+                    slideOutHorizontally(
+                        animationSpec = tween(WyuNavExitMillis, easing = WyuNavEasing),
+                    ) { it }
                 }
             },
         ) {
@@ -272,9 +403,13 @@ fun WyuApp(
                 // Stay sharp while a morph is on screen: the return overlay
                 // already crossfades to a sharp home, so the live page under it
                 // must not be mid-unblur when the overlay comes off.
-                WyuPageEffects(
-                    active = currentRoute == "home" || cardMorph != null || returnMorph != null,
-                    startBlurred = false,
+                WyuRoutePage(
+                    route = "home",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
+                    activeOverride = cardMorph != null || returnMorph != null,
                 ) {
                     HomeScreen(
                         authVm = authVm,
@@ -294,11 +429,12 @@ fun WyuApp(
                 }
             }
             composable("schedule") {
-                WyuPageEffects(
-                    active = currentRoute == "schedule",
-                    startBlurred = initialRoute != SharedViewTransition.ROUTE_SCHEDULE &&
-                        cardMorph == null &&
-                        returnMorph == null,
+                WyuRoutePage(
+                    route = "schedule",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
                 ) {
                     ScheduleScreen(
                         vm = app.scheduleViewModel,
@@ -309,20 +445,37 @@ fun WyuApp(
                 }
             }
             composable("settings") {
-                WyuPageEffects(
-                    active = currentRoute == "settings",
-                    startBlurred = initialRoute != SharedViewTransition.ROUTE_SETTINGS &&
-                        cardMorph == null &&
-                        returnMorph == null,
+                WyuRoutePage(
+                    route = "settings",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
                 ) {
                     SettingsScreen(
                         authVm = authVm,
                         onBack = { closeTool(SharedViewTransition.ROUTE_SETTINGS) },
+                        onOpenAdvanced = { nav.navigate("settings/advanced") },
                     )
                 }
             }
+            composable("settings/advanced") {
+                WyuRoutePage(
+                    route = "settings/advanced",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
+                    SoftGlassAdvancedScreen(onBack = goBack)
+                }
+            }
             composable("me/login") {
-                WyuPageEffects(active = currentRoute == "me/login") {
+                WyuRoutePage(
+                    route = "me/login",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
                     AuthLoginScreen(
                         vm = authVm,
                         onBack = goBack,
@@ -330,7 +483,12 @@ fun WyuApp(
                 }
             }
             composable("me/jxgl") {
-                WyuPageEffects(active = currentRoute == "me/jxgl") {
+                WyuRoutePage(
+                    route = "me/jxgl",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
                     JxglWebScreen(
                         vm = authVm,
                         onBack = goBack,
@@ -340,11 +498,12 @@ fun WyuApp(
             }
             composable("lxt") {
                 val lxtVm = remember { app.lxtViewModel }
-                WyuPageEffects(
-                    active = currentRoute == "lxt",
-                    startBlurred = initialRoute != SharedViewTransition.ROUTE_LXT &&
-                        cardMorph == null &&
-                        returnMorph == null,
+                WyuRoutePage(
+                    route = "lxt",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
                 ) {
                     LxtScreen(
                         vm = lxtVm,
@@ -356,7 +515,12 @@ fun WyuApp(
             }
             composable("lxt/bind") {
                 val lxtVm = remember { app.lxtViewModel }
-                WyuPageEffects(active = currentRoute == "lxt/bind") {
+                WyuRoutePage(
+                    route = "lxt/bind",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
                     LxtBindScreen(
                         vm = lxtVm,
                         onBack = goBack,
@@ -365,7 +529,12 @@ fun WyuApp(
             }
             composable("lxt/valve") {
                 val lxtVm = remember { app.lxtViewModel }
-                WyuPageEffects(active = currentRoute == "lxt/valve") {
+                WyuRoutePage(
+                    route = "lxt/valve",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
                     LxtBindScreen(
                         vm = lxtVm,
                         onBack = goBack,
@@ -375,11 +544,12 @@ fun WyuApp(
             }
             composable("elec") {
                 val elecVm = remember { app.elecViewModel }
-                WyuPageEffects(
-                    active = currentRoute == "elec",
-                    startBlurred = initialRoute != SharedViewTransition.ROUTE_ELEC &&
-                        cardMorph == null &&
-                        returnMorph == null,
+                WyuRoutePage(
+                    route = "elec",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
                 ) {
                     ElecScreen(
                         vm = elecVm,
@@ -389,11 +559,12 @@ fun WyuApp(
             }
             composable("gym") {
                 val gymVm = remember { app.gymViewModel }
-                WyuPageEffects(
-                    active = currentRoute == "gym",
-                    startBlurred = initialRoute != SharedViewTransition.ROUTE_GYM &&
-                        cardMorph == null &&
-                        returnMorph == null,
+                WyuRoutePage(
+                    route = "gym",
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
                 ) {
                     GymScreen(
                         vm = gymVm,
@@ -437,16 +608,24 @@ fun WyuApp(
                 sharpHome = morph.sharpHome,
                 pageBlur = morph.pageBlur,
                 cancelRequested = openCancel.value,
+                modifier = Modifier.zIndex(1f),
                 onCovered = {
-                    if (currentRoute == "home") nav.navigate(morph.route)
+                    val top = nav.currentBackStackEntry?.destination?.route
+                    if (top != morph.route) {
+                        if (top == "home") {
+                            nav.navigate(morph.route)
+                        } else {
+                            // A returning page is still on the stack; end the
+                            // stack at home -> new route.
+                            nav.navigate(morph.route) { popUpTo("home") }
+                        }
+                    }
                 },
                 onFinished = {
                     morphRunning.value = false
                     openCancel.value = false
                     cardMorph = null
-                    WyuMorphPageState.titleHidden = false
-                    WyuMorphPageState.contentProgress = 1f
-                    WyuMorphPageState.morphSettled = true
+                    settleMorphState()
                 },
                 onCancelled = {
                     val popped = if (nav.currentBackStackEntry?.destination?.route == morph.route) {
@@ -473,10 +652,7 @@ fun WyuApp(
                         cardMorph = null
                         morphRunning.value = false
                         openCancel.value = false
-                        WyuMorphPageState.titleHidden = false
-                        WyuMorphPageState.contentProgress = 1f
-                        WyuMorphPageState.morphSettled = true
-                        returnRunning.value = false
+                        settleMorphState()
                         homeSharpSnapshots.remove(morph.route)
                     }
                 },
@@ -491,48 +667,76 @@ fun WyuApp(
                 reopenRequested = returnReopen.value,
                 onTap = { returnReopen.value = true },
                 onSwap = {
-                    val popped =
-                        if (nav.currentBackStackEntry?.destination?.route == morph.route) {
-                            nav.popBackStack()
-                        } else {
-                            false
-                        }
-                    // The overlay already matches the live home, so it only has
-                    // to stay up until the host has swapped the page out.
-                    scope.launch {
-                        if (popped) {
-                            val settled = withTimeoutOrNull(400) {
-                                nav.visibleEntries.first { entries ->
-                                    entries.none { it.destination.route == morph.route }
-                                }
-                            }
-                            if (settled == null) Log.w("WyuMorph", "return settle timed out")
-                        }
-                        withFrameNanos { }
-                        withFrameNanos { }
-                        returnMorph = null
-                        returnRunning.value = false
-                        returnReopen.value = false
-                        WyuMorphPageState.titleHidden = false
-                        WyuMorphPageState.contentProgress = 1f
-                        cardSnapshots.remove(morph.route)
-                        homeSharpSnapshots.remove(morph.route)
+                    // Normally already popped when the return started; this is
+                    // only a fallback. Home has had the full animation to
+                    // compose, so the overlay can come off immediately.
+                    if (nav.currentBackStackEntry?.destination?.route == morph.route) {
+                        nav.popBackStack()
                     }
+                    // The return finished without being reopened; its saved
+                    // page state would otherwise pile up, so drop it.
+                    nav.clearBackStack(morph.route)
+                    returnMorph = null
+                    returnRunning.value = false
+                    returnReopen.value = false
+                    returnSettling.value = true
+                    settleMorphState()
+                    cardSnapshots.remove(morph.route)
+                    homeSharpSnapshots.remove(morph.route)
                 },
                 onReopened = {
-                    // The page stayed composed under the overlay; just drop it.
+                    // The page was popped when the return started; bring it
+                    // back with its saved state and only then lift the overlay.
                     scope.launch {
+                        if (nav.currentBackStackEntry?.destination?.route != morph.route) {
+                            nav.navigate(morph.route) { restoreState = true }
+                            val restored = withTimeoutOrNull(300) {
+                                nav.visibleEntries.first { entries ->
+                                    entries.any { it.destination.route == morph.route }
+                                }
+                            }
+                            if (restored == null) Log.w("WyuMorph", "reopen settle timed out")
+                        }
                         withFrameNanos { }
                         withFrameNanos { }
                         returnMorph = null
                         returnRunning.value = false
                         returnReopen.value = false
-                        WyuMorphPageState.titleHidden = false
-                        WyuMorphPageState.contentProgress = 1f
+                        returnSettling.value = true
+                        settleMorphState()
                     }
                 },
             )
         }
+    }
+}
+
+/**
+ * Wraps a destination with the page transition effects, deriving whether the
+ * page is covered by a pushed page or is itself leaving the back stack.
+ */
+@Composable
+private fun WyuRoutePage(
+    route: String,
+    currentRoute: String?,
+    stackRoutes: List<String>,
+    startSharp: Boolean = false,
+    reveal: Boolean = false,
+    activeOverride: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val active = activeOverride || currentRoute == route
+    WyuPageEffects(
+        active = active,
+        covered = !active && route in stackRoutes,
+        leaving = stackRoutes.isNotEmpty() && route !in stackRoutes,
+        startSharp = startSharp || reveal,
+        // A page revealed while the morph overlay is up must arrive bright:
+        // the overlay has already faded to the undimmed home, so starting it
+        // dimmed would flash the whole screen dark at the hand-off.
+        startDimmed = reveal && !activeOverride,
+    ) {
+        content()
     }
 }
 

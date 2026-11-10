@@ -165,8 +165,13 @@ private fun GymContent(
     val scope = rememberCoroutineScope()
     val venueListState = rememberLazyListState()
     val recordsListState = rememberLazyListState()
-    val activeListState = if (pagerState.currentPage == 0) venueListState else recordsListState
-    val collapseFraction = rememberWyuCollapseFraction(activeListState)
+    val venueFraction = rememberWyuCollapseFraction(venueListState)
+    val recordsFraction = rememberWyuCollapseFraction(recordsListState)
+    val collapseFraction = rememberWyuPagerCollapseFraction(
+        pagerState = pagerState,
+        firstFraction = venueFraction,
+        secondFraction = recordsFraction,
+    )
     // The bookings tab is a heavy neighbour: keep it out of the opening frame,
     // then compose it once the morph has landed so later swipes stay smooth.
     var prefetchRecords by remember { mutableStateOf(false) }
@@ -198,7 +203,7 @@ private fun GymContent(
                         scope.launch {
                             pagerState.animateScrollToPage(
                                 page = index,
-                                animationSpec = tween(450, easing = WyuDecelerateEasing),
+                                animationSpec = tween(380, easing = WyuTabEasing),
                             )
                         }
                     }

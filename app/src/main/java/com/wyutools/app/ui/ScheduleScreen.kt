@@ -198,7 +198,11 @@ private fun ScheduleContent(
     val weeklyScrollState = rememberScrollState()
     val dailyFraction = rememberWyuCollapseFraction(dailyListState)
     val weeklyFraction = rememberWyuCollapseFraction(weeklyScrollState)
-    val collapseFraction = if (pagerState.currentPage == 0) dailyFraction else weeklyFraction
+    val collapseFraction = rememberWyuPagerCollapseFraction(
+        pagerState = pagerState,
+        firstFraction = dailyFraction,
+        secondFraction = weeklyFraction,
+    )
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
@@ -232,7 +236,7 @@ private fun ScheduleContent(
                         scope.launch {
                             pagerState.animateScrollToPage(
                                 page = index,
-                                animationSpec = tween(450, easing = WyuDecelerateEasing),
+                                animationSpec = tween(380, easing = WyuTabEasing),
                             )
                         }
                     }
@@ -409,7 +413,6 @@ private fun ScheduleWeekHeader(
         modifier = Modifier
             .fillMaxWidth()
             .height(ScheduleWeekHeaderHeight),
-        cornerRadius = 22.dp,
         insideMargin = PaddingValues(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
         samplePageContent = true,
     ) {
@@ -745,7 +748,6 @@ private fun WeekGrid(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 22.dp,
         insideMargin = PaddingValues(start = 10.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
     ) {
         Row(Modifier.fillMaxWidth()) {

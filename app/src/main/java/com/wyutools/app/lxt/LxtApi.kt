@@ -333,57 +333,6 @@ object LxtApi {
         return result
     }
 
-    fun macFromCode(input: String): String? {
-        val text = input.trim()
-        if (text.startsWith("http://", ignoreCase = true) || text.startsWith("https://", ignoreCase = true)) {
-            return Regex("""^https?://n\.lxt6\.cn/all\?([0-9A-Fa-f]{12})""", RegexOption.IGNORE_CASE)
-                .find(text)
-                ?.groupValues
-                ?.get(1)
-                ?.uppercase()
-        }
-        val compact = text.filterNot { it == ':' || it == '-' || it.isWhitespace() }
-        if (compact.length != 12) return null
-        if (!compact.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return null
-        return compact.uppercase()
-    }
-
-    private fun macParam(mac: String): String =
-        mac.uppercase()
-            .filter { it in '0'..'9' || it in 'A'..'F' }
-            .chunked(2)
-            .joinToString(":")
-
-    suspend fun machineByMac(token: String, mac: String): MachineInfo? {
-        val normalized = mac.uppercase().filter { it in '0'..'9' || it in 'A'..'F' }
-        if (normalized.length != 12) return null
-        val envelope = ensure(
-            call(
-                "GET",
-                "/mgapp/machine/getMachineByMac",
-                params = listOf("mac" to macParam(normalized), "typeId" to "1"),
-                token = token,
-            )
-        )
-        val item = when (val data = envelope.data) {
-            is JSONObject -> data.optJSONObject("machine")
-                ?: data.optJSONArray("records")?.optJSONObject(0)
-                ?: data
-            is JSONArray -> data.optJSONObject(0)
-            else -> null
-        } ?: return null
-        val machineId = optText(item, "machineId")
-        if (machineId.isEmpty()) return null
-        return MachineInfo(
-            machineId = machineId,
-            deviceMac = optText(item, "deviceMac").ifEmpty { normalized },
-            deviceVer = optText(item, "deviceVer"),
-            roomName = optText(item, "roominfo", "roomName"),
-            siteId = optText(item, "siteId"),
-            siteFlag = optInt(item, "siteFlag", "siteflag", "flag"),
-        )
-    }
-
     suspend fun machineStatusList(token: String, siteId: String, siteFlag: Int): List<MachineStatus> {
         if (siteId.isBlank()) return emptyList()
         val envelope = ensure(

@@ -20,7 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
@@ -56,7 +58,11 @@ fun HomeScreen(
     val meFraction = rememberWyuCollapseFraction(meScroll)
     val bottomMargin = rememberWyuNavigatorBottomMargin()
     val page = pager.currentPage
-    val activeFraction = if (page == 0) toolsFraction else meFraction
+    val activeFraction = rememberWyuPagerCollapseFraction(
+        pagerState = pager,
+        firstFraction = toolsFraction,
+        secondFraction = meFraction,
+    )
     val contentBottom = bottomMargin + WyuNavigatorBarHeight + 24.dp
     val dark = LocalWyuDarkTheme.current
     val surface = MiuixTheme.colorScheme.surface
@@ -100,7 +106,7 @@ fun HomeScreen(
                                 scope.launch {
                                     pager.animateScrollToPage(
                                         page = index,
-                                        animationSpec = tween(350, easing = WyuDecelerateEasing),
+                                        animationSpec = tween(300, easing = WyuTabEasing),
                                     )
                                 }
                             }
@@ -110,11 +116,30 @@ fun HomeScreen(
             },
             topBar = {
                 WyuActionBar(
-                    title = if (page == 0) "工具" else "我",
+                    title = "工具",
+                    altTitle = "我",
+                    altFraction = {
+                        (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    },
                     collapsedFraction = { activeFraction.value },
                     floatingAction = {
                         if (page == 1) {
-                            SettingsEntry(onOpen = onOpenSettings)
+                            // Fades and deblurs in as the 我 page slides over.
+                            Box(
+                                modifier = Modifier.graphicsLayer {
+                                    val f = pager.currentPage + pager.currentPageOffsetFraction
+                                    val t = ((f - 0.5f) * 2f).coerceIn(0f, 1f)
+                                    alpha = t
+                                    if (t < 0.99f) {
+                                        val radius = (1f - t) * 12.dp.toPx()
+                                        renderEffect = BlurEffect(radius, radius)
+                                    } else {
+                                        renderEffect = null
+                                    }
+                                },
+                            ) {
+                                SettingsEntry(onOpen = onOpenSettings)
+                            }
                         }
                     },
                 )
@@ -161,7 +186,28 @@ private fun SettingsEntry(onOpen: (SharedCardSnapshot?) -> Unit) {
     val radiusPx = with(density) { 24.dp.toPx() }
     val bounds = remember { Rect() }
     var launching by remember { mutableStateOf(false) }
-
+    val openSettings: () -> Unit = {
+        if (bounds.isEmpty || launching) {
+            if (!launching) onOpen(null)
+        } else {
+            launching = true
+            scope.launch {
+                val bitmap = runCatching {
+                    graphicsLayer.toImageBitmap().asAndroidBitmap()
+                }.getOrNull()
+                launching = false
+                onOpen(
+                    bitmap?.let {
+                        SharedCardSnapshot(
+                            bitmap = it,
+                            bounds = Rect(bounds),
+                            radiusPx = radiusPx,
+                        )
+                    },
+                )
+            }
+        }
+    }
     Box(
         modifier = Modifier
             .onGloballyPositioned { coordinates ->
@@ -188,28 +234,7 @@ private fun SettingsEntry(onOpen: (SharedCardSnapshot?) -> Unit) {
         WyuTopBarAction(
             icon = Icons.Outlined.Settings,
             label = "设置",
-            onClick = {
-                if (bounds.isEmpty || launching) {
-                    if (!launching) onOpen(null)
-                } else {
-                    launching = true
-                    scope.launch {
-                        val bitmap = runCatching {
-                            graphicsLayer.toImageBitmap().asAndroidBitmap()
-                        }.getOrNull()
-                        launching = false
-                        onOpen(
-                            bitmap?.let {
-                                SharedCardSnapshot(
-                                    bitmap = it,
-                                    bounds = Rect(bounds),
-                                    radiusPx = radiusPx,
-                                )
-                            },
-                        )
-                    }
-                }
-            },
+            onClick = openSettings,
         )
     }
 }

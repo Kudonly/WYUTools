@@ -101,24 +101,6 @@ fun LxtBindScreen(
                 }
             }
 
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(
-                    text = LevelTitles[ui.bindLevel.coerceIn(0, LevelTitles.lastIndex)],
-                    style = MiuixTheme.textStyles.title3,
-                )
-                if (ui.bindLevel == 3) {
-                    Text(
-                        text = if (forValve) {
-                            "选择宿舍后将自动查询房间热水机"
-                        } else {
-                            "选择宿舍后将自动查询房间冷水表"
-                        },
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-            }
-
             val selectedId = when (ui.bindLevel) {
                 0 -> ui.bindPath.getOrNull(0)?.id
                 1 -> ui.bindPath.getOrNull(1)?.id
@@ -126,57 +108,86 @@ fun LxtBindScreen(
                 else -> ui.bindRoom?.id
             }
 
-            Box(
+            Card(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                insideMargin = PaddingValues(vertical = 6.dp),
             ) {
-                when {
-                    ui.bindLoading -> CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-
-                    ui.bindItems.isEmpty() -> Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
+                Column(Modifier.fillMaxSize()) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
                         Text(
-                            text = ui.bindError ?: "该层级暂无可选内容",
-                            style = MiuixTheme.textStyles.body2,
-                            color = if (ui.bindError != null) {
-                                MiuixTheme.colorScheme.error
-                            } else {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            },
-                            textAlign = TextAlign.Center,
+                            text = LevelTitles[ui.bindLevel.coerceIn(0, LevelTitles.lastIndex)],
+                            style = MiuixTheme.textStyles.title3,
                         )
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(
-                            text = "重新加载",
-                            onClick = { vm.goBindLevel(ui.bindLevel) },
-                        )
+                        if (ui.bindLevel == 3) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (forValve) {
+                                    "选择宿舍后将自动查询房间热水机"
+                                } else {
+                                    "选择宿舍后将自动查询房间冷水表"
+                                },
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
                     }
 
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        state = bindListState,
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
                     ) {
-                        items(ui.bindItems, key = { it.id }) { node ->
-                            BasicComponent(
-                                title = node.name,
-                                endActions = {
-                                    if (node.id == selectedId) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Check,
-                                            contentDescription = null,
-                                            tint = MiuixTheme.colorScheme.primary,
-                                        )
-                                    }
-                                },
-                                onClick = { vm.chooseBindItem(node) },
+                        when {
+                            ui.bindLoading -> CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center),
                             )
+
+                            ui.bindItems.isEmpty() -> Column(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text = ui.bindError ?: "该层级暂无可选内容",
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = if (ui.bindError != null) {
+                                        MiuixTheme.colorScheme.error
+                                    } else {
+                                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                    },
+                                    textAlign = TextAlign.Center,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                TextButton(
+                                    text = "重新加载",
+                                    onClick = { vm.goBindLevel(ui.bindLevel) },
+                                )
+                            }
+
+                            else -> LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                state = bindListState,
+                            ) {
+                                items(ui.bindItems, key = { it.id }) { node ->
+                                    BasicComponent(
+                                        title = node.name,
+                                        endActions = {
+                                            if (node.id == selectedId) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    tint = MiuixTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        },
+                                        onClick = { vm.chooseBindItem(node) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

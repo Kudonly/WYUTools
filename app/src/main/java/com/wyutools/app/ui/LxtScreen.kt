@@ -27,7 +27,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -87,8 +86,6 @@ fun LxtScreen(
     val collapseFraction = rememberWyuCollapseFraction(scrollState)
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showValveDialog by remember { mutableStateOf(false) }
-    var showValveCodeDialog by remember { mutableStateOf(false) }
-    var valveCode by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { vm.onLxtEntered() }
     LaunchedEffect(ui.message) {
@@ -154,7 +151,6 @@ fun LxtScreen(
                     onOpenValve = { showValveDialog = true },
                     onRefreshValve = vm::refreshValve,
                     onBindValve = onBindValve,
-                    onEnterCode = { showValveCodeDialog = true },
                 )
                 Spacer(Modifier.height(16.dp))
                 ColdWaterCard(ui = ui, onBind = onBind)
@@ -209,59 +205,6 @@ fun LxtScreen(
         },
     )
 
-    WyuOverlayDialog(
-        show = showValveCodeDialog,
-        title = "设备码绑定",
-        summary = "粘贴洗澡机二维码内容，或输入 12 位设备码。",
-        onDismissRequest = {
-            if (!ui.valveCodeBusy) {
-                showValveCodeDialog = false
-                vm.clearValveCodeError()
-            }
-        },
-    ) {
-        Spacer(Modifier.height(12.dp))
-        TextField(
-            value = valveCode,
-            onValueChange = {
-                valveCode = it
-                vm.clearValveCodeError()
-            },
-            label = "设备二维码 / 设备码",
-            singleLine = true,
-            enabled = !ui.valveCodeBusy,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        ui.valveCodeError?.let { error ->
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = error,
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.error,
-            )
-        }
-        Spacer(Modifier.height(16.dp))
-        WyuDialogButton(
-            text = "绑定",
-            loading = ui.valveCodeBusy,
-            loadingText = "绑定中…",
-            enabled = valveCode.isNotBlank(),
-            onClick = {
-                vm.bindValveByCode(valveCode) {
-                    showValveCodeDialog = false
-                    valveCode = ""
-                }
-            },
-        )
-        Spacer(Modifier.height(8.dp))
-        WyuDialogCancelButton(
-            onClick = {
-                showValveCodeDialog = false
-                vm.clearValveCodeError()
-            },
-            enabled = !ui.valveCodeBusy,
-        )
-    }
 }
 
 @Composable
@@ -440,7 +383,6 @@ private fun HotWaterCard(
     onOpenValve: () -> Unit,
     onRefreshValve: () -> Unit,
     onBindValve: () -> Unit,
-    onEnterCode: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -475,15 +417,9 @@ private fun HotWaterCard(
             Text("热水设备", style = MiuixTheme.textStyles.title4)
             Spacer(Modifier.weight(1f))
             ActionChip(
-                text = if (valveDevice == null) "绑定" else "更换",
+                text = if (valveDevice == null) "绑定宿舍" else "更换宿舍",
                 onClick = onBindValve,
                 icon = Icons.Filled.Edit,
-            )
-            Spacer(Modifier.width(8.dp))
-            ActionChip(
-                text = "设备码",
-                onClick = onEnterCode,
-                icon = Icons.Filled.QrCode2,
             )
         }
         Spacer(Modifier.height(4.dp))

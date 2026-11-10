@@ -126,19 +126,39 @@ fun DrawScope.drawWyuImageCover(image: ImageBitmap, dim: Float = 0f) {
     }
 }
 
-/** Slider percentage is the wallpaper's actual brightness; dark theme still adds a floor. */
-fun wyuCustomWallpaperDim(brightness: Float, dark: Boolean): Float =
-    ((1f - brightness.coerceIn(0.8f, 1f)) + if (dark) 0.35f else 0f).coerceIn(0f, 0.92f)
+/** Slider percentage is the wallpaper's actual brightness; each mode stores its own. */
+fun wyuCustomWallpaperDim(brightness: Float): Float =
+    (1f - brightness.coerceIn(0.5f, 1f)).coerceIn(0f, 0.92f)
+
+internal const val WyuSoftGlassBlurMin = 0
 
 object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
     private const val KeyThemeMode = "theme_mode"
+    // Retired single-value key; still read as the fallback for the light value.
     private const val KeyCustomBrightness = "custom_brightness"
+    private const val KeyCustomBrightnessLight = "custom_brightness_light"
+    private const val KeyCustomBrightnessDark = "custom_brightness_dark"
+    private const val BrightnessDarkDefault = 0.6f
     private const val KeySoftGlass = "soft_glass"
     private const val KeySoftGlassBlur = "soft_glass_blur_radius"
+    private const val KeySoftGlassTuningIor = "soft_glass_tuning_refraction_ior"
+    private const val KeySoftGlassTuningSaturationLight = "soft_glass_tuning_saturation_light"
+    private const val KeySoftGlassTuningSaturationDark = "soft_glass_tuning_saturation_dark"
+    private const val KeySoftGlassTuningEdge = "soft_glass_tuning_edge_thickness"
+    private const val KeySoftGlassTuningShapeEdgePx = "soft_glass_tuning_shape_edge_px"
+    private const val KeySoftGlassTuningShapeEdgePow = "soft_glass_tuning_shape_edge_pow"
+    private const val KeySoftGlassTuningReflectOffset = "soft_glass_tuning_reflect_offset"
+    private const val KeySoftGlassTuningReflection = "soft_glass_tuning_reflection_strength"
+    private const val KeySoftGlassTuningReflectLighten = "soft_glass_tuning_reflection_lighten"
+    // Retired single-value key; still read once if the split keys are absent.
+    private const val KeySoftGlassTuningCardTint = "soft_glass_tuning_card_tint_alpha"
+    private const val KeySoftGlassTuningCardTintLight = "soft_glass_tuning_card_tint_light"
+    private const val KeySoftGlassTuningCardTintDark = "soft_glass_tuning_card_tint_dark"
     private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
-    private const val SoftGlassDefaultsVersion = 2
+    private const val SoftGlassDefaultsVersion = 5
+    private const val SoftGlassBlurDefault = 15
     private const val KeyMonetSeed = "monet_seed"
     private const val CustomFileName = "custom_wallpaper.jpg"
     private const val MaxWallpaperSide = 2560
@@ -155,14 +175,21 @@ object WyuAppearance {
     private val _hasCustomWallpaper = MutableStateFlow(false)
     val hasCustomWallpaper: StateFlow<Boolean> = _hasCustomWallpaper.asStateFlow()
 
-    private val _customBrightness = MutableStateFlow(1f)
-    val customBrightness: StateFlow<Float> = _customBrightness.asStateFlow()
+    private val _customBrightnessLight = MutableStateFlow(1f)
+    val customBrightnessLight: StateFlow<Float> = _customBrightnessLight.asStateFlow()
+
+    // Dark mode no longer forces a dim, so its slider starts at 80%.
+    private val _customBrightnessDark = MutableStateFlow(BrightnessDarkDefault)
+    val customBrightnessDark: StateFlow<Float> = _customBrightnessDark.asStateFlow()
 
     private val _softGlass = MutableStateFlow(false)
     val softGlass: StateFlow<Boolean> = _softGlass.asStateFlow()
 
-    private val _softGlassBlur = MutableStateFlow(20)
+    private val _softGlassBlur = MutableStateFlow(SoftGlassBlurDefault)
     val softGlassBlur: StateFlow<Int> = _softGlassBlur.asStateFlow()
+
+    private val _softGlassTuning = MutableStateFlow(WyuSoftGlassTuning())
+    val softGlassTuning: StateFlow<WyuSoftGlassTuning> = _softGlassTuning.asStateFlow()
 
     private val _monetSeed = MutableStateFlow<Int?>(null)
     val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
@@ -181,19 +208,84 @@ object WyuAppearance {
         val appContext = context.applicationContext
         val loaded = appContext.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
         prefs = loaded
+        // v5 ships the tuned soft-glass defaults, so drop any saved slider
+        // overrides (including the retired card-tint keys) and reset blur.
         if (loaded.getInt(KeySoftGlassDefaultsVersion, 0) < SoftGlassDefaultsVersion) {
-            val brightness = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.8f, 1f)
+            val brightnessLight = loaded
+                .getFloat(KeyCustomBrightnessLight, loaded.getFloat(KeyCustomBrightness, 1f))
+                .coerceIn(0.5f, 1f)
+            val brightnessDark = loaded
+                .getFloat(KeyCustomBrightnessDark, BrightnessDarkDefault)
+                .coerceIn(0.5f, 1f)
             loaded.edit()
-                .putInt(KeySoftGlassBlur, 20)
-                .putFloat(KeyCustomBrightness, brightness)
+                .putInt(KeySoftGlassBlur, SoftGlassBlurDefault)
+                .putFloat(KeyCustomBrightnessLight, brightnessLight)
+                .putFloat(KeyCustomBrightnessDark, brightnessDark)
+                .remove(KeyCustomBrightness)
+                .remove(KeySoftGlassTuningIor)
+                .remove(KeySoftGlassTuningSaturationLight)
+                .remove(KeySoftGlassTuningSaturationDark)
+                .remove(KeySoftGlassTuningEdge)
+                .remove(KeySoftGlassTuningShapeEdgePx)
+                .remove(KeySoftGlassTuningShapeEdgePow)
+                .remove(KeySoftGlassTuningReflectOffset)
+                .remove(KeySoftGlassTuningReflection)
+                .remove(KeySoftGlassTuningReflectLighten)
+                .remove(KeySoftGlassTuningCardTint)
+                .remove(KeySoftGlassTuningCardTintLight)
+                .remove(KeySoftGlassTuningCardTintDark)
                 .putInt(KeySoftGlassDefaultsVersion, SoftGlassDefaultsVersion)
                 .apply()
         }
         _hasCustomWallpaper.value = customFile(appContext).let { it.isFile && it.length() > 0L }
         if (!_hasCustomWallpaper.value) _customWallpaperResolved.value = true
-        _customBrightness.value = loaded.getFloat(KeyCustomBrightness, 1f).coerceIn(0.8f, 1f)
+        _customBrightnessLight.value = loaded
+            .getFloat(KeyCustomBrightnessLight, loaded.getFloat(KeyCustomBrightness, 1f))
+            .coerceIn(0.5f, 1f)
+        _customBrightnessDark.value = loaded
+            .getFloat(KeyCustomBrightnessDark, BrightnessDarkDefault)
+            .coerceIn(0.5f, 1f)
         _softGlass.value = loaded.getBoolean(KeySoftGlass, false)
-        _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, 20).coerceIn(0, 100)
+        _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, SoftGlassBlurDefault)
+            .coerceIn(WyuSoftGlassBlurMin, 100)
+        val tuningDefaults = WyuSoftGlassTuning()
+        _softGlassTuning.value = WyuSoftGlassTuning(
+            refractionIor = loaded.getFloat(KeySoftGlassTuningIor, tuningDefaults.refractionIor)
+                .coerceIn(0.1f, 10f),
+            saturationLight = loaded
+                .getFloat(KeySoftGlassTuningSaturationLight, tuningDefaults.saturationLight)
+                .coerceIn(0f, 2f),
+            saturationDark = loaded
+                .getFloat(KeySoftGlassTuningSaturationDark, tuningDefaults.saturationDark)
+                .coerceIn(0f, 2f),
+            edgeThickness = loaded.getFloat(KeySoftGlassTuningEdge, tuningDefaults.edgeThickness)
+                .coerceIn(0f, 800f),
+            shapeEdgePx = loaded.getFloat(KeySoftGlassTuningShapeEdgePx, tuningDefaults.shapeEdgePx)
+                .coerceIn(0.5f, 432f),
+            shapeEdgePow = loaded
+                .getFloat(KeySoftGlassTuningShapeEdgePow, tuningDefaults.shapeEdgePow)
+                .coerceIn(0.05f, 22.8f),
+            reflectOffset = loaded
+                .getFloat(KeySoftGlassTuningReflectOffset, tuningDefaults.reflectOffset)
+                .coerceIn(-3200f, 4800f),
+            reflectionStrength = loaded
+                .getFloat(KeySoftGlassTuningReflection, tuningDefaults.reflectionStrength)
+                .coerceIn(0f, 2f),
+            reflectLighten = loaded
+                .getFloat(KeySoftGlassTuningReflectLighten, tuningDefaults.reflectLighten)
+                .coerceIn(-4.8f, 7.2f),
+            cardTintAlphaLight = loaded
+                .getFloat(
+                    KeySoftGlassTuningCardTintLight,
+                    loaded.getFloat(KeySoftGlassTuningCardTint, tuningDefaults.cardTintAlphaLight),
+                )
+                .coerceIn(0f, 1f),
+            // The retired key never governed dark default cards, so it must not
+            // seed the dark value; keeping the dark default preserves the look.
+            cardTintAlphaDark = loaded
+                .getFloat(KeySoftGlassTuningCardTintDark, tuningDefaults.cardTintAlphaDark)
+                .coerceIn(0f, 1f),
+        )
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         val saved = WyuWallpaper.entries
             .firstOrNull { it.name == loaded.getString(KeyWallpaper, null) }
@@ -222,17 +314,20 @@ object WyuAppearance {
         _wallpaper.value = wallpaper
     }
 
-    fun setCustomBrightness(context: Context, brightness: Float) {
+    fun setCustomBrightness(context: Context, brightness: Float, dark: Boolean) {
         ensureLoaded(context)
-        val clamped = brightness.coerceIn(0.8f, 1f)
-        if (_customBrightness.value == clamped) return
-        _customBrightness.value = clamped
-        prefs?.edit()?.putFloat(KeyCustomBrightness, clamped)?.apply()
+        val clamped = brightness.coerceIn(0.5f, 1f)
+        val target = if (dark) _customBrightnessDark else _customBrightnessLight
+        if (target.value == clamped) return
+        target.value = clamped
+        prefs?.edit()
+            ?.putFloat(if (dark) KeyCustomBrightnessDark else KeyCustomBrightnessLight, clamped)
+            ?.apply()
     }
 
     fun setSoftGlassBlur(context: Context, percent: Int) {
         ensureLoaded(context)
-        val clamped = percent.coerceIn(0, 100)
+        val clamped = percent.coerceIn(WyuSoftGlassBlurMin, 100)
         if (_softGlassBlur.value == clamped) return
         _softGlassBlur.value = clamped
         prefs?.edit()?.putInt(KeySoftGlassBlur, clamped)?.apply()
@@ -243,6 +338,39 @@ object WyuAppearance {
         if (_softGlass.value == enabled) return
         _softGlass.value = enabled
         prefs?.edit()?.putBoolean(KeySoftGlass, enabled)?.apply()
+    }
+
+    fun setSoftGlassTuning(context: Context, tuning: WyuSoftGlassTuning) {
+        ensureLoaded(context)
+        val clamped = tuning.copy(
+            refractionIor = ((tuning.refractionIor.coerceIn(0.1f, 10f) * 10f).roundToInt() / 10f),
+            saturationLight = ((tuning.saturationLight.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            saturationDark = ((tuning.saturationDark.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            edgeThickness = tuning.edgeThickness.coerceIn(0f, 800f).roundToInt().toFloat(),
+            shapeEdgePx = tuning.shapeEdgePx.coerceIn(0.5f, 432f).roundToInt().toFloat(),
+            shapeEdgePow = ((tuning.shapeEdgePow.coerceIn(0.05f, 22.8f) * 20f).roundToInt() / 20f),
+            reflectOffset = ((tuning.reflectOffset.coerceIn(-3200f, 4800f) / 10f).roundToInt() * 10f),
+            reflectionStrength = ((tuning.reflectionStrength.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            reflectLighten = ((tuning.reflectLighten.coerceIn(-4.8f, 7.2f) * 20f).roundToInt() / 20f),
+            cardTintAlphaLight = ((tuning.cardTintAlphaLight.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
+            cardTintAlphaDark = ((tuning.cardTintAlphaDark.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
+        )
+        if (_softGlassTuning.value == clamped) return
+        _softGlassTuning.value = clamped
+        prefs?.edit()
+            ?.putFloat(KeySoftGlassTuningIor, clamped.refractionIor)
+            ?.putFloat(KeySoftGlassTuningSaturationLight, clamped.saturationLight)
+            ?.putFloat(KeySoftGlassTuningSaturationDark, clamped.saturationDark)
+            ?.putFloat(KeySoftGlassTuningEdge, clamped.edgeThickness)
+            ?.putFloat(KeySoftGlassTuningShapeEdgePx, clamped.shapeEdgePx)
+            ?.putFloat(KeySoftGlassTuningShapeEdgePow, clamped.shapeEdgePow)
+            ?.putFloat(KeySoftGlassTuningReflectOffset, clamped.reflectOffset)
+            ?.putFloat(KeySoftGlassTuningReflection, clamped.reflectionStrength)
+            ?.putFloat(KeySoftGlassTuningReflectLighten, clamped.reflectLighten)
+            ?.putFloat(KeySoftGlassTuningCardTintLight, clamped.cardTintAlphaLight)
+            ?.putFloat(KeySoftGlassTuningCardTintDark, clamped.cardTintAlphaDark)
+            ?.remove(KeySoftGlassTuningCardTint)
+            ?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {

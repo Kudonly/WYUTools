@@ -35,16 +35,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,7 +83,9 @@ fun ToolsContent(
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp),
     ) {
-        Spacer(Modifier.height(topInset + 4.dp))
+        // MeContent starts its first card at topInset + 8dp column padding
+        // + 14dp spacedBy, so match that exact offset here.
+        Spacer(Modifier.height(topInset + 22.dp))
         ScheduleToolEntry(
             focus = scheduleFocus,
             week = scheduleWeek,
@@ -124,10 +129,13 @@ private fun ToolCard(
     title: String,
     onClick: (SharedCardSnapshot?) -> Unit,
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 20.dp,
+    cornerRadius: Dp = WyuCardCornerRadius,
     color: Color? = null,
     contentColor: Color? = null,
-    content: @Composable ColumnScope.(Modifier) -> Unit,
+    content: @Composable ColumnScope.(
+        titleModifier: Modifier,
+        onTitleLayout: (TextLayoutResult) -> Unit,
+    ) -> Unit,
 ) {
     val graphicsLayer = rememberGraphicsLayer()
     val scope = rememberCoroutineScope()
@@ -136,8 +144,17 @@ private fun ToolCard(
     val radiusPx = with(density) { cornerRadius.toPx() }
     val cardBounds = remember { Rect() }
     val titleBounds = remember { Rect() }
+    // The title is an element of its own: the card layer below never contains
+    // it, and it is painted on top of that layer with the layout the Text node
+    // in the content reports. The morph's stretched card image is therefore
+    // always title-free, and the flying title is the only title on screen.
+    // Its place is resolved in the card's local coordinates at draw time:
+    // window coordinates go stale mid-swipe (pager layer offsets are applied
+    // without a global-position pass for both nodes in the same frame).
+    val titleLayout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    var cardCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var titleCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val titleStyle = MiuixTheme.textStyles.headline2
-    val surfaceColor = MiuixTheme.colorScheme.surface
     val titleFontSizePx = with(density) { titleStyle.fontSize.toPx() }
     val titleStyleLineHeightPx = with(density) {
         val lineHeight = titleStyle.lineHeight
@@ -148,40 +165,23 @@ private fun ToolCard(
         }).toPx()
     }
     var launching by remember { mutableStateOf(false) }
-    val fallbackColor = (color ?: surfaceColor).toArgb()
     val cardColors = if (color != null && contentColor != null) {
         CardDefaults.defaultColors(color = color, contentColor = contentColor)
     } else {
         CardDefaults.defaultColors()
     }
-
-    Card(
-        onClick = {
-            if (cardBounds.isEmpty || launching) {
-                if (!launching) onClick(null)
-                return@Card
-            }
+    val openCard: () -> Unit = {
+        if (cardBounds.isEmpty || launching) {
+            if (!launching) onClick(null)
+        } else {
             launching = true
             scope.launch {
                 val bitmap = runCatching {
                     graphicsLayer.toImageBitmap().asAndroidBitmap()
                 }.getOrNull()
-                val snapshotBitmap = bitmap?.let {
-                    if (SharedViewTransition.isSupported()) {
-                        it
-                    } else {
-                        eraseCardTitle(
-                            bitmap = it,
-                            cardBounds = cardBounds,
-                            titleBounds = titleBounds,
-                            fallbackColor = fallbackColor,
-                            paddingPx = (3 * density.density).roundToInt(),
-                        )
-                    }
-                }
                 launching = false
                 onClick(
-                    snapshotBitmap?.let {
+                    bitmap?.let {
                         SharedCardSnapshot(
                             bitmap = it,
                             bounds = Rect(cardBounds),
@@ -198,9 +198,13 @@ private fun ToolCard(
                     },
                 )
             }
-        },
+        }
+    }
+    Card(
+        onClick = openCard,
         modifier = modifier
             .onGloballyPositioned { coordinates ->
+                cardCoordinates = coordinates
                 val bounds = coordinates.boundsInWindow()
                 val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
                     null
@@ -219,27 +223,47 @@ private fun ToolCard(
                     this@drawWithContent.drawContent()
                 }
                 drawLayer(graphicsLayer)
+                val layout = titleLayout.value
+                val card = cardCoordinates
+                val title = titleCoordinates
+                if (layout != null && !WyuMorphPageState.titleHidden &&
+                    card != null && title != null &&
+                    card.isAttached && title.isAttached
+                ) {
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = card.localPositionOf(title, Offset.Zero),
+                    )
+                }
             },
         insideMargin = PaddingValues(0.dp),
         cornerRadius = cornerRadius,
         colors = cardColors,
     ) {
         content(
-            Modifier.onGloballyPositioned { coordinates ->
-                val bounds = coordinates.boundsInWindow()
-                val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
-                    null
-                } else {
-                    IntArray(2).also(view::getLocationOnScreen)
+            Modifier
+                .drawWithContent {
+                    // Reserved for layout only; the card's draw pass paints the
+                    // title above the recorded layer.
                 }
-                titleBounds.set(
-                    bounds.left.roundToInt() + (origin?.get(0) ?: 0),
-                    bounds.top.roundToInt() + (origin?.get(1) ?: 0),
-                    bounds.right.roundToInt() + (origin?.get(0) ?: 0),
-                    bounds.bottom.roundToInt() + (origin?.get(1) ?: 0),
-                )
-            },
-        )
+                .onGloballyPositioned { coordinates ->
+                    titleCoordinates = coordinates
+                    val bounds = coordinates.boundsInWindow()
+                    val origin = if (SharedViewTransition.boundsUseWindowCoordinate) {
+                        null
+                    } else {
+                        IntArray(2).also(view::getLocationOnScreen)
+                    }
+                    titleBounds.set(
+                        bounds.left.roundToInt() + (origin?.get(0) ?: 0),
+                        bounds.top.roundToInt() + (origin?.get(1) ?: 0),
+                        bounds.right.roundToInt() + (origin?.get(0) ?: 0),
+                        bounds.bottom.roundToInt() + (origin?.get(1) ?: 0),
+                    )
+                },
+        ) { layoutResult ->
+            titleLayout.value = layoutResult
+        }
     }
 }
 
@@ -250,7 +274,7 @@ private fun ToolEntry(
     summary: String,
     onClick: (SharedCardSnapshot?) -> Unit,
 ) {
-    ToolCard(title = title, onClick = onClick) { titleModifier ->
+    ToolCard(title = title, onClick = onClick) { titleModifier, onTitleLayout ->
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -281,6 +305,7 @@ private fun ToolEntry(
                     style = MiuixTheme.textStyles.headline2,
                     fontWeight = FontWeight.Medium,
                     modifier = titleModifier,
+                    onTextLayout = onTitleLayout,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -325,8 +350,7 @@ private fun ScheduleToolEntry(
     ToolCard(
         title = "课表",
         onClick = onClick,
-        cornerRadius = 24.dp,
-    ) { titleModifier ->
+    ) { titleModifier, onTitleLayout ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -353,6 +377,7 @@ private fun ScheduleToolEntry(
                     style = MiuixTheme.textStyles.headline2,
                     fontWeight = FontWeight.Medium,
                     modifier = titleModifier,
+                    onTextLayout = onTitleLayout,
                 )
                 Spacer(Modifier.weight(1f))
                 Icon(
@@ -388,78 +413,4 @@ private fun ScheduleToolEntry(
             )
         }
     }
-}
-
-/** The title is animated as a real Text in the overlay, so remove it from the snapshot. */
-private fun eraseCardTitle(
-    bitmap: Bitmap,
-    cardBounds: Rect,
-    titleBounds: Rect,
-    fallbackColor: Int,
-    paddingPx: Int,
-): Bitmap {
-    if (titleBounds.isEmpty || cardBounds.isEmpty || bitmap.isRecycled) return bitmap
-    val left = (titleBounds.left - cardBounds.left - paddingPx).coerceAtLeast(0)
-    val top = (titleBounds.top - cardBounds.top - paddingPx / 2).coerceAtLeast(0)
-    val right = (titleBounds.right - cardBounds.left + paddingPx).coerceAtMost(bitmap.width)
-    val bottom = (titleBounds.bottom - cardBounds.top + paddingPx / 4).coerceAtMost(bitmap.height)
-    if (right <= left || bottom <= top) return bitmap
-    // GraphicsLayer snapshots are HARDWARE bitmaps; copy to software before sampling pixels.
-    val mutable = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
-        ?: return bitmap
-    // One flat fill can never match frosted glass: the original sampled a far
-    // edge and left a bright rectangle. Rebuild each row from the pixels just
-    // outside both sides of the band instead, so only the smooth local blur
-    // remains and the patch is invisible.
-    val width = right - left
-    val row = IntArray(width)
-    val fallback = fallbackColor or 0xFF000000.toInt()
-    for (y in top until bottom) {
-        var lr = 0
-        var lg = 0
-        var lb = 0
-        var ln = 0
-        var rr = 0
-        var rg = 0
-        var rb = 0
-        var rn = 0
-        for (dy in -2..2) {
-            val sy = (y + dy).coerceIn(0, mutable.height - 1)
-            for (dx in 1..5) {
-                val lp = mutable.getPixel((left - dx).coerceIn(0, mutable.width - 1), sy)
-                if (lp ushr 24 >= 0xF0) {
-                    lr += (lp shr 16) and 0xFF
-                    lg += (lp shr 8) and 0xFF
-                    lb += lp and 0xFF
-                    ln++
-                }
-                val rp = mutable.getPixel((right - 1 + dx).coerceIn(0, mutable.width - 1), sy)
-                if (rp ushr 24 >= 0xF0) {
-                    rr += (rp shr 16) and 0xFF
-                    rg += (rp shr 8) and 0xFF
-                    rb += rp and 0xFF
-                    rn++
-                }
-            }
-        }
-        if (ln == 0 && rn == 0) {
-            row.fill(fallback)
-        } else {
-            val lColorR = if (ln > 0) lr / ln else rr / rn
-            val lColorG = if (ln > 0) lg / ln else rg / rn
-            val lColorB = if (ln > 0) lb / ln else rb / rn
-            val rColorR = if (rn > 0) rr / rn else lColorR
-            val rColorG = if (rn > 0) rg / rn else lColorG
-            val rColorB = if (rn > 0) rb / rn else lColorB
-            for (x in 0 until width) {
-                val t = (x + 1f) / (width + 1f)
-                val r = (lColorR + (rColorR - lColorR) * t).roundToInt()
-                val g = (lColorG + (rColorG - lColorG) * t).roundToInt()
-                val b = (lColorB + (rColorB - lColorB) * t).roundToInt()
-                row[x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-        mutable.setPixels(row, 0, width, left, y, width, 1)
-    }
-    return mutable
 }

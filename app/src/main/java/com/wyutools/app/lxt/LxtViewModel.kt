@@ -22,6 +22,48 @@ private const val VALVE_USING_MAX_AGE = 60 * 60 * 1000L
 private const val VALVE_USING_RETRY_AGE = 10 * 60 * 1000L
 private const val BALANCE_FRESH_AGE = 60 * 1000L
 
+private val NaturalAreaOrder = Comparator<AreaNode> { a, b -> naturalCompare(a.name, b.name) }
+
+/**
+ * Campus entries name their water service ("…热水" / "…冷水"), so the campus
+ * list hides the entries that belong to the other bind type. Neutral names
+ * without either keyword stay visible for both types.
+ */
+private fun matchesBindType(name: String, forValve: Boolean): Boolean {
+    val hot = name.contains("热水")
+    val cold = name.contains("冷水")
+    return if (forValve) hot || !cold else cold || !hot
+}
+
+/** Digit runs compare by value, so 2栋 < 10栋 and 101 < 1001. */
+private fun naturalCompare(a: String, b: String): Int {
+    var i = 0
+    var j = 0
+    while (i < a.length && j < b.length) {
+        val ca = a[i]
+        val cb = b[j]
+        if (ca.isDigit() && cb.isDigit()) {
+            val startA = i
+            val startB = j
+            while (i < a.length && a[i].isDigit()) i++
+            while (j < b.length && b[j].isDigit()) j++
+            val numA = a.substring(startA, i).trimStart('0')
+            val numB = b.substring(startB, j).trimStart('0')
+            val cmp = if (numA.length != numB.length) {
+                numA.length - numB.length
+            } else {
+                numA.compareTo(numB)
+            }
+            if (cmp != 0) return cmp
+        } else {
+            if (ca != cb) return ca.compareTo(cb)
+            i++
+            j++
+        }
+    }
+    return (a.length - i) - (b.length - j)
+}
+
 data class LxtUiState(
     val token: String? = null,
     val account: String = "",
@@ -44,8 +86,6 @@ data class LxtUiState(
     val valveChecking: Boolean = false,
     val valveBusy: Boolean = false,
     val valveResumePrompt: Boolean = false,
-    val valveCodeBusy: Boolean = false,
-    val valveCodeError: String? = null,
     val message: String? = null,
     val bindForValve: Boolean = false,
     val bindLevel: Int = 0,
@@ -240,8 +280,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                 valveUsingActive = false,
                 valveChecking = false,
                 valveResumePrompt = false,
-                valveCodeBusy = false,
-                valveCodeError = null,
             )
         }
     }
@@ -315,6 +353,7 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             try {
+                val forValve = _ui.value.bindForValve
                 val items = withContext(Dispatchers.IO) {
                     when (level) {
                         0 -> LxtApi.lowerAreas(token, LxtApi.SCHOOL_ID)
@@ -323,7 +362,13 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                         else -> LxtApi.rooms(token, _ui.value.bindPath.getOrNull(2)?.id ?: "")
                     }
                 }
-                _ui.update { it.copy(bindItems = items, bindLoading = false) }
+                val visible = if (level == 0) {
+                    items.filter { matchesBindType(it.name, forValve) }
+                } else {
+                    items
+                }
+                val sorted = if (level == 0) visible else visible.sortedWith(NaturalAreaOrder)
+                _ui.update { it.copy(bindItems = sorted, bindLoading = false) }
             } catch (e: Exception) {
                 _ui.update { it.copy(bindLoading = false, bindError = friendly(e)) }
                 if (e is ApiException && e.code == -44) sessionExpired()
@@ -430,55 +475,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(bind = info, coldCent = null, coldError = null, message = "绑定成功") }
         refreshBalances()
         onDone()
-    }
-
-    fun clearValveCodeError() = _ui.update { it.copy(valveCodeError = null) }
-
-    fun bindValveByCode(code: String, onDone: () -> Unit) {
-        val state = _ui.value
-        val token = state.token ?: return
-        if (state.valveCodeBusy) return
-        val mac = LxtApi.macFromCode(code)
-        if (mac == null) {
-            _ui.update { it.copy(valveCodeError = "无法识别设备码，请粘贴设备二维码内容或 12 位设备码") }
-            return
-        }
-        _ui.update { it.copy(valveCodeBusy = true, valveCodeError = null) }
-        viewModelScope.launch {
-            try {
-                val machine = withContext(Dispatchers.IO) { LxtApi.machineByMac(token, mac) }
-                    ?: throw ApiException(-1, "未查询到该设备，请确认设备码")
-                if (machine.deviceVer.isBlank()) throw ApiException(-1, "设备信息不完整，请稍后重试")
-                if (LxtApi.channelWay(machine.deviceVer) == 0) {
-                    throw ApiException(-2, "该设备不支持远程开阀，请现场操作")
-                }
-                val device = ValveDevice(
-                    machineId = machine.machineId,
-                    deviceMac = machine.deviceMac.ifEmpty { mac },
-                    deviceVer = machine.deviceVer,
-                    siteId = machine.siteId,
-                    siteFlag = machine.siteFlag,
-                    roomName = machine.roomName,
-                )
-                prefs.edit().putString("valveDevice", device.toJson()).apply()
-                _ui.update {
-                    it.copy(
-                        valveDevice = device,
-                        valveCodeBusy = false,
-                        valveCodeError = null,
-                        message = "热水设备绑定成功",
-                    )
-                }
-                onDone()
-            } catch (e: Exception) {
-                if (e is ApiException && e.code == -44) {
-                    _ui.update { it.copy(valveCodeBusy = false) }
-                    sessionExpired()
-                } else {
-                    _ui.update { it.copy(valveCodeBusy = false, valveCodeError = friendly(e)) }
-                }
-            }
-        }
     }
 
     fun openValve() {
@@ -694,8 +690,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                 valveUsingActive = false,
                 valveChecking = false,
                 valveResumePrompt = if (resumeOpen) it.valveDevice != null else it.valveResumePrompt,
-                valveCodeBusy = false,
-                valveCodeError = null,
                 balanceBusy = false,
                 valveBusy = false,
                 message = message,

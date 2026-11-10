@@ -136,6 +136,7 @@ fun WyuOverlayDialog(
     val surface = MiuixTheme.colorScheme.background
     val dark = LocalWyuDarkTheme.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val cardColor = when {
         backdrop == null -> surface
@@ -160,7 +161,14 @@ fun WyuOverlayDialog(
                 } else {
                     Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
                 },
-                bgSaturation = softGlassBgSaturation(dark),
+                shapeEdgePx = tuning.shapeEdgePx,
+                shapeEdgePow = tuning.shapeEdgePow,
+                refractionThicknessPx = tuning.edgeThickness,
+                reflectionThicknessPx = tuning.reflectOffset,
+                reflectionLighten = tuning.reflectLighten,
+                bgSaturation = tuning.saturation(dark),
+                reflectionStrength = tuning.reflectionStrength,
+                refractionIor = tuning.refractionIor,
             )
         } else {
             Modifier.textureBlur(

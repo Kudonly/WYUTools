@@ -37,7 +37,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.BrightnessMedium
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.runtime.Composable
@@ -77,6 +76,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     authVm: AuthViewModel,
     onBack: () -> Unit,
+    onOpenAdvanced: () -> Unit,
 ) {
     val scroll = rememberScrollState()
     val fraction = rememberWyuCollapseFraction(scroll)
@@ -89,7 +89,8 @@ fun SettingsScreen(
     val themeMode by WyuAppearance.themeMode.collectAsState()
     val hasCustom by WyuAppearance.hasCustomWallpaper.collectAsState()
     val customWallpaper by WyuAppearance.customWallpaper.collectAsState()
-    val customBrightness by WyuAppearance.customBrightness.collectAsState()
+    val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
+    val brightnessDark by WyuAppearance.customBrightnessDark.collectAsState()
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -197,17 +198,10 @@ fun SettingsScreen(
                     }
                 },
             )
-            Text(
-                text = "“相册”可自定义壁纸，建议使用低明暗对比度壁纸。",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            )
             if (selected == WyuWallpaper.Custom && hasCustom) {
                 CustomBrightnessCard(
-                    brightness = customBrightness,
-                    dark = dark,
-                    onChange = { WyuAppearance.setCustomBrightness(context, it) },
+                    brightness = if (dark) brightnessDark else brightnessLight,
+                    onChange = { WyuAppearance.setCustomBrightness(context, it, dark) },
                 )
                 Spacer(Modifier.height(12.dp))
             }
@@ -252,10 +246,6 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            SmallTitle(
-                text = "通用",
-                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-            )
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -302,9 +292,9 @@ fun SettingsScreen(
                             Spacer(Modifier.height(3.dp))
                             Text(
                                 text = if (softGlassSupported) {
-                                    "Beta 实验性功能，可能导致功耗增加、卡顿发热，请酌情开启"
+                                    "可能导致功耗增加、卡顿发热，请酌情开启"
                                 } else {
-                                    "Beta 实验性功能，需要 Android 13 及以上系统"
+                                    "需要 Android 13 及以上系统"
                                 },
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -322,13 +312,50 @@ fun SettingsScreen(
                             label = "模糊半径",
                             valueText = "$softGlassBlur%",
                             value = softGlassBlur.toFloat(),
-                            valueRange = 0f..100f,
+                            valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
                             onChange = { WyuAppearance.setSoftGlassBlur(context, it.roundToInt()) },
                         )
                     }
                 }
             }
             Spacer(Modifier.height(12.dp))
+            // The tuning screen only matters while the material is on.
+            if (softGlass && softGlassSupported) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    pressFeedbackType = PressFeedbackType.Sink,
+                    onClick = onOpenAdvanced,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "高级模式",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "调整折射、反射与边缘等材质参数",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
             SmallTitle(
                 text = "关于",
                 insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
@@ -465,7 +492,7 @@ private fun appVersionName(context: Context): String = runCatching {
 }.getOrNull().orEmpty().ifBlank { "1.0" }
 
 @Composable
-private fun SoftGlassSliderRow(
+internal fun SoftGlassSliderRow(
     label: String,
     valueText: String,
     value: Float,
@@ -544,7 +571,6 @@ private fun ThemeModeChip(
 @Composable
 private fun CustomBrightnessCard(
     brightness: Float,
-    dark: Boolean,
     onChange: (Float) -> Unit,
 ) {
     Card(
@@ -554,13 +580,6 @@ private fun CustomBrightnessCard(
     ) {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Outlined.BrightnessMedium,
-                    contentDescription = null,
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(8.dp))
                 Text(
                     text = "背景亮度",
                     style = MiuixTheme.textStyles.headline2,
@@ -576,17 +595,8 @@ private fun CustomBrightnessCard(
             Slider(
                 value = brightness,
                 onValueChange = onChange,
-                valueRange = 0.8f..1f,
+                valueRange = 0.5f..1f,
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                text = if (dark) {
-                    "深色模式下背景会强制压暗，滑块可在此基础上继续调整"
-                } else {
-                    "调低亮度可让壁纸上的内容更清晰"
-                },
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
     }
