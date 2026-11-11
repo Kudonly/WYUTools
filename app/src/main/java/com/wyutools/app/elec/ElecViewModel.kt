@@ -30,6 +30,10 @@ data class ElecUiState(
     val loading: Boolean = false,
     val result: ElecInfo? = null,
     val error: String? = null,
+    /** The reading on screen came from disk, not from this query. */
+    val stale: Boolean = false,
+    /** When that cached reading was fetched, so the card can date it. */
+    val staleAt: Long = 0L,
     val history: List<ElecSnapshot> = emptyList(),
     val stats: ElecStats = ElecStats(),
     val period: ElecPeriod = ElecPeriod.ALL,
@@ -91,6 +95,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                 building = filtered,
                 result = null,
                 error = null,
+                stale = false,
+                staleAt = 0L,
                 history = emptyList(),
                 stats = ElecStats(),
                 recharge = null,
@@ -118,6 +124,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                 room = filtered,
                 result = null,
                 error = null,
+                stale = false,
+                staleAt = 0L,
                 history = emptyList(),
                 stats = ElecStats(),
                 recharge = null,
@@ -151,6 +159,12 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
         }
         prefs.edit().putString("building", building).putString("room", room).apply()
         val startedAt = SystemClock.elapsedRealtime()
+        // Seed the card with this room's last reading before the network is even
+        // touched. Without it a slow campus network leaves the page empty for
+        // the whole timeout; the seed is marked stale and swapped out the moment
+        // the live query lands.
+        val seed = if (state.result == null) readCachedInfo(building, room) else null
+        val seedHistory = if (seed != null) readHistory(building, room) else emptyList()
         _ui.update {
             it.copy(
                 loading = true,
@@ -158,6 +172,15 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                 recharge = null,
                 rechargeError = null,
                 rechargeLoading = false,
+                result = seed?.info ?: it.result,
+                history = if (seed != null) seedHistory else it.history,
+                stats = if (seed != null) {
+                    computeStats(seedHistory, seed.info.remainingKwh)
+                } else {
+                    it.stats
+                },
+                stale = if (seed != null) true else it.stale,
+                staleAt = if (seed != null) seed.fetchedAt else it.staleAt,
             )
         }
         viewModelScope.launch {
@@ -166,7 +189,13 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                     val queryInfo = ElecApi.query(building, room)
                     val key = historyKey(building, room)
                     val merged = appendSnapshot(decodeHistory(prefs.getString(key, null)), queryInfo)
-                    prefs.edit().putString(key, encodeHistory(merged)).apply()
+                    prefs.edit()
+                        .putString(key, encodeHistory(merged))
+                        .putString(
+                            infoKey(building, room),
+                            encodeCachedInfo(ElecCachedInfo(queryInfo, System.currentTimeMillis())),
+                        )
+                        .apply()
                     queryInfo to merged
                 }
                 val stats = computeStats(history, info.remainingKwh)
@@ -175,6 +204,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                         result = info,
                         history = history,
                         stats = stats,
+                        stale = false,
+                        staleAt = 0L,
                     )
                 }
                 holdQueryIndicator(startedAt)
@@ -182,9 +213,54 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                 loadRecharge(building, room, _ui.value.period)
             } catch (e: Exception) {
                 holdQueryIndicator(startedAt)
-                _ui.update { it.copy(loading = false, error = friendlyMessage(e)) }
+                // A timeout is not a reason to blank the page: the last reading
+                // is still the best answer available, so keep it and say so.
+                val fallback = if (isOfflineFailure(e)) readCachedInfo(building, room) else null
+                if (fallback != null) {
+                    val stored = readHistory(building, room)
+                    _ui.update {
+                        it.copy(
+                            loading = false,
+                            error = friendlyMessage(e),
+                            result = fallback.info,
+                            history = stored.ifEmpty { it.history },
+                            stats = computeStats(
+                                stored.ifEmpty { it.history },
+                                fallback.info.remainingKwh,
+                            ),
+                            stale = true,
+                            staleAt = fallback.fetchedAt,
+                        )
+                    }
+                } else {
+                    _ui.update {
+                        it.copy(
+                            loading = false,
+                            error = friendlyMessage(e),
+                            stale = false,
+                            staleAt = 0L,
+                        )
+                    }
+                }
             }
         }
+    }
+
+    private fun readCachedInfo(building: String, room: String): ElecCachedInfo? =
+        decodeCachedInfo(prefs.getString(infoKey(building, room), null))
+
+    private fun readHistory(building: String, room: String): List<ElecSnapshot> =
+        decodeHistory(prefs.getString(historyKey(building, room), null))
+
+    /**
+     * Only a dead or slow network falls back to the cached reading. A server
+     * complaint (wrong building, bad room number) must stay an error — showing
+     * an unrelated reading there would be worse than showing nothing.
+     */
+    private fun isOfflineFailure(e: Exception): Boolean = when (e) {
+        is ElecException -> false
+        is SocketTimeoutException, is ConnectException, is UnknownHostException, is IOException -> true
+        else -> false
     }
 
     private suspend fun holdQueryIndicator(startedAt: Long) {
@@ -440,6 +516,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun historyKey(building: String, room: String): String = "history_${building}_$room"
+
+    private fun infoKey(building: String, room: String): String = "info_${building}_$room"
 
     private fun friendlyMessage(e: Exception): String = when (e) {
         is ElecException -> e.message ?: "查询失败"

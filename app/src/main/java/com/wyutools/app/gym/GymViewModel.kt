@@ -2,6 +2,7 @@ package com.wyutools.app.gym
 
 import android.app.Application
 import android.content.Context
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wyutools.app.auth.sanitizeWyuText
@@ -23,6 +24,11 @@ data class GymNotice(
     val message: String,
     val error: Boolean = false,
 )
+
+// One action can report the same reason more than once — the booking call
+// fails, then the venue and record refreshes it triggers fail the same way. A
+// repeat inside this window is the same message to the user, so it is dropped.
+private const val NoticeDedupeMillis = 1500L
 
 data class GymUiState(
     val user: GymUser? = null,
@@ -52,6 +58,8 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         onCookieUpdated = { prefs.edit().putString("cookie", it).apply() },
     )
     private val venueCache = mutableMapOf<LocalDate, List<GymVenue>>()
+    private var lastNoticeText: String? = null
+    private var lastNoticeAt = 0L
     private val authPrefs = app.getSharedPreferences("auth", Context.MODE_PRIVATE)
 
     /**
@@ -289,8 +297,28 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun consumeNotice() {
-        _ui.update { it.copy(notice = null) }
+    /**
+     * Hands the pending notice to exactly one caller and clears it in the same
+     * step. Reading the state and then calling a separate consumeNotice() let
+     * every composition that had already seen the same state show its own
+     * toast, so a single booking could pop two or three of them. Popping here
+     * is atomic: the first taker wins and the rest get null.
+     *
+     * An identical message repeated inside [NoticeDedupeMillis] is dropped too.
+     * After a failed booking the venue and record refreshes report the very
+     * same reason, which would otherwise queue another toast right behind it.
+     */
+    @Synchronized
+    fun takeNotice(): GymNotice? {
+        val pending = _ui.value.notice ?: return null
+        _ui.value = _ui.value.copy(notice = null)
+        val now = SystemClock.elapsedRealtime()
+        if (pending.message == lastNoticeText && now - lastNoticeAt < NoticeDedupeMillis) {
+            return null
+        }
+        lastNoticeText = pending.message
+        lastNoticeAt = now
+        return pending
     }
 
     private fun loadAll() {

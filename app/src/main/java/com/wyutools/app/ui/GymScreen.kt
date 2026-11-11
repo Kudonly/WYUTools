@@ -234,13 +234,20 @@ private fun GymContent(
         prefetchRecords = true
     }
 
+    // One toast per pending notice. The notice is taken out of the state by the
+    // view model (atomically), so a duplicate composition cannot show it again,
+    // and a message that repeats within a moment is dropped there as well.
     LaunchedEffect(ui.notice) {
-        val notice = ui.notice ?: return@LaunchedEffect
+        if (ui.notice == null) return@LaunchedEffect
+        val notice = vm.takeNotice()
+        // A finished booking closes the dialog whether or not its own message
+        // was the one shown, so a dropped duplicate never strands the sheet.
         if (bookingTarget != null && !ui.booking) {
             bookingTarget = null
         }
-        Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
-        vm.consumeNotice()
+        if (notice != null) {
+            Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     WyuPageScaffold(

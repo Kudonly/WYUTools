@@ -232,6 +232,9 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                 info = ui.result,
                 stats = ui.stats,
                 dorm = dormLabel(ui),
+                stale = ui.stale,
+                staleAt = ui.staleAt,
+                refreshing = ui.loading,
             )
             Spacer(Modifier.height(16.dp))
             RechargeEntryCard(
@@ -435,6 +438,9 @@ private fun ResultCard(
     info: ElecInfo?,
     stats: ElecStats,
     dorm: String,
+    stale: Boolean = false,
+    staleAt: Long = 0L,
+    refreshing: Boolean = false,
 ) {
     val low = info != null && info.remainingKwh < 20.0
     val container = if (low) {
@@ -515,6 +521,26 @@ private fun ResultCard(
                 Text(
                     text = "电量偏低，请及时充值",
                     style = MiuixTheme.textStyles.footnote1,
+                )
+            }
+        }
+        if (stale && staleAt > 0L) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = buildString {
+                        append("上次查询 · ")
+                        append(RECORD_TIME_FORMATTER.format(Instant.ofEpochMilli(staleAt)))
+                        append(if (refreshing) "，正在刷新" else "，本次未刷新")
+                    },
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = onContainer.copy(alpha = 0.75f),
                 )
             }
         }
