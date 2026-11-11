@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.wyutools.app.auth.sanitizeWyuText
 import com.wyutools.app.ui.WyuMorphPageState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,27 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         onCookieUpdated = { prefs.edit().putString("cookie", it).apply() },
     )
     private val venueCache = mutableMapOf<LocalDate, List<GymVenue>>()
+    private val authPrefs = app.getSharedPreferences("auth", Context.MODE_PRIVATE)
+
+    /**
+     * The gym profile endpoint currently answers null for the identity fields,
+     * so fall back to the school SSO account already stored for the schedule and
+     * password pages. Booking needs the real 学号: it is what the server compares
+     * the anti-tamper VERIFICATION against, and submitting "null" is rejected as
+     * 参数非法修改.
+     */
+    private fun ssoIdentity(): GymUser? {
+        val account = sanitizeWyuText(authPrefs.getString("sso_account", null)) ?: return null
+        val name = sanitizeWyuText(authPrefs.getString("sso_name", null)) ?: account
+        return GymUser(name = name, account = account)
+    }
+
+    private suspend fun resolveUser(): GymUser {
+        val fromGym = withContext(Dispatchers.IO) { api.validateSession() }
+        return fromGym.takeIf { it.account.isNotBlank() }
+            ?: ssoIdentity()
+            ?: throw GymException("登录已失效，请重新登录。", authExpired = true)
+    }
 
     private val _ui = MutableStateFlow(
         GymUiState(
@@ -66,14 +88,16 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun restoreSession() {
         val cookie = prefs.getString("cookie", "").orEmpty()
-        val name = prefs.getString("name", "").orEmpty()
-        val account = prefs.getString("account", "").orEmpty()
+        // Stale caches may hold the literal "null" the profile endpoint used to
+        // hand us, so sanitise before trusting them.
+        val name = sanitizeWyuText(prefs.getString("name", null))
+        val account = sanitizeWyuText(prefs.getString("account", null))
         if (cookie.isBlank()) {
             _ui.update { it.copy(checkingSession = false, loginNeeded = true) }
             return
         }
 
-        val cachedUser = if (name.isNotBlank() && account.isNotBlank()) {
+        val cachedUser = if (name != null && account != null) {
             GymUser(name = name, account = account)
         } else {
             null
@@ -84,7 +108,7 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             try {
-                val user = withContext(Dispatchers.IO) { api.validateSession() }
+                val user = resolveUser()
                 saveUser(user)
                 _ui.update {
                     it.copy(
@@ -135,7 +159,7 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         api.resetSession()
         viewModelScope.launch {
             try {
-                val user = withContext(Dispatchers.IO) { api.validateSession() }
+                val user = resolveUser()
                 saveUser(user)
                 venueCache.clear()
                 _ui.update {

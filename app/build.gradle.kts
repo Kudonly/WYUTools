@@ -13,8 +13,8 @@ android {
         applicationId = "com.wyutools.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "2.5"
+        versionCode = 12
+        versionName = "2.5.1"
     }
 
     buildTypes {
@@ -36,6 +36,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Debug-only diagnostics (gym request tracing) read BuildConfig.DEBUG.
+        buildConfig = true
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")

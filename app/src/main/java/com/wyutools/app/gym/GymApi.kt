@@ -1,5 +1,8 @@
 package com.wyutools.app.gym
 
+import android.util.Log
+import com.wyutools.app.BuildConfig
+import com.wyutools.app.auth.sanitizeWyuText
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -101,11 +104,20 @@ class GymApi(
         checkAuthPayload(root)
         val data = root.optJSONObject("data")
             ?: throw GymException("登录已失效，请重新登录。", authExpired = true)
-        val account = data.optString("userAccount").trim()
-        if (account.isEmpty()) {
-            throw GymException("登录已失效，请重新登录。", authExpired = true)
+        // optString() turns a JSON null into the literal text "null", and this
+        // endpoint now answers exactly that for the identity fields. Left
+        // unsanitised it sails through the isEmpty() check and every booking is
+        // submitted with XGH/USERID/YYRXM = "null", which the server rejects as
+        // a tampered request ("参数非法修改").
+        val account = sanitizeWyuText(data.optString("userAccount")).orEmpty()
+        val name = sanitizeWyuText(data.optString("userName")) ?: account
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE_TAG,
+                "<- profile | ${raw.code} | account=${account.ifEmpty { "<empty>" }} " +
+                    "nameLen=${name.length} keys=${data.keys().asSequence().joinToString(",")}",
+            )
         }
-        val name = data.optString("userName").trim().ifEmpty { account }
         return GymUser(name = name, account = account)
     }
 
@@ -159,6 +171,14 @@ class GymApi(
         date: LocalDate,
         phone: String,
     ): GymRecord? {
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE_TAG,
+                "== book venue=${venue.name} wid=${venue.wid} bizWid=${venue.bizWid} " +
+                    "sport=${venue.sportName}/${venue.sportId} type=${venue.venueType}/${venue.venueTypeId} " +
+                    "slot=${slot.time} date=$date",
+            )
+        }
         ensureAppSession()
         val formData = buildApplyFormData(user, venue, slot, date, phone)
 
@@ -321,6 +341,12 @@ class GymApi(
             encoded.toByteArray(Charsets.UTF_8),
             android.util.Base64.NO_WRAP,
         )
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE_TAG,
+                "verification raw=$rawVerification ts=$timestamp encoded=$encoded",
+            )
+        }
         return linkedMapOf(
             "YYRXM" to user.name,
             "YYLX_DISPLAY" to "个人预约",
@@ -446,6 +472,12 @@ class GymApi(
     }
 
     private fun postRaw(path: String, fields: Map<String, Any>): String {
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE_TAG,
+                "-> $path | " + fields.entries.joinToString("&") { "${it.key}=${it.value}" },
+            )
+        }
         val builder = FormBody.Builder()
         fields.forEach { (key, value) -> builder.add(key, value.toString()) }
         val request = baseRequest(apiUrl(path))
@@ -453,6 +485,12 @@ class GymApi(
             .post(builder.build())
             .build()
         val raw = execute(request)
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE_TAG,
+                "<- $path | ${raw.code} | redirect=${raw.location ?: "-"} | ${raw.body.take(2000)}",
+            )
+        }
         if (raw.location != null) {
             throw GymException("校园统一认证登录已失效，请重新登录。", authExpired = true)
         }
@@ -750,6 +788,7 @@ class GymApi(
     }
 
     companion object {
+        private const val TRACE_TAG = "GymTrace"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/118.0 Mobile Safari/537.36"
