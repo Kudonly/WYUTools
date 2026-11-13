@@ -103,11 +103,15 @@ object ScheduleParser {
         val startTime = times.start ?: ScheduleSections.defaultStart(range.first)
         val endTime = times.end ?: ScheduleSections.defaultEnd(range.last)
         val teacher = optText(row, "teaxms", "teaxm", "jsxm", "teacher").orEmpty()
+        val className = formatClassNames(
+            optText(row, "jxbmc", "jxbms", "skbjmc", "bjmc", "className", "skbj", "bj").orEmpty(),
+        )
         val rooms = resolveRooms(row, weeks)
         return listOf(
             ParsedRow(
                 name = name,
                 teacher = teacher,
+                className = className,
                 room = rooms.fallback,
                 roomWeeks = rooms.byWeek,
                 dayOfWeek = day,
@@ -127,6 +131,27 @@ object ScheduleParser {
      * 地点名本身可能带连字符，因此只在最后一个“-数字”处拆分。
      * 空地点（如“-14”）表示该周尚未分配教室，保留空字符串以免回退成其他周的教室。
      */
+    /**
+     * 教务 jxbmc 形如 “250931,250932,250933”，也可能带分段标记 “250933[1-24]”。
+     * 只做展示层归一：按分隔符拆开去重，用顿号连起来，原值本身不改写。
+     */
+    private fun formatClassNames(raw: String): String {
+        val tokens = raw.split(',', '，', ';', '；', '、', '/', '|')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        return tokens.joinToString("、")
+    }
+
+    private fun mergeClassNames(current: String, incoming: String): String {
+        if (incoming.isBlank()) return current
+        if (current.isBlank()) return incoming
+        val merged = LinkedHashSet<String>()
+        merged.addAll(current.split('、').map { it.trim() }.filter { it.isNotEmpty() })
+        merged.addAll(incoming.split('、').map { it.trim() }.filter { it.isNotEmpty() })
+        return merged.joinToString("、")
+    }
+
     private fun resolveRooms(row: JSONObject, courseWeeks: Set<Int>): Rooms {
         val detailed = optText(row, "jxcdmc2")
         if (detailed != null) {
@@ -422,6 +447,7 @@ object ScheduleParser {
                     id = key,
                     name = row.name,
                     teacher = row.teacher,
+                    className = row.className,
                     room = row.room,
                     roomWeeks = row.roomWeeks.toMutableMap(),
                     dayOfWeek = row.dayOfWeek,
@@ -434,6 +460,7 @@ object ScheduleParser {
             } else {
                 existing.weeks.addAll(row.weeks)
                 existing.roomWeeks.putAll(row.roomWeeks)
+                existing.className = mergeClassNames(existing.className, row.className)
                 if (existing.room.isBlank() && row.room.isNotBlank()) {
                     existing.room = row.room
                 }
@@ -558,6 +585,7 @@ object ScheduleParser {
     private data class ParsedRow(
         val name: String,
         val teacher: String,
+        val className: String,
         val room: String,
         val roomWeeks: Map<Int, String>,
         val dayOfWeek: Int,
@@ -573,6 +601,7 @@ object ScheduleParser {
         val id: String,
         val name: String,
         val teacher: String,
+        var className: String,
         var room: String,
         val roomWeeks: MutableMap<Int, String>,
         val dayOfWeek: Int,
@@ -586,6 +615,7 @@ object ScheduleParser {
             id = id,
             name = name,
             teacher = teacher,
+            className = className,
             room = room,
             dayOfWeek = dayOfWeek,
             startSection = startSection,

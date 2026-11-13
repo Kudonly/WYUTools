@@ -444,10 +444,18 @@ class SsoApi {
             if (body.startsWith("<")) {
                 throw SsoException("教务系统返回了异常页面，请稍后重试。")
             }
-            checkAuthPayload(
-                runCatching { JSONObject(body) }.getOrNull()
-                    ?: throw SsoException("$label 数据格式异常，请稍后重试。"),
-            )
+            if (body.startsWith("[")) {
+                // teapj/viewPjData 这类接口直接返回数组，用 JSONObject 解析必然失败，
+                // 会误报成“数据格式异常”，所以按顶层形态分开处理。
+                val rows = runCatching { JSONArray(body) }.getOrNull()
+                    ?: throw SsoException("$label 数据格式异常，请稍后重试。")
+                checkAuthPayload(rows)
+            } else {
+                checkAuthPayload(
+                    runCatching { JSONObject(body) }.getOrNull()
+                        ?: throw SsoException("$label 数据格式异常，请稍后重试。"),
+                )
+            }
         }
         response.body
     }
@@ -617,6 +625,14 @@ class SsoApi {
             .firstOrNull { it.isNotEmpty() }
         if (message != null && SESSION_EXPIRED_HINTS.any { message.contains(it) }) {
             throw SsoException("登录已失效，请重新登录。", sessionExpired = true)
+        }
+    }
+
+    /** 数组响应逐行做登录态校验：正常业务行没有 code/message 字段，不会被误判。 */
+    private fun checkAuthPayload(rows: JSONArray) {
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            checkAuthPayload(row)
         }
     }
 

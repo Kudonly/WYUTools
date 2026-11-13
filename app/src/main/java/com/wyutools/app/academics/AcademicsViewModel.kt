@@ -327,7 +327,11 @@ class AcademicsViewModel(
                 val parsed = withContext(Dispatchers.Default) {
                     AcademicsParser.parseEvalDetail(task, raw)
                 }
-                _evalDetail.value = EvalDetailState(key = task.key, detail = parsed)
+                _evalDetail.value = if (parsed.answers.isEmpty()) {
+                    EvalDetailState(key = task.key, error = "教务没有返回这门课的评价明细。")
+                } else {
+                    EvalDetailState(key = task.key, detail = parsed)
+                }
             } catch (error: Throwable) {
                 _evalDetail.value = EvalDetailState(
                     key = task.key,

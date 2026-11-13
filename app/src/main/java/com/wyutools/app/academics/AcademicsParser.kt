@@ -274,7 +274,7 @@ object AcademicsParser {
     }
 
     fun parseEvalDetail(task: EvalTask, raw: String): EvalDetail {
-        val array = runCatching { JSONArray(raw) }.getOrNull() ?: JSONArray()
+        val array = evalAnswerArray(raw)
         val answers = ArrayList<EvalAnswer>(array.length())
         // 每题给一个分值（xzpf）和一个百分比答案（dtjg），总分就是按分值加权的
         // 百分比之和，教务页面上显示的"评分为：100"正是这么算出来的。
@@ -301,6 +301,30 @@ object AcademicsParser {
         }
         val total = if (scored) String.format(Locale.US, "%.0f", totalScore) else null
         return EvalDetail(task = task, total = total, answers = answers)
+    }
+
+    /**
+     * 评价明细正常返回的是数组 `[{xzpf,dtjg,zbmc,...}]`。
+     * 教务个别部署会套一层 `{data:[...]}` / `{rows:[...]}`，这里一并兼容，
+     * 免得只因为外壳不同就把明细判成空。
+     */
+    private fun evalAnswerArray(raw: String): JSONArray {
+        val text = raw.trim()
+        if (text.startsWith("[")) {
+            return runCatching { JSONArray(text) }.getOrDefault(JSONArray())
+        }
+        val root = runCatching { JSONObject(text) }.getOrNull() ?: return JSONArray()
+        val containers = listOf("data", "rows", "list", "records", "result")
+        for (key in containers) {
+            val value = root.opt(key)
+            if (value is JSONArray) return value
+            if (value is JSONObject) {
+                for (inner in containers) {
+                    (value.opt(inner) as? JSONArray)?.let { return it }
+                }
+            }
+        }
+        return JSONArray()
     }
 }
 

@@ -17,6 +17,8 @@ data class ScheduleCourse(
     val id: String,
     val name: String,
     val teacher: String,
+    /** 上课班级：教务 jxbmc 给的班级代码，多个用「、」连起来，可能为空。 */
+    val className: String = "",
     val room: String,
     val dayOfWeek: Int,
     val startSection: Int,

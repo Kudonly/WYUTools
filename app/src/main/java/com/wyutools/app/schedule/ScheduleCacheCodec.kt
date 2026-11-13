@@ -6,7 +6,7 @@ import java.time.LocalDate
 
 /** 课表的本地快照，只保存展示所需字段，不含任何登录信息。 */
 object ScheduleCacheCodec {
-    private const val VERSION = 5
+    private const val VERSION = 6
 
     fun encode(data: ScheduleData): String = JSONObject().apply {
         put("version", VERSION)
@@ -31,6 +31,7 @@ object ScheduleCacheCodec {
                         .put("id", course.id)
                         .put("name", course.name)
                         .put("teacher", course.teacher)
+                        .put("className", course.className)
                         .put("room", course.room)
                         .put("day", course.dayOfWeek)
                         .put("startSection", course.startSection)
@@ -115,6 +116,7 @@ object ScheduleCacheCodec {
                             },
                             name = name,
                             teacher = item.optString("teacher"),
+                            className = item.optString("className"),
                             room = item.optString("room"),
                             dayOfWeek = day,
                             startSection = startSection,

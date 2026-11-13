@@ -1026,6 +1026,10 @@ private fun ScheduleCourseDialog(
             )
             CourseDetailDivider()
             CourseDetailRow(label = "教师", value = course.teacher.ifBlank { "未填写" })
+            if (course.className.isNotBlank()) {
+                CourseDetailDivider()
+                CourseDetailRow(label = "班级", value = course.className)
+            }
             CourseDetailDivider()
             CourseDetailRow(label = "周次", value = formatCourseWeeks(course.weeks))
             CourseDetailDivider()
