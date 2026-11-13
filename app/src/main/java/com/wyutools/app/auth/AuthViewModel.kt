@@ -337,6 +337,28 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         referer = "https://jxgl.wyu.edu.cn/new/student/teapj/jkList.page",
     )
 
+    // ⚠️ 未验证 / UNVERIFIED —— 教学评价提交通道，仅供 academics.EvalSubmitter 使用。
+    // 教务当前未开放学生端评教窗口，这两个接口没有真机验证过，界面不提供任何入口。
+    // 详见 EvalSubmitter.kt 顶部说明。
+
+    /** 拉取评教表单页 HTML，里面藏着 savePj 需要的隐藏字段与动态令牌。 */
+    suspend fun fetchEvalFormPage(teadm: String, dgksdm: String): String = jxglRaw(
+        path = "new/student/teapj/pj.page?teadm=$teadm&dgksdm=$dgksdm" +
+            "&_=${System.currentTimeMillis()}",
+        label = "评价表单",
+        referer = "https://jxgl.wyu.edu.cn/new/student/teapj/jkList.page",
+        html = true,
+    )
+
+    /** 提交评教表单（form-urlencoded）。响应可能是 JSON 或纯文本，按原文返回。 */
+    suspend fun postEvalSubmit(fields: Map<String, String>): String = jxglRaw(
+        path = "new/student/teapj/savePj",
+        label = "评价提交",
+        referer = "https://jxgl.wyu.edu.cn/new/student/teapj/pj.page",
+        form = fields,
+        html = true,
+    )
+
     fun logout() {
         if (_ui.value.loggingOut) return
         autoLoginJob?.cancel()

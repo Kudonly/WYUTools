@@ -268,6 +268,12 @@ object AcademicsParser {
                 closeDate = row.text("jkrq"),
                 termCode = row.text("xnxqdm") ?: termCode,
                 termName = row.text("xnxqmc") ?: termDisplayName(termCode),
+                teadm = row.text("teadm"),
+                teabh = row.text("teabh"),
+                kcrwdm = row.text("kcrwdm"),
+                dgksdm = row.text("dgksdm"),
+                jxhjdm = row.text("jxhjdm"),
+                wjbm = row.text("wjbm"),
             )
         }
         return tasks

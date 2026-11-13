@@ -345,6 +345,18 @@ class AcademicsViewModel(
         _evalDetail.value = EvalDetailState()
     }
 
+    /**
+     * ⚠️ 未验证 / UNVERIFIED —— 教学评价提交能力。
+     *
+     * 完整的提交链路已实现在 [EvalSubmitter]，但教务未开放评教窗口、
+     * 没有真机验证过 `pj.page` 的字段与令牌正则，**界面不调用此方法、不提供入口**。
+     * 等评教开放、抓到真实表单页并校验通过后再接入 UI。
+     */
+    suspend fun submitEval(task: EvalTask, level: EvalSubmitter.Level): EvalSubmitter.Result =
+        withContext(Dispatchers.IO) {
+            EvalSubmitter.submit(auth, task, level)
+        }
+
     // -------------------- 内部 --------------------
 
     private fun loginRequired(): Boolean = !auth.ui.value.loggedIn

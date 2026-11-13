@@ -1,5 +1,6 @@
 package com.wyutools.app.ui
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -25,18 +31,22 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wyutools.app.academics.AcademicsViewModel
@@ -45,7 +55,10 @@ import com.wyutools.app.academics.EvalDetail
 import com.wyutools.app.academics.EvalDetailState
 import com.wyutools.app.academics.EvalTask
 import com.wyutools.app.academics.EvalUiState
+import com.wyutools.app.academics.termDisplayName
 import com.wyutools.app.auth.AuthViewModel
+import com.wyutools.app.schedule.ScheduleTerm
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
@@ -128,6 +141,50 @@ fun EvalScreen(
     }
 }
 
+private val EvalTabTitles = listOf("本学期", "往期")
+private val EvalTabsAreaHeight = 50.dp
+// 胶囊是悬浮层，内容需要为它让位；这里在课表/体育馆的标准留白之上再留一段
+// 呼吸空间，避免第一张卡片贴着切换按钮。
+private val EvalContentTopSpacer = WyuLargeTitleHeight + EvalTabsAreaHeight + 18.dp
+
+/** 悬浮在顶栏下方的长条切换按钮，样式与课表 / 体育馆的 tab 完全一致。 */
+@Composable
+private fun EvalTabsOverlay(
+    pagerState: PagerState,
+    collapsedFraction: State<Float>,
+    onSelect: (Int) -> Unit,
+) {
+    // 滑块跟分页器的连续位置走，左右滑动时与页面同步，而不是等翻页才跳过去。
+    val selectionFraction = remember(pagerState) {
+        { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    }
+    val boost = LocalWyuCollapseBoost.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val morph = WyuMorphPageState.contentProgress
+                val scale = 1f - WyuMorphPageState.ContentShrink * (1f - morph)
+                scaleX = scale
+                scaleY = scale
+                translationY = (1f - morph) * WyuMorphPageState.ContentLift.toPx()
+            }
+            .statusBarsPadding()
+            .padding(top = 62.dp, start = 16.dp, end = 16.dp),
+    ) {
+        WyuFloatingTabs(
+            options = EvalTabTitles,
+            selectedIndex = pagerState.currentPage,
+            onSelect = onSelect,
+            selectionFraction = selectionFraction,
+            modifier = Modifier.graphicsLayer {
+                val collapsed = (collapsedFraction.value + boost()).coerceIn(0f, 1f)
+                translationY = WyuLargeTitleHeight.toPx() * (1f - collapsed)
+            },
+        )
+    }
+}
+
 @Composable
 private fun EvalContent(
     ui: EvalUiState,
@@ -136,15 +193,21 @@ private fun EvalContent(
     onBack: () -> Unit,
     onOpen: (EvalTask) -> Unit,
 ) {
-    val listState = rememberLazyListState()
-    val fraction = rememberWyuCollapseFraction(listState)
-    var selectedCode by rememberSaveable { mutableStateOf("") }
+    // 与课表一致：两页各自持有滚动状态，折叠进度按分页器的连续位置混合。
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val currentListState = rememberLazyListState()
+    val pastListState = rememberLazyListState()
+    val currentFraction = rememberWyuCollapseFraction(currentListState)
+    val pastFraction = rememberWyuCollapseFraction(pastListState)
+    val collapseFraction = rememberWyuPagerCollapseFraction(
+        pagerState = pagerState,
+        firstFraction = currentFraction,
+        secondFraction = pastFraction,
+    )
+    val scope = rememberCoroutineScope()
     // 未评价的课程教务没有开放提交入口，点开只做说明，不去请求明细。
     var blocked by remember { mutableStateOf<EvalTask?>(null) }
     var blockedShow by remember { mutableStateOf(false) }
-    // 学期按新到旧排，默认停在最新的、有评价任务的那一学期。
-    val terms = remember(data) { data.terms.sortedByDescending { it.code } }
-    val selected = terms.firstOrNull { it.code == selectedCode } ?: terms.firstOrNull()
 
     blocked?.let { task ->
         EvalSubmitBlockedDialog(
@@ -155,13 +218,39 @@ private fun EvalContent(
         )
     }
 
+    val openTask: (EvalTask) -> Unit = { task ->
+        if (task.pjdm != null) {
+            onOpen(task)
+        } else {
+            blocked = task
+            blockedShow = true
+        }
+    }
+
     WyuPageScaffold(
-        progress = { fraction.value },
+        progress = { collapseFraction.value },
         maskCollapseHeight = WyuLargeTitleHeight,
+        maskExtension = 34.dp,
+        overlay = {
+            EvalTabsOverlay(
+                pagerState = pagerState,
+                collapsedFraction = collapseFraction,
+                onSelect = { index ->
+                    if (index != pagerState.currentPage) {
+                        scope.launch {
+                            pagerState.animateScrollToPage(
+                                page = index,
+                                animationSpec = tween(380, easing = WyuTabEasing),
+                            )
+                        }
+                    }
+                },
+            )
+        },
         topBar = {
             WyuActionBar(
                 title = "教评",
-                collapsedFraction = { fraction.value },
+                collapsedFraction = { collapseFraction.value },
                 navigationIcon = {
                     WyuTopBarIconButton(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
@@ -180,66 +269,21 @@ private fun EvalContent(
             )
         },
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 28.dp,
-            ),
-        ) {
-            if (terms.isEmpty()) {
-                item(key = "empty") {
-                    EvalEmptyCard()
-                }
-            } else {
-                item(key = "terms") {
-                    TermChips(
-                        terms = terms.map { it.code to it.name },
-                        selected = selected?.code.orEmpty(),
-                        onSelect = { selectedCode = it },
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-                if (selected != null) {
-                    val done = selected.tasks.count { it.pjdm != null }
-                    item(key = "head-${selected.code}") {
-                        Text(
-                            text = if (done == selected.tasks.size) {
-                                "共 ${selected.tasks.size} 门课程 · 全部已评价 · 点开可看明细"
-                            } else {
-                                "共 ${selected.tasks.size} 门课程 · 已评价 $done 门 · 点开可看明细"
-                            },
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                        )
-                    }
-                    items(selected.tasks, key = { it.key }) { task ->
-                        EvalTaskCard(
-                            task = task,
-                            onClick = {
-                                if (task.pjdm != null) {
-                                    onOpen(task)
-                                } else {
-                                    blocked = task
-                                    blockedShow = true
-                                }
-                            },
-                        )
-                        Spacer(Modifier.height(10.dp))
-                    }
-                }
-            }
-            item(key = "note") {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "结课评价由教务系统发布，评价内容与得分以教务为准。教务当前未开放学生端提交评价的入口，" +
-                        "因此这里只能查看已提交的评价明细。",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        val listTopInset = padding.calculateTopPadding() - WyuLargeTitleHeight
+        val listBottomInset = padding.calculateBottomPadding() + 28.dp
+        Box(Modifier.fillMaxSize()) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1,
+            ) { page ->
+                EvalPage(
+                    page = page,
+                    data = data,
+                    listState = if (page == 0) currentListState else pastListState,
+                    topInset = listTopInset,
+                    bottomInset = listBottomInset,
+                    onOpen = openTask,
                 )
             }
         }
@@ -247,7 +291,136 @@ private fun EvalContent(
 }
 
 @Composable
-private fun EvalEmptyCard() {
+private fun EvalPage(
+    page: Int,
+    data: EvalData,
+    listState: LazyListState,
+    topInset: Dp,
+    bottomInset: Dp,
+    onOpen: (EvalTask) -> Unit,
+) {
+    // 第一页只看当前学期；其余学期归到「往期」，由学期 chip 逐学期查看。
+    val currentCode = remember { ScheduleTerm.currentCode() }
+    val currentTerm = remember(data, currentCode) {
+        data.terms.firstOrNull { it.code == currentCode }
+    }
+    val pastTerms = remember(data, currentCode) {
+        data.terms.filter { it.code != currentCode }.sortedByDescending { it.code }
+    }
+    // 往期仍按学期分类，用与拆页前一样的横向学期 chip 切换，默认停在最新的一学期。
+    var selectedCode by rememberSaveable { mutableStateOf("") }
+    val selectedTerm = pastTerms.firstOrNull { it.code == selectedCode } ?: pastTerms.firstOrNull()
+
+    // 换学期后回到列表顶部，避免上一学期的滚动位置带到下一学期。
+    LaunchedEffect(page, selectedCode) {
+        if (page == 1) listState.scrollToItem(0)
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = topInset,
+            bottom = bottomInset,
+        ),
+    ) {
+        // 给悬浮在顶栏下方的切换按钮让出位置，并留出与内容的呼吸空间。
+        item(key = "tabs-spacer") {
+            Spacer(Modifier.height(EvalContentTopSpacer))
+        }
+
+        if (page == 0) {
+            val tasks = currentTerm?.tasks.orEmpty()
+            if (tasks.isEmpty()) {
+                item(key = "current-empty") {
+                    EvalEmptyCard(
+                        title = "暂无教评",
+                        body = "当前学期（${termDisplayName(currentCode)}）教务还没有发布结课评价任务，" +
+                            "发布后会显示在这里。可切到「往期」查看历史评价。",
+                    )
+                }
+            } else {
+                item(key = "current-head") {
+                    EvalTermHeader(
+                        title = "本学期 · ${termDisplayName(currentCode)}",
+                        tasks = tasks,
+                    )
+                }
+                items(tasks, key = { "current-${it.key}" }) { task ->
+                    EvalTaskCard(task = task, onClick = { onOpen(task) })
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        } else {
+            if (pastTerms.isEmpty()) {
+                item(key = "past-empty") {
+                    EvalEmptyCard(
+                        title = "暂无往期教评",
+                        body = "没有查询到往期学期的结课评价记录。",
+                    )
+                }
+            } else {
+                item(key = "past-terms") {
+                    Column {
+                        TermChips(
+                            terms = pastTerms.map { it.code to it.name },
+                            selected = selectedTerm?.code.orEmpty(),
+                            onSelect = { selectedCode = it },
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+                selectedTerm?.let { term ->
+                    item(key = "past-head-${term.code}") {
+                        EvalTermHeader(title = term.name, tasks = term.tasks)
+                    }
+                    items(term.tasks, key = { "past-${term.code}-${it.key}" }) { task ->
+                        EvalTaskCard(task = task, onClick = { onOpen(task) })
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
+            }
+        }
+
+        item(key = "note") {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "结课评价由教务系统发布，评价内容与得分以教务为准。教务当前未开放学生端提交评价的入口，" +
+                    "因此这里只能查看已提交的评价明细。",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EvalTermHeader(title: String, tasks: List<EvalTask>) {
+    val done = tasks.count { it.pjdm != null }
+    Column(modifier = Modifier.padding(start = 6.dp, bottom = 10.dp)) {
+        Text(
+            text = title,
+            style = MiuixTheme.textStyles.footnote1,
+            fontWeight = FontWeight.SemiBold,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = if (done == tasks.size) {
+                "共 ${tasks.size} 门课程 · 全部已评价 · 点开可看明细"
+            } else {
+                "共 ${tasks.size} 门课程 · 已评价 $done 门 · 点开可看明细"
+            },
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
+}
+
+@Composable
+private fun EvalEmptyCard(title: String, body: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = WyuCardCornerRadius,
@@ -259,12 +432,12 @@ private fun EvalEmptyCard() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "还没有结课评价",
+                text = title,
                 style = MiuixTheme.textStyles.headline2,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(6.dp))
-            AcademicBody("教务发布评价任务后，这里会按学期列出来。")
+            AcademicBody(body)
         }
     }
 }

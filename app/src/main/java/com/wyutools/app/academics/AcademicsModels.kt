@@ -166,6 +166,14 @@ data class EvalTask(
     val closeDate: String?,
     val termCode: String,
     val termName: String,
+    // ↓ 评价提交（未验证）需要的原始标识，pjDatas 一行里的字段。
+    // 现有展示逻辑不用它们，全部可空且带默认值，避免影响缓存/旧数据。
+    val teadm: String? = null,
+    val teabh: String? = null,
+    val kcrwdm: String? = null,
+    val dgksdm: String? = null,
+    val jxhjdm: String? = null,
+    val wjbm: String? = null,
 ) {
     val key: String get() = "${pjdm.orEmpty()}|$courseName|${teacher.orEmpty()}|${session.orEmpty()}"
 }
