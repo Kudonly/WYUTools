@@ -11,8 +11,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -40,13 +38,7 @@ import top.yukonga.miuix.kmp.blur.highlight.LightPosition
 import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.runtimeShaderEffect
-import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlin.time.TimeSource
 
 internal fun BackdropEffectScope.lens(
@@ -242,11 +234,15 @@ internal class WyuDampedDragAnimation(
     }
 }
 
-private const val LIGHT_REF_X = 0.5f
-private const val LIGHT_REF_Y = 0.7f
-private const val GRAVITY_DIR_THRESHOLD_SQ = 0.01f
-private const val GRAVITY_ANGLE_STEP_RAD = (3.0 * PI / 180.0).toFloat()
-
+/**
+ * The rim highlight, fixed in place.
+ *
+ * It used to be re-aimed from the device's gravity vector, so the light slid
+ * around the edge as the phone tilted. Real glass in a phone does not do that —
+ * the highlight belongs to the surface, not to how the surface is held — and on
+ * a moving bar the constant re-aim read as the rim swimming. The two lights keep
+ * their fixed angles: one from the upper left, a weaker one from the bottom.
+ */
 internal val WyuGlassSpecular: Highlight = Highlight(
     width = 1.dp,
     alpha = 1f,
@@ -266,41 +262,6 @@ internal val WyuGlassSpecular: Highlight = Highlight(
         dualPeak = true,
     ),
 )
-
-private val WyuGlassSpecularStyle = WyuGlassSpecular.style as BloomStroke
-
-@Composable
-internal fun rememberWyuSpecularHighlight(extraDegrees: Float): State<Highlight> {
-    val tiltState = rememberDeviceTilt()
-    val angle = remember(tiltState) {
-        derivedStateOf {
-            val tilt = tiltState.value
-            val magnitudeSquared = tilt.gravityX * tilt.gravityX + tilt.gravityY * tilt.gravityY
-            if (magnitudeSquared > GRAVITY_DIR_THRESHOLD_SQ) {
-                (atan2(tilt.gravityY, tilt.gravityX) / GRAVITY_ANGLE_STEP_RAD)
-                    .roundToInt() * GRAVITY_ANGLE_STEP_RAD
-            } else {
-                (-PI / 2).toFloat()
-            }
-        }
-    }
-    return remember(angle, extraDegrees) {
-        derivedStateOf {
-            val rad = angle.value + (extraDegrees * PI / 180.0).toFloat()
-            WyuGlassSpecular.copy(
-                style = WyuGlassSpecularStyle.copy(
-                    primaryLight = WyuGlassSpecularStyle.primaryLight.copy(
-                        position = LightPosition(
-                            x = LIGHT_REF_X + cos(rad),
-                            y = LIGHT_REF_Y + sin(rad),
-                            z = WyuGlassSpecularStyle.primaryLight.position.z,
-                        ),
-                    ),
-                ),
-            )
-        }
-    }
-}
 
 private const val ROUNDED_RECT_SDF = """
 float radiusAt(float2 coord, float4 radii) {

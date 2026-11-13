@@ -1,5 +1,7 @@
 package com.wyutools.app.ui
 
+import android.os.Build
+import android.view.RoundedCorner
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
@@ -16,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -68,6 +72,56 @@ internal class WyuSquircleShape(private val cornerRadius: Dp) : Shape {
 }
 internal const val CardBlurRadius = 38f
 private const val ButtonBlurRadius = 30f
+
+/**
+ * iOS ships an icon corner of 22.37% of the side, but that figure is the
+ * *visual* radius of the quintic squircle. A continuous-corner path reads
+ * rounder than an arc at the same nominal radius, so the nominal value is the
+ * visual one scaled by 0.8 — verified against an arc of the same side length.
+ */
+internal const val WyuIconCornerRatio = 0.2237f * 0.8f
+
+/**
+ * The shared silhouette for a square tinted tile (a tool icon, an app icon).
+ * Use it together with [rememberWyuIconShape] so the path is built once.
+ */
+internal fun wyuIconShape(side: Dp): Shape = WyuSquircleShape(side * WyuIconCornerRatio)
+
+@Composable
+internal fun rememberWyuIconShape(side: Dp): Shape = remember(side) { wyuIconShape(side) }
+
+/** Same silhouette, but with the radius given directly — for tiles that are
+ *  deliberately rounder than the shared ratio. */
+@Composable
+internal fun rememberWyuSquircle(radius: Dp): Shape = remember(radius) { WyuSquircleShape(radius) }
+
+/** Corner every full-bleed surface has to land on: the sheets pushed by the
+ *  navigator and the window a card opens into. Read from the panel itself on
+ *  API 31+, so a phone with tighter or rounder body corners is followed instead
+ *  of guessed; devices that cannot report one share the sheets' fallback. */
+internal val WyuNavPageCornerFallback = 48.dp
+
+@Composable
+internal fun rememberDisplayCornerPx(): Float {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    return remember(view, density) {
+        val reported = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            0
+        } else {
+            runCatching {
+                val display = view.display ?: return@runCatching 0
+                intArrayOf(
+                    RoundedCorner.POSITION_TOP_LEFT,
+                    RoundedCorner.POSITION_TOP_RIGHT,
+                    RoundedCorner.POSITION_BOTTOM_LEFT,
+                    RoundedCorner.POSITION_BOTTOM_RIGHT,
+                ).maxOfOrNull { display.getRoundedCorner(it)?.radius ?: 0 } ?: 0
+            }.getOrDefault(0)
+        }
+        if (reported > 0) reported.toFloat() else with(density) { WyuNavPageCornerFallback.toPx() }
+    }
+}
 
 /** One corner radius for every card in the app, one step below the dialogs' 32dp. */
 internal val WyuCardCornerRadius = 28.dp

@@ -34,7 +34,8 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 enum class WyuWallpaper(val label: String) {
-    Default("默认"),
+    // 晨雾 is the stock look: the app ships with it, so there is no "no
+    // wallpaper" entry any more — every non-custom choice is a gradient.
     Mist("晨雾"),
     Jade("青岚"),
     Dusk("晚霞"),
@@ -43,7 +44,7 @@ enum class WyuWallpaper(val label: String) {
 
     fun backgroundStops(dark: Boolean, surface: Color): List<Pair<Float, Color>>? {
         val stops = when (this) {
-            Default, Custom -> return null
+            Custom -> return null
             Mist -> if (dark) {
                 listOf(Color(0xFF24324A), Color(0xFF1D2737), Color(0xFF181E2A))
             } else {
@@ -163,7 +164,7 @@ object WyuAppearance {
     private const val CustomFileName = "custom_wallpaper.jpg"
     private const val MaxWallpaperSide = 2560
 
-    private val _wallpaper = MutableStateFlow(WyuWallpaper.Default)
+    private val _wallpaper = MutableStateFlow(WyuWallpaper.Mist)
     val wallpaper: StateFlow<WyuWallpaper> = _wallpaper.asStateFlow()
 
     private val _themeMode = MutableStateFlow(WyuThemeMode.System)
@@ -289,10 +290,12 @@ object WyuAppearance {
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         val saved = WyuWallpaper.entries
             .firstOrNull { it.name == loaded.getString(KeyWallpaper, null) }
+        // A stored custom choice that no longer has a file falls back to the
+        // stock 晨雾; the retired "Default" entry resolves to the same thing.
         _wallpaper.value = when {
-            saved == WyuWallpaper.Custom && !_hasCustomWallpaper.value -> WyuWallpaper.Default
+            saved == WyuWallpaper.Custom && !_hasCustomWallpaper.value -> WyuWallpaper.Mist
             saved != null -> saved
-            else -> WyuWallpaper.Default
+            else -> WyuWallpaper.Mist
         }
         _themeMode.value = WyuThemeMode.entries
             .firstOrNull { it.name == loaded.getString(KeyThemeMode, null) }
@@ -394,8 +397,8 @@ object WyuAppearance {
             if (bitmap == null) {
                 _hasCustomWallpaper.value = false
                 if (_wallpaper.value == WyuWallpaper.Custom) {
-                    prefs?.edit()?.putString(KeyWallpaper, WyuWallpaper.Default.name)?.apply()
-                    _wallpaper.value = WyuWallpaper.Default
+                    prefs?.edit()?.putString(KeyWallpaper, WyuWallpaper.Mist.name)?.apply()
+                    _wallpaper.value = WyuWallpaper.Mist
                 }
                 return
             }
@@ -572,6 +575,6 @@ object WyuAppearance {
     }
 }
 
-val LocalWyuWallpaper = staticCompositionLocalOf { WyuWallpaper.Default }
+val LocalWyuWallpaper = staticCompositionLocalOf { WyuWallpaper.Mist }
 val LocalWyuCustomWallpaper = staticCompositionLocalOf<ImageBitmap?> { null }
 val LocalWyuDarkTheme = staticCompositionLocalOf { false }

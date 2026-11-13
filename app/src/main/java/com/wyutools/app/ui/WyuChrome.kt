@@ -43,12 +43,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -100,6 +102,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -114,6 +117,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
+import androidx.lifecycle.compose.dropUnlessResumed
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -173,10 +177,82 @@ internal object WyuMorphPageState {
     var exitTitleFontPx = 0f
     var exitTitleLinePx = 0f
 
+    /** While true the page scaffold skips its own wallpaper. A morph capture
+     *  sets it for exactly one frame so the NavHost records the page content on
+     *  a transparent background; the window backdrop keeps painting the very
+     *  same wallpaper underneath, so nothing changes on screen. Read in the
+     *  draw phase only, so toggling it never recomposes. */
+    var suppressPageBackground by mutableStateOf(false)
+
     /** True from the start of a return until 50ms after it lands. A card tap
      *  waits on it so its snapshot is never taken from the pulled-back home,
      *  which would otherwise open the next morph from a shrunk, shifted card. */
     var returnSettling by mutableStateOf(false)
+
+    /** True while *any* morph is on screen — opening, cancelling or returning.
+     *  Maintained by MainActivity, so user input outranks all three phases. */
+    var morphActive by mutableStateOf(false)
+
+    /** True while the home pager is actually moving between tabs, from a tap or
+     *  a swipe. The return morph paints the home from a still capture, so a
+     *  switch that starts underneath it would play invisibly and only its end
+     *  state would be seen once the overlay comes off. The return window watches
+     *  this and hands the screen back to the live page the moment it flips. */
+    var homePagerMoving by mutableStateOf(false)
+
+    /** A pure opening morph answers only to BACK. Every other press is
+     *  deliberately ignored: the destination page is still growing and has no
+     *  home cards to hand a new operation to. Once BACK starts the interrupt,
+     *  this flips false and the very next press may open another card. */
+    var openingOnly by mutableStateOf(false)
+
+    /** Generation of the gesture that currently owns the screen. A press does
+     *  not cancel a running animation: it only advances this generation. The
+     *  old morph keeps playing its own Animatable in parallel, while the new
+     *  one starts immediately on a fresh one. */
+    var inputEpoch by mutableIntStateOf(0)
+        private set
+
+    /** Plain field, written by the active window's animation each frame and
+     *  read only when a press hands the window over to a parallel close. */
+    var morphWindowProgress = 0f
+
+    /** Non-consuming DOWN hook. The press wins instantly: it ends every wait,
+     *  puts the page content back at rest and starts a new generation. It never
+     *  touches any Animatable, so no animation is stopped or waited out. */
+    fun interruptMorph() {
+        // flyingRoute is set synchronously at the very start of open/close,
+        // so it covers the frame before morphActive has been published.
+        if (!morphActive && flyingRoute == null) return
+        // During the opening animation only BACK may interrupt. A stray touch
+        // here must not bump the generation or reset contentProgress, or the
+        // page would visibly jump out of its settle for one frame.
+        if (openingOnly) return
+        inputEpoch++
+        // This is the fix for the "element drops and shrinks" bug: a morph
+        // that is being left behind must not keep driving the page's scale and
+        // translation, and the next morph must inherit a fully settled page.
+        contentProgress = 1f
+        returnSettling = false
+    }
+
+    /** Only the newest generation may write [contentProgress]. Old morphs
+     *  still animate their windows in parallel, but leave the page alone. */
+    fun ownsContent(epoch: Int): Boolean = inputEpoch == epoch
+
+    /** Route whose own copy is currently in flight.
+     *
+     *  The page keeps the slot — layout must never move when an element leaves —
+     *  but draws nothing in it, so the animated copy is the only one on screen.
+     *  Two things need that: the capture (the home layers are recorded for the
+     *  morph's backdrop, and a card baked into them would sit frozen under the
+     *  window for the whole flight), and the close's landing rebound, which
+     *  shrinks the window below the card it came from — without the hole, the
+     *  live card would show through that reveal as a second, overlapping copy.
+     *
+     *  Read it in draw scopes only (a `graphicsLayer` block), never in
+     *  composition: a capture sets it and records in the very same frame. */
+    var flyingRoute by mutableStateOf<String?>(null)
 
     /** Suspends until the return has landed and its 50ms margin has elapsed. */
     suspend fun awaitReturnSettled() {
@@ -432,16 +508,18 @@ fun WyuPageScaffold(
                 )
                 if (pageBounds.value != next) pageBounds.value = next
             }
-            .then(
+            .drawBehind {
+                // Skipped for the one frame a morph capture records: the page
+                // then comes out with a transparent background, which is what
+                // lets the morph split home into a wallpaper layer and a
+                // content layer that can move apart.
+                if (WyuMorphPageState.suppressPageBackground) return@drawBehind
                 when {
-                    pageBrush != null -> Modifier.background(pageBrush)
-                    customWallpaper != null -> Modifier.drawBehind {
-                        drawWyuImageCover(customWallpaper, customDim)
-                    }
-
-                    else -> Modifier.background(surface)
-                },
-            ),
+                    pageBrush != null -> drawRect(brush = pageBrush)
+                    customWallpaper != null -> drawWyuImageCover(customWallpaper, customDim)
+                    else -> drawRect(surface)
+                }
+            },
     ) {
         if (glassBackdrop != null) {
             Box(Modifier.fillMaxSize().layerBackdrop(glassBackdrop))
@@ -1304,41 +1382,21 @@ val WyuTabEasing = CubicBezierEasing(0.25f, 0f, 0.02f, 1f)
 const val WyuNavParentShiftFraction = 0.06f
 const val WyuNavParentScale = 0.94f
 
-/** Corner used when the display does not report a physical radius. */
-private val WyuNavPageCornerFallback = 48.dp
-
 /**
  * Corner radius the moving sheet wears while it travels.
  *
  * Taken from the display itself, so the travelling page has the same curve as
  * the phone's own glass: on a body with tighter or rounder corners the sheet
- * now lands flush instead of guessing a fixed 48dp (which showed a wedge of
+ * lands flush instead of guessing a fixed 48dp (which showed a wedge of
  * wallpaper in the corners on devices with a smaller radius).
  */
 @Composable
 private fun rememberWyuNavPageCorner(): Dp {
-    val view = LocalView.current
     val density = LocalDensity.current
-    return remember(view, density) {
-        val radiusPx = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            0
-        } else {
-            runCatching {
-                val display = view.display
-                if (display == null) {
-                    0
-                } else {
-                    intArrayOf(
-                        RoundedCorner.POSITION_TOP_LEFT,
-                        RoundedCorner.POSITION_TOP_RIGHT,
-                        RoundedCorner.POSITION_BOTTOM_LEFT,
-                        RoundedCorner.POSITION_BOTTOM_RIGHT,
-                    ).maxOfOrNull { display.getRoundedCorner(it)?.radius ?: 0 } ?: 0
-                }
-            }.getOrDefault(0)
-        }
-        if (radiusPx > 0) with(density) { radiusPx.toDp() } else WyuNavPageCornerFallback
-    }
+    // One source of truth: the morph window reads the same value, so a card
+    // opens into a page whose corner is already exactly this radius.
+    val radiusPx = rememberDisplayCornerPx()
+    return remember(radiusPx, density) { with(density) { radiusPx.toDp() } }
 }
 
 /** Black scrim laid over the page underneath a pushed page. */
@@ -1487,6 +1545,47 @@ fun rememberWyuCollapseFraction(listState: LazyListState): State<Float> {
             } else {
                 (listState.firstVisibleItemScrollOffset / rangePx).coerceIn(0f, 1f)
             }
+        }
+    }
+}
+
+@Composable
+fun rememberWyuCollapseFraction(gridState: LazyGridState): State<Float> {
+    val rangePx = with(LocalDensity.current) { 64.dp.toPx() }
+    return remember(gridState, rangePx) {
+        derivedStateOf {
+            if (gridState.firstVisibleItemIndex > 0) {
+                1f
+            } else {
+                (gridState.firstVisibleItemScrollOffset / rangePx).coerceIn(0f, 1f)
+            }
+        }
+    }
+}
+
+/**
+ * Collapse fraction for a pager with more than two pages: blends the two
+ * neighbouring pages' fractions by the continuous page position, so the top bar
+ * keeps moving smoothly across every swipe.
+ */
+@Composable
+fun rememberWyuMultiPageCollapseFraction(
+    pagerState: PagerState,
+    fractions: List<State<Float>>,
+): State<Float> = remember(pagerState, fractions) {
+    derivedStateOf {
+        if (fractions.isEmpty()) {
+            0f
+        } else {
+            val last = fractions.lastIndex.toFloat()
+            val position = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                .coerceIn(0f, last)
+            val index = position.toInt().coerceIn(0, fractions.lastIndex)
+            val next = (index + 1).coerceAtMost(fractions.lastIndex)
+            val t = (position - index).coerceIn(0f, 1f)
+            val a = fractions[index].value
+            val b = fractions[next].value
+            a + (b - a) * t
         }
     }
 }
@@ -1666,7 +1765,8 @@ private data class WyuNavTab(
 )
 
 private val WyuNavTabs = listOf(
-    WyuNavTab("工具", Icons.Outlined.Build),
+    WyuNavTab("常用", Icons.Outlined.Build),
+    WyuNavTab("更多", Icons.Outlined.GridView),
     WyuNavTab("我", Icons.Outlined.Person),
 )
 
@@ -1703,8 +1803,10 @@ fun WyuNavigatorBar(
     } else {
         null
     }
-    val pillSpecular = if (glassBackdrop != null) rememberWyuSpecularHighlight(extraDegrees = -45f) else null
-    val thumbSpecular = if (glassBackdrop != null) rememberWyuSpecularHighlight(extraDegrees = 90f) else null
+    // One fixed rim for every glass surface: the highlight belongs to the
+    // material, not to the way the phone happens to be held.
+    val pillSpecular = if (glassBackdrop != null) WyuGlassSpecular else null
+    val thumbSpecular = if (glassBackdrop != null) WyuGlassSpecular else null
 
     val initialFraction = selectionFraction().coerceIn(0f, lastIndex.toFloat())
     val damped = remember {
@@ -1719,12 +1821,51 @@ fun WyuNavigatorBar(
     val glassIconScale: () -> Float = { 1f + 0.02f * damped.pressProgress }
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(initialFraction) }
-    var interacting by remember { mutableStateOf(false) }
-    var interactionGen by remember { mutableIntStateOf(0) }
     var pressedIndex by remember { mutableIntStateOf(-1) }
-    var lastSelectAt by remember { mutableLongStateOf(0L) }
+    // The thumb has exactly one source of truth: the live pager position.
+    // A tap/drag may put it ahead of the pager (the page starts moving on
+    // release); that lead is a hold with an explicit target plus a timeout,
+    // and every new tap retargets it instead of being dropped.
+    var holdTarget by remember { mutableFloatStateOf(Float.NaN) }
+    var holdGen by remember { mutableIntStateOf(0) }
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentSelected by rememberUpdatedState(selectedIndex)
+    val currentFraction by rememberUpdatedState(selectionFraction)
+    fun pagerPosition(): Float = currentFraction().coerceIn(0f, lastIndex.toFloat())
+    /** Keep the thumb on a committed target until the pager catches up. */
+    fun holdThumb(target: Float) {
+        holdTarget = target
+        holdGen += 1
+        val gen = holdGen
+        // Never snap: the slide towards the finger / back to the committed
+        // page must always be a spring, with no teleport in between.
+        damped.updateValue(target)
+        scope.launch {
+            // A tab tween is 300ms; anything longer means the request never
+            // landed, so reconcile instead of leaving a permanent lead.
+            delay(360)
+            if (gen == holdGen && holdTarget == target &&
+                pressedIndex < 0 && !dragging
+            ) {
+                holdTarget = Float.NaN
+                damped.updateValue(pagerPosition())
+            }
+        }
+    }
+    /**
+     * Cancelled gesture or a tap on the page the thumb already sits on: hand
+     * the thumb back to the committed page (the target of the switch in
+     * flight, or the live pager position), never to a stale selectedIndex.
+     */
+    fun settleThumb() {
+        val hold = holdTarget
+        if (hold.isNaN()) {
+            holdGen += 1
+            damped.updateValue(pagerPosition())
+        } else {
+            holdThumb(hold)
+        }
+    }
     val thumbPressed = dragging || pressedIndex >= 0
     val thumbScaleX by animateFloatAsState(
         targetValue = if (thumbPressed) 0.96f else 1f,
@@ -1738,13 +1879,15 @@ fun WyuNavigatorBar(
     )
 
     LaunchedEffect(Unit) {
-        snapshotFlow { selectionFraction() }.collect { fraction ->
+        snapshotFlow { currentFraction() }.collect { fraction ->
             if (dragging || pressedIndex >= 0) return@collect
             val target = fraction.coerceIn(0f, lastIndex.toFloat())
-            if (interacting) {
-                // Keep the pressed preview in place until the pager lands on it.
-                if (abs(target - damped.value) < 0.01f) interacting = false
-            } else {
+            val hold = holdTarget
+            // Mirror the pager exactly on every frame. A hold is released as
+            // soon as the pager reaches its target; if the request was dropped
+            // or the tween interrupted, holdThumb()'s timeout reconciles it.
+            if (hold.isNaN() || abs(target - hold) < 0.01f) {
+                holdTarget = Float.NaN
                 damped.snapToValue(target)
             }
         }
@@ -1797,7 +1940,7 @@ fun WyuNavigatorBar(
                                 )
                             },
                             highlight = {
-                                pillSpecular?.value?.copy(alpha = 0.75f)
+                                pillSpecular?.copy(alpha = 0.75f)
                                     ?: WyuGlassSpecular.copy(alpha = 0f)
                             },
                             layerBlock = {
@@ -1832,37 +1975,17 @@ fun WyuNavigatorBar(
                 )
                 .padding(inset)
                 .pointerInput(WyuNavTabs.size) {
-                    fun revertPreview(target: Int) {
-                        scope.launch {
-                            damped.animateToValue(target.toFloat())
-                            interacting = false
-                        }
-                    }
-                    fun releasePreviewAfterLanding() {
-                        val gen = interactionGen
-                        scope.launch {
-                            delay(450)
-                            if (gen == interactionGen &&
-                                pressedIndex < 0 &&
-                                !dragging
-                            ) {
-                                interacting = false
-                            }
-                        }
-                    }
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val cellPx = size.width / WyuNavTabs.size.toFloat()
-                        val startSelected = currentSelected
                         val downIndex = (down.position.x / cellPx).toInt().coerceIn(0, lastIndex)
                         pressedIndex = downIndex
                         damped.press()
-                        if (downIndex != startSelected) {
-                            // Slide the thumb under the finger immediately on press.
-                            interactionGen++
-                            interacting = true
-                            damped.updateValue(downIndex.toFloat())
-                        }
+                        // Slide towards the finger with the damped spring, not
+                        // a teleport. The pager may not move the thumb while
+                        // the finger is down; on release each tap retargets
+                        // the pager and the hold follows it.
+                        damped.updateValue(downIndex.toFloat())
                         val startFraction = if (dragging) dragFraction else downIndex.toFloat()
                         var totalX = 0f
                         var totalY = 0f
@@ -1892,8 +2015,8 @@ fun WyuNavigatorBar(
                                 ) {
                                     dragActive = true
                                     dragging = true
-                                    interactionGen++
-                                    interacting = true
+                                    // Keep the committed target: it is where a
+                                    // later dropped gesture springs back to.
                                     dragFraction = (startFraction + totalX / cellPx)
                                         .coerceIn(0f, lastIndex.toFloat())
                                     lastTick = dragFraction.roundToInt()
@@ -1919,36 +2042,40 @@ fun WyuNavigatorBar(
                             }
                         }
                         pressedIndex = -1
+                        // No debounce: read the live position at release and
+                        // let every tap retarget the pager, even one that
+                        // interrupts a tween already in flight.
+                        val livePosition = pagerPosition()
                         if (dragActive) {
                             val target = dragFraction.roundToInt().coerceIn(0, lastIndex)
                             dragging = false
                             damped.updateValue(target.toFloat())
                             damped.release()
-                            if (target != startSelected) {
+                            if (!cancelled && abs(livePosition - target.toFloat()) > 0.001f) {
                                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                                 currentOnSelect(target)
+                                holdThumb(target.toFloat())
+                            } else {
+                                settleThumb()
                             }
-                            releasePreviewAfterLanding()
-                        } else if (!cancelled) {
-                            val now = SystemClock.uptimeMillis()
-                            if (now - lastSelectAt >= 200L) {
-                                lastSelectAt = now
-                                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                if (downIndex != startSelected) {
-                                    currentOnSelect(downIndex)
-                                    // Release the preview if the pager transition is
-                                    // interrupted before it lands.
-                                    releasePreviewAfterLanding()
-                                }
-                            } else if (downIndex != startSelected) {
-                                revertPreview(startSelected)
-                            }
-                            damped.release()
                         } else {
-                            damped.release()
-                            if (downIndex != startSelected) {
-                                revertPreview(startSelected)
+                            if (!cancelled) {
+                                view.performHapticFeedback(
+                                    HapticFeedbackConstants.VIRTUAL_KEY,
+                                )
+                                if (abs(livePosition - downIndex.toFloat()) > 0.001f) {
+                                    currentOnSelect(downIndex)
+                                    // The thumb is already under the finger;
+                                    // hold it on the new target until the
+                                    // pager arrives.
+                                    holdThumb(downIndex.toFloat())
+                                } else {
+                                    settleThumb()
+                                }
+                            } else {
+                                settleThumb()
                             }
+                            damped.release()
                         }
                     }
                 },
@@ -1983,7 +2110,15 @@ fun WyuNavigatorBar(
                         tab = tab,
                         selected = isSelected,
                         tint = contentColor,
-                        alpha = if (isSelected) 0.95f else 0.55f,
+                        // The thumb is exactly one cell wide, so its overlap
+                        // with cell `index` is 1 - |offset|. The tab brightens
+                        // by precisely the fraction the slider covers it,
+                        // continuously, instead of flipping at the page
+                        // halfway point.
+                        highlight = {
+                            (1f - abs(damped.value - index.toFloat()))
+                                .coerceIn(0f, 1f)
+                        },
                         scale = if (glassBackdrop != null) {
                             glassIconScale
                         } else {
@@ -2019,7 +2154,7 @@ fun WyuNavigatorBar(
                             )
                         },
                         highlight = {
-                            thumbSpecular.value.copy(alpha = damped.pressProgress)
+                            thumbSpecular.copy(alpha = damped.pressProgress)
                         },
                         layerBlock = {
                             val velocity = damped.velocity / 10f
@@ -2058,23 +2193,28 @@ private fun RowScope.WyuNavigatorTab(
     tab: WyuNavTab,
     selected: Boolean,
     tint: Color,
-    alpha: Float,
+    highlight: () -> Float,
     scale: () -> Float,
     activate: (() -> Unit)?,
 ) {
-    val semanticsModifier = if (activate != null) {
+    // Semantic / accessibility clicks never pass through pointerInput, so they
+    // take the official lifecycle guard directly: dropUnlessResumed() discards
+    // the tap while the home destination is leaving RESUMED in a NavHost
+    // transition, exactly as it does for a navigate() call in a Button.
+    val guardedActivate = activate?.let { action -> dropUnlessResumed { action() } }
+    val semanticsModifier = if (guardedActivate != null) {
         Modifier.semantics(mergeDescendants = true) {
             role = Role.Tab
             this.selected = selected
             onClick(label = tab.label) {
-                activate()
+                guardedActivate()
                 true
             }
         }
     } else {
         Modifier
     }
-    Column(
+    Box(
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
@@ -2084,6 +2224,42 @@ private fun RowScope.WyuNavigatorTab(
                 scaleX = value
                 scaleY = value
             },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Dim and bright copies of the same label crossfaded by the thumb's
+        // overlap. Reading highlight() inside graphicsLayer keeps the
+        // per-frame update in the draw phase rather than recomposing the
+        // whole glass bar every frame.
+        WyuNavigatorTabContent(
+            tab = tab,
+            tint = tint,
+            alpha = 0.55f,
+            emphasized = false,
+            modifier = Modifier.graphicsLayer { alpha = 1f - highlight() },
+        )
+        WyuNavigatorTabContent(
+            tab = tab,
+            tint = tint,
+            alpha = 0.95f,
+            emphasized = true,
+            // Only one semantic copy of the label should be exposed.
+            modifier = Modifier
+                .clearAndSetSemantics { }
+                .graphicsLayer { alpha = highlight() },
+        )
+    }
+}
+
+@Composable
+private fun WyuNavigatorTabContent(
+    tab: WyuNavTab,
+    tint: Color,
+    alpha: Float,
+    emphasized: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -2099,7 +2275,7 @@ private fun RowScope.WyuNavigatorTab(
             style = TextStyle(
                 fontSize = 11.sp,
                 lineHeight = 13.sp,
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                fontWeight = if (emphasized) FontWeight.Medium else FontWeight.Normal,
             ),
             color = tint.copy(alpha = alpha),
             maxLines = 1,

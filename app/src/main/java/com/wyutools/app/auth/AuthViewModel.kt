@@ -247,6 +247,96 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 考试安排查询：与课表共享同一个教务会话，同样带过期重试。 */
+    suspend fun fetchExams(termCode: String): String {
+        if (!_ui.value.loggedIn) {
+            throw SsoException("登录统一身份认证后即可查看考试安排。")
+        }
+        return try {
+            api.fetchJxglExams(termCode)
+        } catch (error: SsoException) {
+            if (error.sessionExpired) handleSessionExpired(forceAutoLogin = true)
+            throw error
+        }
+    }
+
+    /**
+     * 新版教务模块的通用拉取：成绩 / 绩点 / 体测 / 教评共用一个教务会话，
+     * 会话过期时和处理课表一样静默重建一次。
+     */
+    private suspend fun jxglRaw(
+        path: String,
+        label: String,
+        referer: String = "https://jxgl.wyu.edu.cn/",
+        form: Map<String, String>? = null,
+        html: Boolean = false,
+    ): String {
+        if (!_ui.value.loggedIn) {
+            throw SsoException("登录统一身份认证后即可查看$label。")
+        }
+        return try {
+            api.fetchJxglRaw(path, form = form, referer = referer, label = label, html = html)
+        } catch (error: SsoException) {
+            if (error.sessionExpired) handleSessionExpired(forceAutoLogin = true)
+            throw error
+        }
+    }
+
+    /** 全部课程成绩（一次拿整学期，页面自己按学期分组）。 */
+    suspend fun fetchGrades(): String = jxglRaw(
+        path = "new/student/xskccj/kccjDatas",
+        label = "成绩",
+        referer = "https://jxgl.wyu.edu.cn/new/student/xskccj/main.page",
+        form = mapOf(
+            "source" to "kccjlist",
+            "page" to "1",
+            "rows" to "300",
+            "sort" to "xnxqdm,kcmc",
+            "order" to "asc",
+        ),
+    )
+
+    /** 单科分项成绩（平时 25% / 期末 60% 那种）。 */
+    suspend fun fetchGradeDetail(cjdm: String): String = jxglRaw(
+        path = "new/student/xskccj/getDetail?cjdm=$cjdm",
+        label = "成绩详情",
+        referer = "https://jxgl.wyu.edu.cn/new/student/xskccj/main.page",
+    )
+
+    /** 成绩分析单（HTML 小表：课程内 / 教学班内的排名）。 */
+    suspend fun fetchGradeRankSheet(cjdm: String): String = jxglRaw(
+        path = "new/student/xskccj/kccjfxd.page?cjdm=$cjdm",
+        label = "成绩分析单",
+        referer = "https://jxgl.wyu.edu.cn/new/student/xskccj/main.page",
+        html = true,
+    )
+
+    /** 平均绩点。scope: 1=按学期 2=按学年 3=历年（教务默认口径）。 */
+    suspend fun fetchGpa(scope: Int): String = jxglRaw(
+        path = "new/student/xskccj/xsjdDatas?ckfs=$scope&ckjh=",
+        label = "平均绩点",
+        referer = "https://jxgl.wyu.edu.cn/new/student/xskccj/kccjjdList.page",
+    )
+
+    suspend fun fetchPhysicalTests(): String = jxglRaw(
+        path = "new/student/xstccj/datas?page=1&rows=100&sort=xnxqdm&order=asc",
+        label = "体测成绩",
+        referer = "https://jxgl.wyu.edu.cn/new/student/xstccj",
+    )
+
+    suspend fun fetchEvalTasks(termCode: String): String = jxglRaw(
+        path = "new/student/teapj/pjDatas?page=1&rows=200&xnxqdm=$termCode" +
+            "&primarySort=%20kcrwdm%20asc",
+        label = "结课评价",
+        referer = "https://jxgl.wyu.edu.cn/new/student/teapj/jkList.page",
+    )
+
+    suspend fun fetchEvalDetail(pjdm: String): String = jxglRaw(
+        path = "new/student/teapj/viewPjData?pjdm=$pjdm",
+        label = "评价明细",
+        referer = "https://jxgl.wyu.edu.cn/new/student/teapj/jkList.page",
+    )
+
     fun logout() {
         if (_ui.value.loggingOut) return
         autoLoginJob?.cancel()

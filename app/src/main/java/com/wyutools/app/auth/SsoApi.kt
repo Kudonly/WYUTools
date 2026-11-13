@@ -326,14 +326,14 @@ class SsoApi {
         }
 
         var response = request()
-        if (scheduleNeedsLogin(response)) {
+        if (jxglNeedsLogin(response)) {
             establishJxgl()
             response = request()
         }
         if (response.code != 200) {
             throw SsoException("课表获取失败（HTTP ${response.code}），请稍后重试。")
         }
-        if (scheduleNeedsLogin(response)) {
+        if (jxglNeedsLogin(response)) {
             throw SsoException("登录已失效，请重新登录。", sessionExpired = true)
         }
         if (response.body.trim().startsWith("<")) {
@@ -346,7 +346,113 @@ class SsoApi {
         response.body
     }
 
-    private fun scheduleNeedsLogin(response: RawResponse): Boolean {
+    /**
+     * 拉取教务考试安排原始 JSON。
+     *
+     * 走「学生考试任务」模块的分页接口 `xsksrw/paginateXsksrw`（与课表同源的
+     * 新版 jqGrid 风格接口，老的 `xsksap!getDataList.action` 已经下线）。
+     * 复用同一个 jxgl 会话，被踢回统一认证时重建一次再重试；字段解析交给
+     * exam 层，认证层不依赖考试模型。
+     */
+    suspend fun fetchJxglExams(termCode: String): String = withContext(Dispatchers.IO) {
+        fun request(): RawResponse {
+            // 分页参数按教务前端原样带上：rows 取大一点，一次拿完一学期。
+            val body = FormBody.Builder()
+                .add("xnxqdm", termCode)
+                .add("page", "1")
+                .add("rows", "200")
+                .add("sort", "xsxm")
+                .add("order", "asc")
+                .build()
+            val request = newRequest(JXGL_EXAM_DATA_URL)
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Origin", JXGL_ORIGIN)
+                .header("Referer", JXGL_EXAM_PAGE_URL)
+                .post(body)
+                .build()
+            return execute(request)
+        }
+
+        var response = request()
+        if (jxglNeedsLogin(response)) {
+            establishJxgl()
+            response = request()
+        }
+        if (response.code != 200) {
+            throw SsoException("考试安排获取失败（HTTP ${response.code}），请稍后重试。")
+        }
+        if (jxglNeedsLogin(response)) {
+            // 重建会话后还是登录页：多半是教务这个模块本身不可用（尚未开放
+            // 或改版），不能当成会话过期去清登录态，否则用户会被无故登出。
+            throw SsoException("教务系统没有返回考试数据，请稍后重试。")
+        }
+        if (response.body.trim().startsWith("<")) {
+            throw SsoException("教务系统返回了异常页面，请稍后重试。")
+        }
+        checkAuthPayload(
+            runCatching { JSONObject(response.body.trim()) }.getOrNull()
+                ?: throw SsoException("考试数据格式异常，请稍后重试。"),
+        )
+        response.body
+    }
+
+    /**
+     * 新版教务模块的通用访问入口（成绩 / 绩点 / 体测 / 教评 都走这里）。
+     *
+     * 与课表、考试一致：先复用现有 jxgl 会话，被踢回统一认证时重建一次再重试。
+     * 只返回响应体，具体字段由各业务层解析，认证层不依赖业务模型。
+     *
+     * @param form 非 null 时用 POST 表单提交，null 表示 GET。
+     * @param html 需要页面本身（例如成绩分析单的表格）而不是 JSON。
+     */
+    suspend fun fetchJxglRaw(
+        path: String,
+        form: Map<String, String>? = null,
+        referer: String = JXGL_HOME,
+        label: String,
+        html: Boolean = false,
+    ): String = withContext(Dispatchers.IO) {
+        fun request(): RawResponse {
+            val builder = newRequest(JXGL_ORIGIN + "/" + path.trimStart('/'))
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", referer)
+            val body = form?.let { fields ->
+                FormBody.Builder().apply {
+                    fields.forEach { (key, value) -> add(key, value) }
+                }.build()
+            }
+            return execute(if (body == null) builder.get().build() else builder.post(body).build())
+        }
+
+        var response = request()
+        if (jxglNeedsLogin(response)) {
+            establishJxgl()
+            response = request()
+        }
+        if (response.code != 200) {
+            throw SsoException("$label 获取失败（HTTP ${response.code}），请稍后重试。")
+        }
+        if (jxglNeedsLogin(response)) {
+            // 重建会话后还是登录页：多半是这个模块没对本账号开放，不能当成
+            // 会话过期去清登录态，否则用户会被无故登出。
+            throw SsoException("教务系统没有返回$label，请稍后重试。")
+        }
+        val body = response.body.trim()
+        if (!html) {
+            if (body.startsWith("<")) {
+                throw SsoException("教务系统返回了异常页面，请稍后重试。")
+            }
+            checkAuthPayload(
+                runCatching { JSONObject(body) }.getOrNull()
+                    ?: throw SsoException("$label 数据格式异常，请稍后重试。"),
+            )
+        }
+        response.body
+    }
+
+    private fun jxglNeedsLogin(response: RawResponse): Boolean {
         if (response.code == 401 || response.code == 403) return true
         if (isAuthServerUrl(response.url.toString())) return true
         val location = response.location
@@ -628,6 +734,13 @@ class SsoApi {
             "https://jxgl.wyu.edu.cn/new/student/xsgrkb/main.page"
         private const val JXGL_SCHEDULE_DATA_URL =
             "https://jxgl.wyu.edu.cn/new/student/xsgrkb/getCalendarWeekDatas"
+        // 考试安排走「学生考试任务」的新版模块接口（老的 .action 接口已下线），
+        // Referer 必须指向该模块自己的页面，否则会被当作非法请求拦掉。
+        private const val JXGL_EXAM_PAGE_URL =
+            "https://jxgl.wyu.edu.cn/new/student/xsksrw/main.page"
+        private const val JXGL_EXAM_DATA_URL =
+            "https://jxgl.wyu.edu.cn/new/student/xsksrw/paginateXsksrw"
+        private const val JXGL_ORIGIN = "https://jxgl.wyu.edu.cn"
         private const val AUTH_SERVER_HOST = "authserver.wyu.edu.cn"
         private val SESSION_CODE_PATTERN = Regex("\"code\"\\s*:\\s*-401")
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()

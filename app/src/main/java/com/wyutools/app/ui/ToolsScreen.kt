@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -69,12 +70,10 @@ fun ToolsContent(
     scrollState: ScrollState,
     topInset: Dp,
     bottomInset: Dp,
+    tools: List<WyuTool>,
     scheduleFocus: ScheduleFocus?,
     scheduleWeek: Int,
-    onOpenSchedule: (SharedCardSnapshot?) -> Unit,
-    onOpenLxt: (SharedCardSnapshot?) -> Unit,
-    onOpenElec: (SharedCardSnapshot?) -> Unit,
-    onOpenGym: (SharedCardSnapshot?) -> Unit,
+    onOpen: (WyuTool, SharedCardSnapshot?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -86,35 +85,32 @@ fun ToolsContent(
         // MeContent starts its first card at topInset + 8dp column padding
         // + 14dp spacedBy, so match that exact offset here.
         Spacer(Modifier.height(topInset + 22.dp))
-        ScheduleToolEntry(
-            focus = scheduleFocus,
-            week = scheduleWeek,
-            onClick = onOpenSchedule,
-        )
-        Spacer(Modifier.height(12.dp))
-        ToolEntry(
-            icon = Icons.Outlined.WaterDrop,
-            title = "洗澡",
-            summary = "热水余额 · 开阀用水",
-            onClick = onOpenLxt,
-        )
-        Spacer(Modifier.height(12.dp))
-        ToolEntry(
-            icon = Icons.Outlined.Bolt,
-            title = "电费",
-            summary = "用电查询 · 扫码充值",
-            onClick = onOpenElec,
-        )
-        Spacer(Modifier.height(12.dp))
-        ToolEntry(
-            icon = Icons.Outlined.SportsBasketball,
-            title = "体育馆预约",
-            summary = "场地查询 · 在线预约",
-            onClick = onOpenGym,
-        )
-        Spacer(Modifier.height(32.dp))
+        tools.forEach { tool ->
+            when (tool) {
+                WyuTool.Schedule -> ScheduleToolEntry(
+                    focus = scheduleFocus,
+                    week = scheduleWeek,
+                    route = tool.route,
+                    onClick = { snapshot -> onOpen(tool, snapshot) },
+                )
+
+                else -> ToolEntry(
+                    icon = tool.icon,
+                    title = tool.title,
+                    summary = tool.summary,
+                    route = tool.route,
+                    onClick = { snapshot -> onOpen(tool, snapshot) },
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        Spacer(Modifier.height(20.dp))
         Text(
-            text = "更多工具正在路上",
+            text = if (tools.isEmpty()) {
+                "常用还没有卡片，用右上角的卡片按钮从「更多」里挑几个"
+            } else {
+                "更多工具可在「更多」页查看与管理"
+            },
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
@@ -128,6 +124,7 @@ fun ToolsContent(
 private fun ToolCard(
     title: String,
     onClick: (SharedCardSnapshot?) -> Unit,
+    route: String? = null,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = WyuCardCornerRadius,
     color: Color? = null,
@@ -171,15 +168,17 @@ private fun ToolCard(
         CardDefaults.defaultColors()
     }
     val openCard: () -> Unit = {
+        // User input wins: cut a still-running return short even if the DOWN
+        // was consumed by this card's own clickable before the global press
+        // hook could see it. The wait below then resolves in a few frames.
+        WyuMorphPageState.interruptMorph()
         if (cardBounds.isEmpty || launching) {
             if (!launching) onClick(null)
         } else {
             launching = true
             scope.launch {
-                // A return may still be pulling the home back; wait until it
-                // lands plus its 50ms margin so the snapshot is never taken
-                // from a shrunk, shifted card.
-                WyuMorphPageState.awaitReturnSettled()
+                // No waiting for the previous animation: the press already
+                // put the page back at rest and started a parallel close.
                 val bitmap = runCatching {
                     graphicsLayer.toImageBitmap().asAndroidBitmap()
                 }.getOrNull()
@@ -207,6 +206,15 @@ private fun ToolCard(
     Card(
         onClick = openCard,
         modifier = modifier
+            // The card that is currently flying draws nothing in its slot while
+            // it is out — read in the layer block, so a capture can hide it and
+            // record in the same frame. Layout is untouched: the card keeps its
+            // size and place, so the morph's target never shifts.
+            .graphicsLayer {
+                // Layer blocks mutate a persistent layer, so this is a full
+                // assignment, not a one-way switch.
+                alpha = if (route != null && WyuMorphPageState.flyingRoute == route) 0f else 1f
+            }
             .onGloballyPositioned { coordinates ->
                 cardCoordinates = coordinates
                 val bounds = coordinates.boundsInWindow()
@@ -276,9 +284,10 @@ private fun ToolEntry(
     icon: ImageVector,
     title: String,
     summary: String,
+    route: String,
     onClick: (SharedCardSnapshot?) -> Unit,
 ) {
-    ToolCard(title = title, onClick = onClick) { titleModifier, onTitleLayout ->
+    ToolCard(title = title, onClick = onClick, route = route) { titleModifier, onTitleLayout ->
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -288,7 +297,7 @@ private fun ToolEntry(
             Box(
                 modifier = Modifier
                     .size(52.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(rememberWyuIconShape(52.dp))
                     .background(MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.60f)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -331,6 +340,7 @@ private fun ToolEntry(
 private fun ScheduleToolEntry(
     focus: ScheduleFocus?,
     week: Int,
+    route: String,
     onClick: (SharedCardSnapshot?) -> Unit,
 ) {
     val primary = MiuixTheme.colorScheme.primary
@@ -354,6 +364,7 @@ private fun ScheduleToolEntry(
     ToolCard(
         title = "课表",
         onClick = onClick,
+        route = route,
     ) { titleModifier, onTitleLayout ->
         Column(
             modifier = Modifier
@@ -364,7 +375,7 @@ private fun ScheduleToolEntry(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(rememberWyuIconShape(44.dp))
                         .background(primary.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center,
                 ) {

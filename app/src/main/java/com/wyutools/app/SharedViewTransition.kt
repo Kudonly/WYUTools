@@ -22,6 +22,19 @@ data class SharedCardSnapshot(
     val titleLineHeightPx: Float = 0f,
 )
 
+/**
+ * Home as the two layers an iOS-style zoom needs. The wallpaper is its own
+ * layer so it can move towards the viewer while [content] — everything drawn on
+ * top of it — pulls back and shrinks. Both are captured from the same frame, so
+ * their geometry stays registered pixel for pixel; [content] carries a
+ * transparent background because it is recorded with the page's own wallpaper
+ * switched off.
+ */
+data class SharedHomeLayers(
+    val wallpaper: Bitmap,
+    val content: Bitmap,
+)
+
 object SharedViewTransition {
     private const val TAG = "SharedViewTransition"
 
