@@ -250,7 +250,9 @@ private fun GpaGlassButton(onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Card(
+        // 与旁边「刷新」按钮同款材质：实时采样顶栏下方的页面内容层，
+        // 不用缓存烘焙的壁纸底图，列表滚动、卡片形变都能透上来。
+        LiveGlassCard(
             modifier = Modifier.fillMaxHeight(),
             cornerRadius = 17.dp,
             insideMargin = PaddingValues(horizontal = 13.dp),

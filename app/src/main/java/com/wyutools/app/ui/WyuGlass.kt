@@ -72,6 +72,9 @@ internal class WyuSquircleShape(private val cornerRadius: Dp) : Shape {
 }
 internal const val CardBlurRadius = 38f
 private const val ButtonBlurRadius = 30f
+// Same live blur radius as the top-bar glass buttons, so a pill sitting next
+// to them reads as the same material instead of a softer, card-like surface.
+private const val TopBarGlassBlurRadius = 24f
 
 /**
  * iOS ships an icon corner of 22.37% of the side, but that figure is the
@@ -311,6 +314,81 @@ fun Card(
             null
         },
         onLongPress = onLongPress,
+        content = content,
+    )
+}
+
+/**
+ * Glass card for top-bar chrome that samples the **live page content** behind
+ * it, the same way the neighbouring top-bar glass buttons (refresh / back) do.
+ *
+ * The regular [Card] points its shader at `LocalWyuGlassBackdrop` — wallpaper
+ * only — and, when a custom wallpaper is set, at a cached pre-baked underlay
+ * bitmap. That is cheap but frozen: the list scrolling underneath never shows
+ * through. `LocalWyuPageBackdrop` records the `wyu-content` layer live every
+ * frame; the top bar lives in a separate subcompose slot, so it is not part of
+ * the capture and the pill cannot frost an image of itself.
+ *
+ * No baked underlay branch here and no pre-blurred wallpaper fallback: the
+ * surface stays live in every appearance mode. Shader tuning mirrors
+ * `WyuTopBarGlassButton` so the pill and the round buttons read as one material.
+ */
+@Composable
+fun LiveGlassCard(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = WyuCardCornerRadius,
+    insideMargin: PaddingValues = CardDefaults.InsideMargin,
+    colors: CardColors = CardDefaults.defaultColors(),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    // Same live source as the adjacent top-bar glass buttons: the content layer,
+    // not the wallpaper-only backdrop.
+    val backdrop = LocalWyuPageBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    val useSoftGlass = softGlass && wyuSoftGlassSupported
+    val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    MiuixCard(
+        // Never take the baked-underlay branch. When soft glass is off the
+        // pre-blurred wallpaper is skipped too, so the surface stays live in
+        // every appearance mode.
+        modifier = when {
+            backdrop == null -> modifier
+            useSoftGlass -> modifier.wyuSoftGlass(
+                backdrop = backdrop,
+                shape = shape,
+                glassShape = WyuSoftGlassShape.RoundedRect,
+                cornerRadius = cornerRadius,
+                blurPercent = softGlassBlur,
+                baseTint = if (dark) {
+                    Color.Transparent
+                } else {
+                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                },
+                refractionThicknessPx = TopBarGlassRefractionPx,
+                reflectionThicknessPx = TopBarGlassReflectionPx,
+                shapeEdgePx = tuning.shapeEdgePx,
+                shapeEdgePow = tuning.shapeEdgePow,
+                reflectionLighten = tuning.reflectLighten,
+                bgSaturation = tuning.saturation(dark),
+                reflectionStrength = tuning.reflectionStrength,
+                refractionIor = tuning.refractionIor,
+            )
+            else -> modifier.textureBlur(
+                backdrop = backdrop,
+                shape = shape,
+                blurRadius = TopBarGlassBlurRadius,
+            )
+        },
+        cornerRadius = cornerRadius,
+        insideMargin = insideMargin,
+        colors = if (backdrop != null) {
+            colors.frosted(if (useSoftGlass) CardSoftGlassAlpha else CardGlassAlpha)
+        } else {
+            colors
+        },
         content = content,
     )
 }

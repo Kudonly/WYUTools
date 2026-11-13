@@ -1072,6 +1072,20 @@ private fun DrawScope.drawMorphBackdropContent(
 }
 
 /**
+ * From here on the window is visually the live page: the card snapshot
+ * ([CardWindowFadeEnd]) and the tile surface ([MorphCardFillFadeEnd]) are both
+ * gone, and the hole already covers most of the screen.
+ *
+ * A critically damped spring crawls through its last ~15% for a few hundred
+ * milliseconds before it reaches the visibility threshold, and keeping the
+ * full-screen press blocker until [CardMorphOverlay] detaches made every tap
+ * inside the container feel dead for that whole tail. Handing hit-testing over
+ * at this point lets buttons, drags and scrolls answer while the spring is
+ * still finishing; the animation itself is untouched.
+ */
+private const val MorphInteractiveFrom = 0.85f
+
+/**
  * Opens the card into the page: the card preview stretches with the growing
  * rounded window and dissolves into the destination underneath it, while the
  * home backdrop recedes, blurs and finally hands over to the page.
@@ -1110,6 +1124,10 @@ fun CardMorphOverlay(
     // reverse animation has landed it must no longer swallow touches, so the
     // home is usable on the very next frame even while the overlay is fading out.
     var landed by remember(snapshot) { mutableStateOf(false) }
+    // Latched once the open window has become the live page. Written from the
+    // spring's progress callback, so it costs exactly one recomposition (not
+    // one per frame) and never flips back if the spring settles unevenly.
+    var interactive by remember(snapshot, home) { mutableStateOf(false) }
     // Detaching twice would run the cancel clean-up twice, so the two places
     // that can end this window share one guard.
     val ended = remember(snapshot) { booleanArrayOf(false) }
@@ -1192,6 +1210,9 @@ fun CardMorphOverlay(
             expand.animateOpen(1f) { settled ->
                 WyuMorphPageState.morphWindowProgress = settled
                 if (style == WyuMorphStyle.Tile) applyContent(settled)
+                // The window is the live page now: stop swallowing presses
+                // inside the container while the spring finishes its tail.
+                if (!interactive && settled >= MorphInteractiveFrom) interactive = true
             }
             if (style == WyuMorphStyle.Tile) applyContent(1f)
             onFinished()
@@ -1214,11 +1235,14 @@ fun CardMorphOverlay(
                 },
             )
             .then(
-                // During a pure opening this consumes every press: only BACK
-                // is allowed to interrupt. The moment BACK fires,
-                // cancelRequested is true in the very same composition, so the
-                // blocker is gone and touches reach the live home underneath.
-                if (landed || cancelRequested) {
+                // Early in a pure opening this consumes every press: the
+                // window is still a snapshot, so only BACK may interrupt. It
+                // comes off in three cases — BACK fired (cancelRequested), the
+                // reverse landed, or the window has become the live page
+                // (interactive). In the last case the spring is still moving,
+                // but taps and drags inside the container reach the real page
+                // underneath instead of waiting for onFinished().
+                if (landed || cancelRequested || interactive) {
                     Modifier
                 } else {
                     Modifier.clickable(

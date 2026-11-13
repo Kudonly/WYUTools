@@ -201,9 +201,13 @@ internal object WyuMorphPageState {
     var homePagerMoving by mutableStateOf(false)
 
     /** A pure opening morph answers only to BACK. Every other press is
-     *  deliberately ignored: the destination page is still growing and has no
-     *  home cards to hand a new operation to. Once BACK starts the interrupt,
-     *  this flips false and the very next press may open another card. */
+     *  deliberately ignored by [interruptMorph]: the destination page is still
+     *  settling, and bumping the generation / snapping [contentProgress] would
+     *  make it jump for a frame. Hit-testing is separate: CardMorphOverlay
+     *  passes presses inside the container through once the window is the live
+     *  page, so those taps must stay neutral here. Once BACK starts the
+     *  interrupt, this flips false and the very next press may open another
+     *  card. */
     var openingOnly by mutableStateOf(false)
 
     /** Generation of the gesture that currently owns the screen. A press does
@@ -856,8 +860,8 @@ private fun WyuSwitchingTitle(
 
 // A 44dp disc is barely wider than the captured backdrop padding, so the
 // card-sized offsets clamp at the layer boundary and fringe the rim highlight.
-private const val TopBarGlassRefractionPx = 56f
-private const val TopBarGlassReflectionPx = 96f
+internal const val TopBarGlassRefractionPx = 56f
+internal const val TopBarGlassReflectionPx = 96f
 
 // The tab pill is only 38dp tall, so card-sized edge and refraction values
 // exceed its 114px capture padding and leave the top rim looking unfilled.
