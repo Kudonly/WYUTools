@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
@@ -374,7 +373,7 @@ private fun ScheduleOverlay(
                 scaleY = scale
                 translationY = (1f - morph) * WyuMorphPageState.ContentLift.toPx()
             }
-            .statusBarsPadding()
+            .padding(top = rememberWyuStatusBarTopInset())
             .padding(top = 62.dp, start = 16.dp, end = 16.dp)
             .graphicsLayer {
                 val collapsed = (collapsedFraction.value + boost()).coerceIn(0f, 1f)

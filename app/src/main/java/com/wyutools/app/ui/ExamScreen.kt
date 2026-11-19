@@ -48,7 +48,7 @@ import com.wyutools.app.exam.ExamData
 import com.wyutools.app.exam.ExamEntry
 import com.wyutools.app.exam.ExamUiState
 import com.wyutools.app.exam.ExamViewModel
-import top.yukonga.miuix.kmp.basic.Button
+// Shared Button from WyuGlass.kt keeps the haptic tick and 莫奈 styling.
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon

@@ -81,6 +81,14 @@ enum class WyuWallpaper(val label: String) {
         val stops = backgroundStops(dark, surface) ?: return null
         return Brush.verticalGradient(*stops.toTypedArray())
     }
+
+    /**
+     * One representative colour for Monet key-colour extraction. Gradient
+     * wallpapers use their middle stop (the most saturated one); a custom photo
+     * has no stops and is seeded from [WyuAppearance.monetSeed] instead.
+     */
+    fun seedColor(dark: Boolean): Color? =
+        backgroundStops(dark, Color.Black)?.getOrNull(1)?.second
 }
 
 enum class WyuThemeMode(val label: String) {
@@ -142,6 +150,8 @@ object WyuAppearance {
     private const val KeyCustomBrightnessLight = "custom_brightness_light"
     private const val KeyCustomBrightnessDark = "custom_brightness_dark"
     private const val BrightnessDarkDefault = 0.6f
+    private const val KeyCardTheme = "card_theme"
+    // Retired boolean; still read once to migrate into [KeyCardTheme].
     private const val KeySoftGlass = "soft_glass"
     private const val KeySoftGlassBlur = "soft_glass_blur_radius"
     private const val KeySoftGlassTuningIor = "soft_glass_tuning_refraction_ior"
@@ -183,6 +193,13 @@ object WyuAppearance {
     private val _customBrightnessDark = MutableStateFlow(BrightnessDarkDefault)
     val customBrightnessDark: StateFlow<Float> = _customBrightnessDark.asStateFlow()
 
+    private val _cardTheme = MutableStateFlow(WyuCardTheme.Default)
+    val cardTheme: StateFlow<WyuCardTheme> = _cardTheme.asStateFlow()
+
+    /**
+     * Derived flag kept for the glass pipeline: every soft-glass surface checks
+     * it, so the material stays a boolean even though the UI now picks a theme.
+     */
     private val _softGlass = MutableStateFlow(false)
     val softGlass: StateFlow<Boolean> = _softGlass.asStateFlow()
 
@@ -246,7 +263,22 @@ object WyuAppearance {
         _customBrightnessDark.value = loaded
             .getFloat(KeyCustomBrightnessDark, BrightnessDarkDefault)
             .coerceIn(0.5f, 1f)
-        _softGlass.value = loaded.getBoolean(KeySoftGlass, false)
+        // A retired boolean keeps its meaning on upgrade: soft glass on means
+        // the theme was 柔光玻璃. Devices below API 33 cannot render it, so the
+        // stored choice degrades to 默认 instead of showing a dead material.
+        val storedCardTheme = loaded.getString(KeyCardTheme, null)
+            ?.let { name -> WyuCardTheme.entries.firstOrNull { it.name == name } }
+            ?: if (loaded.getBoolean(KeySoftGlass, false)) {
+                WyuCardTheme.SoftGlass
+            } else {
+                WyuCardTheme.Default
+            }
+        _cardTheme.value = if (!wyuSoftGlassSupported && storedCardTheme == WyuCardTheme.SoftGlass) {
+            WyuCardTheme.Default
+        } else {
+            storedCardTheme
+        }
+        _softGlass.value = _cardTheme.value == WyuCardTheme.SoftGlass
         _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, SoftGlassBlurDefault)
             .coerceIn(WyuSoftGlassBlurMin, 100)
         val tuningDefaults = WyuSoftGlassTuning()
@@ -336,11 +368,29 @@ object WyuAppearance {
         prefs?.edit()?.putInt(KeySoftGlassBlur, clamped)?.apply()
     }
 
-    fun setSoftGlass(context: Context, enabled: Boolean) {
+    /**
+     * Switching the surface language. 柔光玻璃 also drives the glass pipeline's
+     * boolean flag, so the derived flow flips together with the stored theme;
+     * 莫奈 keeps that flag off and renders MD3 surfaces instead.
+     */
+    fun setCardTheme(context: Context, theme: WyuCardTheme) {
         ensureLoaded(context)
-        if (_softGlass.value == enabled) return
-        _softGlass.value = enabled
-        prefs?.edit()?.putBoolean(KeySoftGlass, enabled)?.apply()
+        val resolved = if (!wyuSoftGlassSupported && theme == WyuCardTheme.SoftGlass) {
+            WyuCardTheme.Default
+        } else {
+            theme
+        }
+        if (_cardTheme.value == resolved) return
+        _cardTheme.value = resolved
+        _softGlass.value = resolved == WyuCardTheme.SoftGlass
+        prefs?.edit()?.putString(KeyCardTheme, resolved.name)?.apply()
+    }
+
+    fun setSoftGlass(context: Context, enabled: Boolean) {
+        setCardTheme(
+            context,
+            if (enabled) WyuCardTheme.SoftGlass else WyuCardTheme.Default,
+        )
     }
 
     fun setSoftGlassTuning(context: Context, tuning: WyuSoftGlassTuning) {

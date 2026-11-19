@@ -2,16 +2,31 @@ package com.wyutools.app.ui
 
 import android.os.Build
 import android.view.RoundedCorner
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -37,6 +52,7 @@ import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
 import top.yukonga.miuix.kmp.basic.TextFieldColors
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -143,6 +159,18 @@ fun Card(
     samplePageContent: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // 莫奈 drops the glass pipeline entirely: MD3 renders opaque tonal
+    // containers with a state layer instead of sampling anything behind.
+    if (LocalWyuMd3Style.current) {
+        Md3CardSurface(
+            modifier = modifier,
+            cornerRadius = cornerRadius,
+            insideMargin = insideMargin,
+            colors = colors,
+            content = content,
+        )
+        return
+    }
     val glass = if (samplePageContent) {
         LocalWyuPageBackdrop.current
     } else {
@@ -235,6 +263,18 @@ fun Card(
     onLongPress: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (LocalWyuMd3Style.current) {
+        Md3CardSurface(
+            modifier = modifier,
+            cornerRadius = cornerRadius,
+            insideMargin = insideMargin,
+            colors = colors,
+            onClick = onClick,
+            onLongPress = onLongPress,
+            content = content,
+        )
+        return
+    }
     val glass = LocalWyuGlassBackdrop.current
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
@@ -341,6 +381,16 @@ fun LiveGlassCard(
     colors: CardColors = CardDefaults.defaultColors(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (LocalWyuMd3Style.current) {
+        Md3CardSurface(
+            modifier = modifier,
+            cornerRadius = cornerRadius,
+            insideMargin = insideMargin,
+            colors = colors,
+            content = content,
+        )
+        return
+    }
     // Same live source as the adjacent top-bar glass buttons: the content layer,
     // not the wallpaper-only backdrop.
     val backdrop = LocalWyuPageBackdrop.current
@@ -405,6 +455,19 @@ fun Button(
     insideMargin: PaddingValues = ButtonDefaults.InsideMargin,
     content: @Composable RowScope.() -> Unit,
 ) {
+    if (LocalWyuMd3Style.current) {
+        Md3Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            minWidth = minWidth,
+            minHeight = minHeight,
+            colors = colors,
+            insideMargin = insideMargin,
+            content = content,
+        )
+        return
+    }
     val glass = LocalWyuGlassBackdrop.current
     val useGlass = glass != null && colors.color.alpha > 0.01f
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
@@ -461,6 +524,140 @@ fun IconButton(
         enabled = enabled,
         content = content,
     )
+}
+
+/**
+ * Material Design 3 filled card, used while 莫奈 is the active theme.
+ *
+ * Opaque tonal container, MD3's 12dp corner and an 8% state layer on press —
+ * no blur, no baked underlay, nothing sampled from the page behind. Custom
+ * containers (a course tile, an elec `primaryContainer`) keep their colour;
+ * only the stock `surfaceContainer` is remapped to MD3's `surfaceContainerHigh`
+ * so cards still separate from the page.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Md3CardSurface(
+    modifier: Modifier,
+    cornerRadius: Dp,
+    insideMargin: PaddingValues,
+    colors: CardColors,
+    onClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val container = if (colors.color == CardDefaults.defaultColors().color) {
+        scheme.surfaceContainerHigh
+    } else {
+        colors.color
+    }
+    // 28dp squircles read as miuix, not MD3; a card that was already tighter
+    // than 16dp keeps its own radius.
+    val shape = RoundedCornerShape(cornerRadius.coerceAtMost(16.dp))
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val interactive = onClick != null || onLongPress != null
+    val stateLayer = if (interactive && pressed) {
+        colors.contentColor.copy(alpha = 0.1f)
+    } else {
+        Color.Transparent
+    }
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(container)
+            .background(stateLayer)
+            .then(
+                when {
+                    onClick != null && onLongPress != null -> Modifier.combinedClickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onLongClick = onLongPress,
+                        onClick = onClick,
+                    )
+
+                    onClick != null -> Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onClick = onClick,
+                    )
+
+                    onLongPress != null -> Modifier.combinedClickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onLongClick = onLongPress,
+                        onClick = {},
+                    )
+
+                    else -> Modifier
+                },
+            )
+            .padding(insideMargin),
+        content = content,
+    )
+}
+
+/**
+ * MD3 filled button. The stock miuix colours carry the glass wash, so they are
+ * mapped onto the MD3 roles instead: default → `primary`, a half-transparent
+ * neutral → `surfaceContainerHigh` (tonal), a solid custom colour is kept as-is
+ * (destructive stays `error`). Corner radius is always the button's own half
+ * height, which is MD3's full pill.
+ */
+@Composable
+private fun Md3Button(
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    minWidth: Dp,
+    minHeight: Dp,
+    colors: ButtonColors,
+    insideMargin: PaddingValues,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val defaults = ButtonDefaults.buttonColors()
+    val isTransparent = colors.color.alpha <= 0.01f
+    val container = when {
+        isTransparent -> colors.color
+        colors.color == defaults.color -> scheme.primary
+        colors.color.alpha < 0.99f -> scheme.surfaceContainerHigh
+        else -> colors.color
+    }
+    val contentColor = when {
+        isTransparent -> colors.contentColor
+        colors.color == defaults.color -> scheme.onPrimary
+        else -> colors.contentColor
+    }
+    val shape = RoundedCornerShape(minHeight / 2)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val stateLayer = if (enabled && pressed) {
+        contentColor.copy(alpha = 0.12f)
+    } else {
+        Color.Transparent
+    }
+    val tap = hapticClick(enabled, onClick)
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        Row(
+            modifier = modifier
+                .clip(shape)
+                .background(if (enabled) container else colors.disabledColor)
+                .background(stateLayer)
+                .defaultMinSize(minWidth = minWidth, minHeight = minHeight)
+                .clickable(
+                    enabled = enabled,
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = tap,
+                )
+                .padding(insideMargin),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
 }
 
 private fun CardColors.frosted(alpha: Float): CardColors =

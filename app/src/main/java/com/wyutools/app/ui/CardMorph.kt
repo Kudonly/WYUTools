@@ -1754,9 +1754,7 @@ private fun FlightTitle(
     val rawTitleBounds = snapshot.titleBounds ?: return
     val location = rememberViewLocation()
     val density = LocalDensity.current
-    val surfaceTop = with(density) {
-        WindowInsets.statusBars.getTop(this).toFloat()
-    }
+    val surfaceTop = with(density) { rememberWyuStatusBarTopInset().toPx() }
     val startBounds = remember(rawTitleBounds) {
         Rect(
             rawTitleBounds.left.toFloat() - location[0],

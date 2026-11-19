@@ -143,6 +143,15 @@ import kotlin.math.roundToInt
 
 val WyuNavigatorBarHeight: Dp = 58.dp
 
+/**
+ * How much of the press swell survives horizontally on the navigator thumb.
+ * The drag animation scales both axes to 78/56 while pressed; on a thumb that
+ * is already one full cell wide, that growth reads as too long and runs over
+ * the neighbouring icons, so the width keeps only this fraction of it while
+ * the vertical bloom stays untouched.
+ */
+private const val ThumbPressWidenTrim = 0.82f
+
 private val WyuCollapsedBarHeight = 56.dp
 internal val WyuLargeTitleHeight = 46.dp
 
@@ -655,7 +664,7 @@ fun WyuActionBar(
     altFraction: () -> Float = { 0f },
 ) {
     val onSurface = MiuixTheme.colorScheme.onSurface
-    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val statusTop = rememberWyuStatusBarTopInset()
     val largeStyle = remember(onSurface) {
         TextStyle(
             fontSize = 32.sp,
@@ -888,7 +897,9 @@ private fun WyuTopBarGlassButton(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
-    val useSoftGlass = softGlass && wyuSoftGlassSupported
+    // 莫奈: opaque tonal circle, no shadow, no sampling and no rim light.
+    val md3 = LocalWyuMd3Style.current
+    val useSoftGlass = !md3 && softGlass && wyuSoftGlassSupported
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -922,65 +933,74 @@ private fun WyuTopBarGlassButton(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .shadow(
-                    elevation = 3.dp,
-                    shape = CircleShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.10f),
-                    spotColor = Color.Black.copy(alpha = 0.16f),
-                )
                 .then(
-                    when {
-                        backdrop == null -> Modifier
-                        useSoftGlass -> Modifier.wyuSoftGlass(
-                            backdrop = backdrop,
-                            shape = CircleShape,
-                            glassShape = WyuSoftGlassShape.Circle,
-                            blurPercent = softGlassBlur,
-                            baseTint = if (dark) {
-                                Color.Transparent
-                            } else {
-                                Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                            },
-                            refractionThicknessPx = TopBarGlassRefractionPx,
-                            reflectionThicknessPx = TopBarGlassReflectionPx,
-                            shapeEdgePx = softGlassTuning.shapeEdgePx,
-                            shapeEdgePow = softGlassTuning.shapeEdgePow,
-                            reflectionLighten = softGlassTuning.reflectLighten,
-                            bgSaturation = softGlassTuning.saturation(dark),
-                            reflectionStrength = softGlassTuning.reflectionStrength,
-                            refractionIor = softGlassTuning.refractionIor,
-                        )
-
-                        else -> Modifier.textureBlur(
-                            backdrop = backdrop,
-                            shape = CircleShape,
-                            blurRadius = 24f,
-                        )
-                    },
-                )
-                .clip(CircleShape)
-                .then(
-                    if (useSoftGlass && backdrop != null) {
+                    if (md3) {
                         Modifier
+                            .clip(CircleShape)
+                            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
                     } else {
-                        Modifier.background(
-                            if (dark) {
-                                Color.White.copy(alpha = 0.16f)
-                            } else {
-                                Color.White.copy(alpha = 0.55f)
-                            },
-                        )
+                        Modifier
+                            .shadow(
+                                elevation = 3.dp,
+                                shape = CircleShape,
+                                clip = false,
+                                ambientColor = Color.Black.copy(alpha = 0.10f),
+                                spotColor = Color.Black.copy(alpha = 0.16f),
+                            )
+                            .then(
+                                when {
+                                    backdrop == null -> Modifier
+                                    useSoftGlass -> Modifier.wyuSoftGlass(
+                                        backdrop = backdrop,
+                                        shape = CircleShape,
+                                        glassShape = WyuSoftGlassShape.Circle,
+                                        blurPercent = softGlassBlur,
+                                        baseTint = if (dark) {
+                                            Color.Transparent
+                                        } else {
+                                            Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                                        },
+                                        refractionThicknessPx = TopBarGlassRefractionPx,
+                                        reflectionThicknessPx = TopBarGlassReflectionPx,
+                                        shapeEdgePx = softGlassTuning.shapeEdgePx,
+                                        shapeEdgePow = softGlassTuning.shapeEdgePow,
+                                        reflectionLighten = softGlassTuning.reflectLighten,
+                                        bgSaturation = softGlassTuning.saturation(dark),
+                                        reflectionStrength = softGlassTuning.reflectionStrength,
+                                        refractionIor = softGlassTuning.refractionIor,
+                                    )
+
+                                    else -> Modifier.textureBlur(
+                                        backdrop = backdrop,
+                                        shape = CircleShape,
+                                        blurRadius = 24f,
+                                    )
+                                },
+                            )
+                            .clip(CircleShape)
+                            .then(
+                                if (useSoftGlass && backdrop != null) {
+                                    Modifier
+                                } else {
+                                    Modifier.background(
+                                        if (dark) {
+                                            Color.White.copy(alpha = 0.16f)
+                                        } else {
+                                            Color.White.copy(alpha = 0.55f)
+                                        },
+                                    )
+                                },
+                            )
+                            .border(
+                                width = 0.5.dp,
+                                color = if (dark) {
+                                    Color.White.copy(alpha = 0.14f)
+                                } else {
+                                    Color.Black.copy(alpha = 0.06f)
+                                },
+                                shape = CircleShape,
+                            )
                     },
-                )
-                .border(
-                    width = 0.5.dp,
-                    color = if (dark) {
-                        Color.White.copy(alpha = 0.14f)
-                    } else {
-                        Color.Black.copy(alpha = 0.06f)
-                    },
-                    shape = CircleShape,
                 ),
         )
         Icon(
@@ -1092,31 +1112,38 @@ fun WyuFloatingTabs(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
-    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
-    val containerColor = if (dark) {
-        Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
-    } else {
-        Color.White.copy(alpha = if (glass) 0.58f else 1f)
+    // 莫奈 turns the pill into an MD3 segmented control: opaque container,
+    // primary thumb, onPrimary label. Nothing is blurred or shadowed.
+    val md3 = LocalWyuMd3Style.current
+    val useSoftGlass = !md3 && backdrop != null && softGlass && wyuSoftGlassSupported
+    val scheme = MiuixTheme.colorScheme
+    val containerColor = when {
+        md3 -> scheme.surfaceContainerHigh
+        dark -> Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
+        else -> Color.White.copy(alpha = if (glass) 0.58f else 1f)
     }
-    val indicatorColor = if (dark) {
-        Color.White.copy(alpha = 0.16f)
-    } else {
-        Color.Black.copy(alpha = 0.10f)
+    val indicatorColor = when {
+        md3 -> scheme.primary
+        dark -> Color.White.copy(alpha = 0.16f)
+        else -> Color.Black.copy(alpha = 0.10f)
     }
     val borderColor = when {
+        md3 -> Color.Transparent
         glass && dark -> Color.White.copy(alpha = 0.14f)
         glass -> Color.Black.copy(alpha = 0.06f)
         dark -> Color.White.copy(alpha = 0.08f)
         else -> Color.Black.copy(alpha = 0.04f)
     }
     val contentColor = if (dark) Color.White else Color.Black
+    val selectedContentColor = if (md3) scheme.onPrimary else contentColor
+    val unselectedContentColor = if (md3) scheme.onSurface else contentColor
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .height(38.dp)
             .shadow(
-                elevation = 10.dp,
+                elevation = if (md3) 0.dp else 10.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = Color.Black.copy(alpha = 0.10f),
@@ -1124,6 +1151,7 @@ fun WyuFloatingTabs(
             )
             .then(
                 when {
+                    md3 -> Modifier
                     backdrop == null -> Modifier
                     useSoftGlass -> Modifier.wyuSoftGlass(
                         backdrop = backdrop,
@@ -1314,9 +1342,9 @@ fun WyuFloatingTabs(
                 )
                 val textColor by animateColorAsState(
                     targetValue = if (selected) {
-                        contentColor.copy(alpha = 0.95f)
+                        selectedContentColor.copy(alpha = if (md3) 1f else 0.95f)
                     } else {
-                        contentColor.copy(alpha = 0.55f)
+                        unselectedContentColor.copy(alpha = if (md3) 0.72f else 0.55f)
                     },
                     animationSpec = tween(180),
                     label = "floatingTabText",
@@ -1759,9 +1787,37 @@ private class WyuPagePullState(
 
 @Composable
 fun rememberWyuNavigatorBottomMargin(): Dp {
-    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val inset = rememberStickyInset(
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+    )
     return if (inset < 24.dp) 24.dp else inset + 8.dp
 }
+
+/**
+ * Insets of a window that is still on screen but no longer visible collapse to
+ * zero (the app parked behind Recents, or a task switch in flight). Every
+ * edge-to-edge element that pads itself by such an inset then slides out of
+ * place while the user can still see the app in the task switcher, and snaps
+ * back on return.
+ *
+ * Keeping the last non-zero measurement pins the chrome instead: the bar never
+ * moves, and the real value takes over again as soon as the window reports one.
+ */
+@Composable
+private fun rememberStickyInset(inset: Dp): Dp {
+    val last = remember { StickyInset() }
+    if (inset > 0.dp) last.value = inset
+    return if (inset > 0.dp) inset else last.value
+}
+
+private class StickyInset {
+    var value: Dp = 0.dp
+}
+
+/** Status-bar height that survives the window being hidden. See [rememberStickyInset]. */
+@Composable
+internal fun rememberWyuStatusBarTopInset(): Dp =
+    rememberStickyInset(WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
 
 private data class WyuNavTab(
     val label: String,
@@ -2162,7 +2218,7 @@ fun WyuNavigatorBar(
                         },
                         layerBlock = {
                             val velocity = damped.velocity / 10f
-                            scaleX = damped.scaleX
+                            scaleX = 1f + (damped.scaleX - 1f) * ThumbPressWidenTrim
                             scaleY = damped.scaleY
                             scaleX /= 1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f)
                             scaleY *= 1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f)

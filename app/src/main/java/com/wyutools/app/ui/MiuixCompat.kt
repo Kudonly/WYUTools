@@ -137,14 +137,17 @@ fun WyuOverlayDialog(
     val dark = LocalWyuDarkTheme.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
-    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
+    // 莫奈 renders the sheet as an opaque MD3 dialog: no frost, no page sampling.
+    val md3 = LocalWyuMd3Style.current
+    val useSoftGlass = !md3 && backdrop != null && softGlass && wyuSoftGlassSupported
     val cardColor = when {
+        md3 -> MiuixTheme.colorScheme.surfaceContainerHigh
         backdrop == null -> surface
         useSoftGlass -> Color.Transparent
         else -> surface.copy(alpha = DialogCardTint)
     }
     val dialogShape = remember { WyuSquircleShape(DialogCardCorner) }
-    val frostModifier = if (backdrop != null) {
+    val frostModifier = if (backdrop != null && !md3) {
         if (useSoftGlass) {
             Modifier.wyuSoftGlass(
                 backdrop = backdrop,
@@ -181,7 +184,7 @@ fun WyuOverlayDialog(
         Modifier
     }
     val topInset = maxOf(
-        WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+        rememberWyuStatusBarTopInset(),
         WindowInsets.captionBar.asPaddingValues().calculateTopPadding(),
         WindowInsets.displayCutout.asPaddingValues().calculateTopPadding(),
     )

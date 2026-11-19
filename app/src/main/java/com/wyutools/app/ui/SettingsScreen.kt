@@ -48,7 +48,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -92,8 +94,10 @@ fun SettingsScreen(
     val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
     val brightnessDark by WyuAppearance.customBrightnessDark.collectAsState()
     val softGlass by WyuAppearance.softGlass.collectAsState()
+    val cardTheme by WyuAppearance.cardTheme.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    var themePickerOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
     var cropSource by remember { mutableStateOf<Bitmap?>(null) }
@@ -276,44 +280,62 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
+            // One surface language at a time: the card is the current pick and
+            // the tap target, the sheet holds the alternatives.
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
+                pressFeedbackType = PressFeedbackType.Sink,
+                onClick = { themePickerOpen = true },
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "柔光玻璃",
+                                text = "主题",
                                 style = MiuixTheme.textStyles.headline2,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(3.dp))
                             Text(
-                                text = if (softGlassSupported) {
-                                    "可能导致功耗增加、卡顿发热，请酌情开启"
-                                } else {
-                                    "需要 Android 13 及以上系统"
-                                },
+                                text = cardTheme.summary,
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
-                        Spacer(Modifier.width(16.dp))
-                        Switch(
-                            checked = softGlass && softGlassSupported,
-                            onCheckedChange = { WyuAppearance.setSoftGlass(context, it) },
-                            enabled = softGlassSupported,
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = cardTheme.label,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
                         )
                     }
-                    if (softGlass && softGlassSupported) {
+                    if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
                         SoftGlassSliderRow(
                             label = "模糊半径",
                             valueText = "$softGlassBlur%",
                             value = softGlassBlur.toFloat(),
                             valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
                             onChange = { WyuAppearance.setSoftGlassBlur(context, it.roundToInt()) },
+                        )
+                        Text(
+                            text = "柔光玻璃可能导致功耗增加、卡顿发热，请酌情使用",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    if (cardTheme != WyuCardTheme.SoftGlass && !softGlassSupported) {
+                        Text(
+                            text = "柔光玻璃需要 Android 13 及以上系统",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                 }
@@ -413,6 +435,14 @@ fun SettingsScreen(
         }
     }
 
+    ThemePickerDialog(
+        show = themePickerOpen,
+        selected = cardTheme,
+        softGlassSupported = softGlassSupported,
+        onSelect = { WyuAppearance.setCardTheme(context, it) },
+        onDismiss = { themePickerOpen = false },
+    )
+
     UpdateResultDialog(
         result = updateResult,
         versionName = versionName,
@@ -483,6 +513,137 @@ private fun UpdateResultDialog(
             }
         }
     }
+}
+
+/**
+ * Small sheet for picking the surface language. Every row previews its material
+ * so the choice reads before it is applied. 柔光玻璃 needs the shader path, so
+ * it is disabled (and explained) below API 33 instead of silently doing nothing.
+ */
+@Composable
+private fun ThemePickerDialog(
+    show: Boolean,
+    selected: WyuCardTheme,
+    softGlassSupported: Boolean,
+    onSelect: (WyuCardTheme) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    WyuOverlayDialog(
+        show = show,
+        title = "主题",
+        summary = "选择卡片与按钮的视觉风格",
+        onDismissRequest = onDismiss,
+    ) {
+        WyuCardTheme.entries.forEach { theme ->
+            ThemeOptionRow(
+                theme = theme,
+                selected = theme == selected,
+                enabled = theme != WyuCardTheme.SoftGlass || softGlassSupported,
+                onClick = {
+                    onSelect(theme)
+                    onDismiss()
+                },
+            )
+            if (theme != WyuCardTheme.entries.last()) {
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        WyuDialogButton(text = "完成", onClick = onDismiss)
+    }
+}
+
+@Composable
+private fun ThemeOptionRow(
+    theme: WyuCardTheme,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val shape = RoundedCornerShape(18.dp)
+    val background by animateColorAsState(
+        targetValue = if (selected) {
+            scheme.primary.copy(alpha = 0.10f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(160),
+        label = "themeOptionBackground",
+    )
+    val tap = hapticClick(enabled = enabled && !selected, action = onClick)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(background)
+            .clickable(
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = tap,
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .alpha(if (enabled) 1f else 0.4f),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ThemeSwatch(theme)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = theme.label,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = if (enabled) theme.summary else "需要 Android 13 及以上系统",
+                style = MiuixTheme.textStyles.footnote1,
+                color = scheme.onSurfaceVariantSummary,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** 44dp preview tile: frosted wash, liquid-glass highlight, or MD3 tone pair. */
+@Composable
+private fun ThemeSwatch(theme: WyuCardTheme) {
+    val scheme = MiuixTheme.colorScheme
+    val shape = RoundedCornerShape(14.dp)
+    val brush = when (theme) {
+        WyuCardTheme.Default -> Brush.linearGradient(
+            listOf(
+                scheme.primary.copy(alpha = 0.28f),
+                scheme.surfaceContainerHigh.copy(alpha = 0.9f),
+            ),
+        )
+
+        WyuCardTheme.SoftGlass -> Brush.linearGradient(
+            listOf(
+                Color.White.copy(alpha = 0.92f),
+                scheme.primary.copy(alpha = 0.32f),
+            ),
+        )
+
+        WyuCardTheme.Monet -> Brush.linearGradient(
+            listOf(scheme.primary, scheme.surfaceContainerHigh),
+        )
+    }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(shape)
+            .background(brush)
+            .border(0.5.dp, scheme.outline.copy(alpha = 0.3f), shape),
+    )
 }
 
 private const val ShiyiUrl = "https://github.com/aglorice/shiyi"

@@ -36,7 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.Button
+// Uses the shared Button from WyuGlass.kt so the haptic tick and the 莫奈
+// surface style apply here too.
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text

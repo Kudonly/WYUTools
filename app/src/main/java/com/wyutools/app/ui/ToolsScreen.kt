@@ -3,9 +3,7 @@ package com.wyutools.app.ui
 import android.graphics.Bitmap
 import android.graphics.Rect
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -33,7 +31,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -294,21 +291,13 @@ private fun ToolEntry(
                 .padding(18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(rememberWyuIconShape(52.dp))
-                    .background(MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.60f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(26.dp),
-                    tint = MiuixTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.width(16.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MiuixTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(14.dp))
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.Center,
@@ -372,20 +361,12 @@ private fun ScheduleToolEntry(
                 .padding(horizontal = 20.dp, vertical = 18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(rememberWyuIconShape(44.dp))
-                        .background(primary.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CalendarMonth,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = primary,
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Outlined.CalendarMonth,
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
+                    tint = primary,
+                )
                 Spacer(Modifier.width(12.dp))
                 Text(
                     text = "课表",
