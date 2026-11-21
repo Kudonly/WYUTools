@@ -21,6 +21,9 @@ import java.util.Locale
 object QrCodes {
     private const val SIZE = 720
 
+    /** 相册里的存放目录与文件名前缀 */
+    private const val ALBUM = "WUKit"
+
     fun encode(content: String): Bitmap {
         val hints = mapOf(
             EncodeHintType.CHARACTER_SET to "UTF-8",
@@ -41,7 +44,7 @@ object QrCodes {
     fun saveToGallery(
         context: Context,
         bitmap: Bitmap,
-        prefix: String = "WYUTools-电费充值",
+        prefix: String = "$ALBUM-电费充值",
     ): String {
         val fileName = "$prefix-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.CHINA).format(Date())}.png"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -49,7 +52,7 @@ object QrCodes {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/WYUTools")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/$ALBUM")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
@@ -68,10 +71,10 @@ object QrCodes {
                 resolver.delete(uri, null, null)
                 throw e
             }
-            return "已保存到相册 Pictures/WYUTools"
+            return "已保存到相册 Pictures/$ALBUM"
         }
 
-        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "WYUTools")
+        val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), ALBUM)
         if (!dir.exists() && !dir.mkdirs()) throw IOException("无法创建保存目录")
         val file = File(dir, fileName)
         FileOutputStream(file).use { output ->
