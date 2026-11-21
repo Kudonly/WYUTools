@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/icon.png" width="120" alt="WUKit 图标"></p>
+
 # WUKit
 
 五邑大学校园服务的一站式 Android 工具。日常高频的校园功能原本散在几个小程序、公众号与网页里，WUKit 把它们收进一个约 2 MB 的应用：查课表、写待办、看热水与电费、约体育馆，都在同一套界面里完成。
