@@ -171,6 +171,7 @@ object WyuAppearance {
     private const val SoftGlassDefaultsVersion = 5
     private const val SoftGlassBlurDefault = 15
     private const val KeyMonetSeed = "monet_seed"
+    private const val KeyPaletteScheme = "monet_palette_scheme"
     private const val CustomFileName = "custom_wallpaper.jpg"
     private const val MaxWallpaperSide = 2560
 
@@ -211,6 +212,9 @@ object WyuAppearance {
 
     private val _monetSeed = MutableStateFlow<Int?>(null)
     val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
+
+    private val _paletteScheme = MutableStateFlow(WyuPaletteScheme.Default)
+    val paletteScheme: StateFlow<WyuPaletteScheme> = _paletteScheme.asStateFlow()
 
     private val _customWallpaperResolved = MutableStateFlow(false)
 
@@ -320,6 +324,7 @@ object WyuAppearance {
                 .coerceIn(0f, 1f),
         )
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
+        _paletteScheme.value = WyuPaletteScheme.fromStored(loaded.getString(KeyPaletteScheme, null))
         val saved = WyuWallpaper.entries
             .firstOrNull { it.name == loaded.getString(KeyWallpaper, null) }
         // A stored custom choice that no longer has a file falls back to the
@@ -384,6 +389,14 @@ object WyuAppearance {
         _cardTheme.value = resolved
         _softGlass.value = resolved == WyuCardTheme.SoftGlass
         prefs?.edit()?.putString(KeyCardTheme, resolved.name)?.apply()
+    }
+
+    /** 莫奈 palette style; independent of the surface theme, so it survives switching away. */
+    fun setPaletteScheme(context: Context, scheme: WyuPaletteScheme) {
+        ensureLoaded(context)
+        if (_paletteScheme.value == scheme) return
+        _paletteScheme.value = scheme
+        prefs?.edit()?.putString(KeyPaletteScheme, scheme.name)?.apply()
     }
 
     fun setSoftGlass(context: Context, enabled: Boolean) {

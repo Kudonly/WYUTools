@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,11 +54,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.update.ReleaseInfo
@@ -95,9 +98,21 @@ fun SettingsScreen(
     val brightnessDark by WyuAppearance.customBrightnessDark.collectAsState()
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
+    val monetSeed by WyuAppearance.monetSeed.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     var themePickerOpen by remember { mutableStateOf(false) }
+    var palettePickerOpen by remember { mutableStateOf(false) }
+    // Exactly the seed the theme derives from, so the picker previews the
+    // palettes that will actually be applied.
+    val paletteSeed = remember(selected, dark, monetSeed) {
+        if (selected == WyuWallpaper.Custom) {
+            monetSeed
+        } else {
+            selected.seedColor(dark)?.toArgb()
+        }
+    }
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
     var cropSource by remember { mutableStateOf<Bitmap?>(null) }
@@ -317,20 +332,6 @@ fun SettingsScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
-                    if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
-                        SoftGlassSliderRow(
-                            label = "模糊半径",
-                            valueText = "$softGlassBlur%",
-                            value = softGlassBlur.toFloat(),
-                            valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
-                            onChange = { WyuAppearance.setSoftGlassBlur(context, it.roundToInt()) },
-                        )
-                        Text(
-                            text = "柔光玻璃可能导致功耗增加、卡顿发热，请酌情使用",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
                     if (cardTheme != WyuCardTheme.SoftGlass && !softGlassSupported) {
                         Text(
                             text = "柔光玻璃需要 Android 13 及以上系统",
@@ -341,6 +342,98 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
+            // Palette styles only exist for 莫奈: the other materials paint with
+            // the wallpaper wash and have no seed to re-map.
+            if (cardTheme == WyuCardTheme.Monet) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    pressFeedbackType = PressFeedbackType.Sink,
+                    onClick = { palettePickerOpen = true },
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "取色方案",
+                                    style = MiuixTheme.textStyles.headline2,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = paletteScheme.summary,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = paletteScheme.label,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.primary,
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        PaletteStripe(
+                            colors = remember(paletteSeed, paletteScheme, dark) {
+                                paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
+                            },
+                            height = 10.dp,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            // The blur is the one knob everyone touches, so it gets its own card
+            // next to the tuning screen instead of hiding under 主题.
+            if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        // One label only: the card is about a single number, so
+                        // the title says what it is and the value rides beside
+                        // it instead of repeating as a slider label.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "模糊度",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "$softGlassBlur%",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Slider(
+                            value = softGlassBlur.toFloat(),
+                            onValueChange = {
+                                WyuAppearance.setSoftGlassBlur(context, it.roundToInt())
+                            },
+                            valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "柔光玻璃可能导致功耗增加、卡顿发热，请酌情使用",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
             // The tuning screen only matters while the material is on.
             if (softGlass && softGlassSupported) {
                 Card(
@@ -441,6 +534,15 @@ fun SettingsScreen(
         softGlassSupported = softGlassSupported,
         onSelect = { WyuAppearance.setCardTheme(context, it) },
         onDismiss = { themePickerOpen = false },
+    )
+
+    PaletteSchemePickerDialog(
+        show = palettePickerOpen,
+        selected = paletteScheme,
+        seed = paletteSeed,
+        dark = dark,
+        onSelect = { WyuAppearance.setPaletteScheme(context, it) },
+        onDismiss = { palettePickerOpen = false },
     )
 
     UpdateResultDialog(
@@ -608,6 +710,158 @@ private fun ThemeOptionRow(
                 contentDescription = null,
                 tint = scheme.primary,
                 modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Palette styles for 莫奈. Every row previews the palette that scheme would
+ * build from the current seed, so the difference reads at a glance instead of
+ * asking the user to apply six themes to compare.
+ */
+@Composable
+private fun PaletteSchemePickerDialog(
+    show: Boolean,
+    selected: WyuPaletteScheme,
+    seed: Int?,
+    dark: Boolean,
+    onSelect: (WyuPaletteScheme) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val previews = remember(seed, dark) {
+        WyuPaletteScheme.entries.associateWith { scheme ->
+            seed?.let { palettePreview(it, scheme, dark) }
+        }
+    }
+    WyuOverlayDialog(
+        show = show,
+        title = "取色方案",
+        summary = "壁纸颜色如何铺开，只影响莫奈主题的配色",
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 380.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            WyuPaletteScheme.entries.forEach { scheme ->
+                PaletteSchemeRow(
+                    scheme = scheme,
+                    colors = previews[scheme],
+                    selected = scheme == selected,
+                    onClick = {
+                        onSelect(scheme)
+                        onDismiss()
+                    },
+                )
+                if (scheme != WyuPaletteScheme.entries.last()) {
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        WyuDialogButton(text = "完成", onClick = onDismiss)
+    }
+}
+
+@Composable
+private fun PaletteSchemeRow(
+    scheme: WyuPaletteScheme,
+    colors: List<Color>?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val schemeColors = MiuixTheme.colorScheme
+    val shape = RoundedCornerShape(18.dp)
+    val background by animateColorAsState(
+        targetValue = if (selected) {
+            schemeColors.primary.copy(alpha = 0.10f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(160),
+        label = "paletteOptionBackground",
+    )
+    val tap = hapticClick(enabled = !selected, action = onClick)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(background)
+            .clickable(role = Role.RadioButton, onClick = tap)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PaletteTile(colors = colors)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = scheme.label,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = scheme.summary,
+                style = MiuixTheme.textStyles.footnote1,
+                color = schemeColors.onSurfaceVariantSummary,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = schemeColors.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** 40dp tile: the scheme's primary, secondary container and tertiary stacked. */
+@Composable
+private fun PaletteTile(colors: List<Color>?) {
+    val scheme = MiuixTheme.colorScheme
+    val shape = RoundedCornerShape(13.dp)
+    val bands = colors ?: listOf(scheme.primary, scheme.secondaryContainer, scheme.tertiaryContainer)
+    Column(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(shape)
+            .border(0.5.dp, scheme.outline.copy(alpha = 0.3f), shape),
+    ) {
+        bands.forEach { color ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(color),
+            )
+        }
+    }
+}
+
+/** Wide version of [PaletteTile] for the settings card. */
+@Composable
+private fun PaletteStripe(colors: List<Color>?, height: Dp) {
+    val scheme = MiuixTheme.colorScheme
+    val shape = RoundedCornerShape(height / 2)
+    val bands = colors ?: listOf(scheme.primary, scheme.secondaryContainer, scheme.tertiaryContainer)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(shape),
+    ) {
+        bands.forEach { color ->
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f)
+                    .background(color),
             )
         }
     }

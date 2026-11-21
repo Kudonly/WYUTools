@@ -145,6 +145,16 @@ internal fun rememberDisplayCornerPx(): Float {
 /** One corner radius for every card in the app, one step below the dialogs' 32dp. */
 internal val WyuCardCornerRadius = 28.dp
 
+// Rim values tuned for cards are larger than a short pill is tall: a 40dp band
+// would spend its whole height inside the rim, and the top edge then samples
+// outside the captured layer and stays unfilled. These are the numbers the 38dp
+// segmented pill uses, which is the same height class as the week capsule.
+private const val CompactGlassEdgePx = 40f
+private const val CompactGlassEdgePow = 2.2f
+private const val CompactGlassRefractionPx = 56f
+private const val CompactGlassReflectionPx = 800f
+private const val CompactGlassBlurRadius = 30f
+
 /**
  * Frosted-glass variants of Miuix's card and button. They stay identical to the
  * originals unless a wallpaper-only backdrop is published, which only happens
@@ -157,6 +167,8 @@ fun Card(
     insideMargin: PaddingValues = CardDefaults.InsideMargin,
     colors: CardColors = CardDefaults.defaultColors(),
     samplePageContent: Boolean = false,
+    /** Short surface (a 40dp band): keep the rim inside the shape. */
+    compactGlass: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // 莫奈 drops the glass pipeline entirely: MD3 renders opaque tonal
@@ -194,6 +206,11 @@ fun Card(
         else -> Color.White.copy(alpha = tuning.cardTintAlphaLight)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    val edgePx = if (compactGlass) CompactGlassEdgePx else tuning.shapeEdgePx
+    val edgePow = if (compactGlass) CompactGlassEdgePow else tuning.shapeEdgePow
+    val refractionPx = if (compactGlass) CompactGlassRefractionPx else tuning.edgeThickness
+    val reflectionPx = if (compactGlass) CompactGlassReflectionPx else tuning.reflectOffset
+    val blurRadius = if (compactGlass) CompactGlassBlurRadius else CardBlurRadius
     MiuixCard(
         modifier = when {
             glass == null -> modifier
@@ -206,10 +223,10 @@ fun Card(
                     glassShape = WyuSoftGlassShape.RoundedRect,
                     cornerRadius = cornerRadius,
                     baseTint = softGlassCardTint,
-                    shapeEdgePx = tuning.shapeEdgePx,
-                    shapeEdgePow = tuning.shapeEdgePow,
-                    refractionThicknessPx = tuning.edgeThickness,
-                    reflectionThicknessPx = tuning.reflectOffset,
+                    shapeEdgePx = edgePx,
+                    shapeEdgePow = edgePow,
+                    refractionThicknessPx = refractionPx,
+                    reflectionThicknessPx = reflectionPx,
                     reflectionLighten = tuning.reflectLighten,
                     bgSaturation = tuning.saturation(dark),
                     reflectionStrength = tuning.reflectionStrength,
@@ -224,10 +241,10 @@ fun Card(
                 blurPercent = softGlassBlur,
                 downscale = CardSoftGlassDownscale,
                 baseTint = softGlassCardTint,
-                shapeEdgePx = tuning.shapeEdgePx,
-                shapeEdgePow = tuning.shapeEdgePow,
-                refractionThicknessPx = tuning.edgeThickness,
-                reflectionThicknessPx = tuning.reflectOffset,
+                shapeEdgePx = edgePx,
+                shapeEdgePow = edgePow,
+                refractionThicknessPx = refractionPx,
+                reflectionThicknessPx = reflectionPx,
                 reflectionLighten = tuning.reflectLighten,
                 bgSaturation = tuning.saturation(dark),
                 reflectionStrength = tuning.reflectionStrength,
@@ -237,7 +254,7 @@ fun Card(
             // replaying a live Gaussian for every card, every frame.
             !samplePageContent && gaussianUnderlay != null ->
                 modifier.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
-            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
+            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
         },
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
@@ -552,14 +569,14 @@ private fun Md3CardSurface(
     } else {
         colors.color
     }
-    // 28dp squircles read as miuix, not MD3; a card that was already tighter
-    // than 16dp keeps its own radius.
-    val shape = RoundedCornerShape(cornerRadius.coerceAtMost(16.dp))
+    // MD3 Expressive gives containers the extra-large corner (28dp); the
+    // squircle look belongs to the glass themes, so plain rounded corners here.
+    val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val interactive = onClick != null || onLongPress != null
     val stateLayer = if (interactive && pressed) {
-        colors.contentColor.copy(alpha = 0.1f)
+        colors.contentColor.copy(alpha = 0.12f)
     } else {
         Color.Transparent
     }

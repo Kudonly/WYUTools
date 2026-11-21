@@ -70,9 +70,11 @@ import com.wyutools.app.ui.ROUTE_EXAM
 import com.wyutools.app.ui.ROUTE_GPA
 import com.wyutools.app.ui.ROUTE_GRADES
 import com.wyutools.app.ui.ROUTE_PHYSICAL
+import com.wyutools.app.ui.ROUTE_TODAY
 import com.wyutools.app.ui.LxtBindScreen
 import com.wyutools.app.ui.LxtScreen
 import com.wyutools.app.ui.ScheduleScreen
+import com.wyutools.app.ui.TodayScreen
 import com.wyutools.app.ui.SettingsScreen
 import com.wyutools.app.ui.SoftGlassAdvancedScreen
 import com.wyutools.app.ui.WyuMorphPageState
@@ -192,7 +194,7 @@ fun WyuApp(
     // it with the same morph. 考试 is not part of the system shared-view set
     // (it is never launched from a shortcut), but it still opens in-app.
     val morphRoutes = remember {
-        SharedViewTransition.featureRoutes + ROUTE_EXAM + ROUTE_COMMON +
+        SharedViewTransition.featureRoutes + ROUTE_TODAY + ROUTE_EXAM + ROUTE_COMMON +
             ROUTE_GRADES + ROUTE_GPA + ROUTE_EVAL + ROUTE_PHYSICAL
     }
 
@@ -744,6 +746,22 @@ fun WyuApp(
                             // top bar control.
                             openTool(ROUTE_COMMON, card, WyuMorphStyle.Tile)
                         },
+                    )
+                }
+            }
+            composable(ROUTE_TODAY) {
+                WyuRoutePage(
+                    route = ROUTE_TODAY,
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
+                ) {
+                    TodayScreen(
+                        vm = app.scheduleViewModel,
+                        authVm = authVm,
+                        onLogin = { nav.navigate("me/login") },
+                        onBack = { closeTool(ROUTE_TODAY) },
                     )
                 }
             }

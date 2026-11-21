@@ -586,6 +586,7 @@ private fun MoreToolCell(
  */
 private val WyuTool.iconColor: Color
     get() = when (this) {
+        WyuTool.Today -> Color(0xFFFF6B00)
         WyuTool.Schedule -> Color(0xFF0A84FF)
         WyuTool.Lxt -> Color(0xFF30B0C7)
         WyuTool.Elec -> Color(0xFFFF9F0A)

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SportsBasketball
+import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.wyutools.app.SharedViewTransition
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+
+/** 今日：从课表拆出来的单日页，以后会挂更多「今天」相关的东西。 */
+const val ROUTE_TODAY = "today"
 
 /** 考试 is its own page; it is not part of the shared-element tool set. */
 const val ROUTE_EXAM = "exam"
@@ -45,6 +49,7 @@ enum class WyuTool(
      */
     val lockedInCommon: Boolean,
 ) {
+    Today("today", "今日", "今日待办 · 今天的课", false),
     Schedule("schedule", "课表", "本周课程 · 今日安排", false),
     Lxt("lxt", "洗澡", "热水余额 · 开阀用水", false),
     Elec("elec", "电费", "用电查询 · 扫码充值", false),
@@ -57,6 +62,7 @@ enum class WyuTool(
 
     val icon: ImageVector
         get() = when (this) {
+            Today -> Icons.Outlined.Today
             Schedule -> Icons.Outlined.CalendarMonth
             Lxt -> Icons.Outlined.WaterDrop
             Elec -> Icons.Outlined.Bolt
@@ -69,6 +75,7 @@ enum class WyuTool(
 
     val route: String
         get() = when (this) {
+            Today -> ROUTE_TODAY
             Schedule -> SharedViewTransition.ROUTE_SCHEDULE
             Lxt -> SharedViewTransition.ROUTE_LXT
             Elec -> SharedViewTransition.ROUTE_ELEC
@@ -103,14 +110,21 @@ data class WyuToolLayout(
 object WyuToolLayoutStore {
     private const val PREFS = "tool_layout"
     private const val KEY = "layout"
+    /**
+     * Bumped when a new tool must be placed instead of merely appended, or when
+     * an existing order has to change. 3: 课表 moves to the top of 常用.
+     */
+    private const val VERSION = 3
 
     private var prefs: SharedPreferences? = null
 
     private val _state = MutableStateFlow(WyuToolLayout(defaultCommon(), defaultMore()))
     val state: StateFlow<WyuToolLayout> = _state.asStateFlow()
 
+    /** 课表 is the page this app is opened for, so it leads the 常用 stack. */
     private fun defaultCommon(): List<String> = listOf(
         WyuTool.Schedule.id,
+        WyuTool.Today.id,
         WyuTool.Lxt.id,
         WyuTool.Elec.id,
         WyuTool.Gym.id,
@@ -135,8 +149,10 @@ object WyuToolLayoutStore {
         if (current.isCommon(tool) == inCommon) return
         if (!inCommon && tool.lockedInCommon) return
         val next = if (inCommon) {
+            // Appended, not sorted by enum order: the list is user-ordered now,
+            // and re-sorting would throw that order away on every toggle.
             WyuToolLayout(
-                common = (current.common + tool.id).sortedBy { id -> WyuTool.fromId(id)?.ordinal ?: 99 },
+                common = current.common + tool.id,
                 more = current.more - tool.id,
             )
         } else {
@@ -146,6 +162,38 @@ object WyuToolLayoutStore {
             )
         }
         apply(next)
+    }
+
+    /**
+     * Puts [tool] at [index] of 常用 ([toCommon]) or 更多, taking it out of the
+     * other list first. The index is the slot the finger was over, so a move
+     * inside one list means "remove, then insert at that slot" and a move across
+     * the two lists means "append or insert there".
+     */
+    fun moveTool(tool: WyuTool, toCommon: Boolean, index: Int) {
+        val current = _state.value
+        val wasCommon = tool.id in current.common
+        if (toCommon == wasCommon) {
+            val list = if (toCommon) current.common else current.more
+            val from = list.indexOf(tool.id)
+            if (from < 0) return
+            val to = index.coerceIn(0, list.lastIndex)
+            if (from == to) return
+            val next = list.toMutableList().apply { add(to, removeAt(from)) }
+            apply(if (toCommon) current.copy(common = next) else current.copy(more = next))
+            return
+        }
+        val common = if (toCommon) {
+            current.common.toMutableList().apply { add(index.coerceIn(0, size), tool.id) }
+        } else {
+            current.common - tool.id
+        }
+        val more = if (toCommon) {
+            current.more - tool.id
+        } else {
+            current.more.toMutableList().apply { add(index.coerceIn(0, size), tool.id) }
+        }
+        apply(WyuToolLayout(common = common, more = more))
     }
 
     /** Moves the icon at [from] to [to]; the rest close the gap (iOS reflow). */
@@ -167,6 +215,7 @@ object WyuToolLayoutStore {
     }
 
     private fun encode(layout: WyuToolLayout): String = JSONObject().apply {
+        put("v", VERSION)
         put("c", JSONArray(layout.common))
         put("m", JSONArray(layout.more))
     }.toString()
@@ -175,6 +224,11 @@ object WyuToolLayoutStore {
         if (raw.isNullOrBlank()) return WyuToolLayout(defaultCommon(), defaultMore())
         val json = runCatching { JSONObject(raw) }.getOrNull()
             ?: return WyuToolLayout(defaultCommon(), defaultMore())
+        // A layout written before 今日 existed has no version field: that is
+        // the one case where a tool the file never knew about is worth putting
+        // on 常用 instead of dropping it into 更多.
+        val legacy = !json.has("v")
+        val version = json.optInt("v", 0)
         val common = json.optJSONArray("c").toStringList()
         val more = json.optJSONArray("m").toStringList()
         val seen = mutableSetOf<String>()
@@ -190,7 +244,23 @@ object WyuToolLayoutStore {
         val missing = WyuTool.entries
             .filter { it.id !in seen }
             .map { it.id }
-        return WyuToolLayout(common = cleanCommon, more = cleanMore + missing)
+        val promoteToday = legacy && WyuTool.Today.id in missing
+        val promotedCommon = if (promoteToday) {
+            listOf(WyuTool.Today.id) + cleanCommon
+        } else {
+            cleanCommon
+        }
+        return WyuToolLayout(
+            common = if (version < 3) withScheduleFirst(promotedCommon) else promotedCommon,
+            more = cleanMore + missing.filterNot { promoteToday && it == WyuTool.Today.id },
+        )
+    }
+
+    /** One-time migration: 课表 used to sit behind 今日. */
+    private fun withScheduleFirst(common: List<String>): List<String> {
+        val id = WyuTool.Schedule.id
+        if (id !in common || common.firstOrNull() == id) return common
+        return listOf(id) + common.filterNot { it == id }
     }
 
     private fun JSONArray?.toStringList(): List<String> {

@@ -1763,16 +1763,31 @@ private fun FlightTitle(
             rawTitleBounds.bottom.toFloat() - location[1],
         )
     }
-    val targetBounds = remember(density, surfaceTop) {
-        val left = with(density) { 28.dp.toPx() }
-        Rect(left, surfaceTop + with(density) { 56.dp.toPx() }, left, surfaceTop)
+    // Pages that keep the bar collapsed publish where their title really is;
+    // flying into the empty large-title slot would land in nothing.
+    val collapsedTarget = WyuMorphPageState.collapsedTitleBounds
+    val targetBounds = remember(density, surfaceTop, collapsedTarget) {
+        collapsedTarget ?: run {
+            val left = with(density) { 28.dp.toPx() }
+            Rect(left, surfaceTop + with(density) { 56.dp.toPx() }, left, surfaceTop)
+        }
     }
     val startFontPx = snapshot.titleFontSizePx.takeIf { it > 0f }
         ?: with(density) { 22.sp.toPx() }
     val startLinePx = snapshot.titleLineHeightPx.takeIf { it > 0f }
         ?: startFontPx * 1.25f
-    val targetFontPx = with(density) { 32.sp.toPx() }
-    val targetLinePx = with(density) { 40.sp.toPx() }
+    val targetFontPx = if (collapsedTarget != null) {
+        WyuMorphPageState.collapsedTitleFontPx.takeIf { it > 0f }
+            ?: with(density) { 18.sp.toPx() }
+    } else {
+        with(density) { 32.sp.toPx() }
+    }
+    val targetLinePx = if (collapsedTarget != null) {
+        WyuMorphPageState.collapsedTitleLinePx.takeIf { it > 0f }
+            ?: with(density) { 22.sp.toPx() }
+    } else {
+        with(density) { 40.sp.toPx() }
+    }
 
     val progressValue = progress()
     // The title rides the same eased progress as the container, so it lands with it.

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.SportsBasketball
+import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,11 +45,14 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +74,9 @@ fun ToolsContent(
     tools: List<WyuTool>,
     scheduleFocus: ScheduleFocus?,
     scheduleWeek: Int,
+    todayTodoCount: Int,
+    /** 今日的课有几节；null 表示还没有课表（未登录或未加载）。 */
+    todayCourseCount: Int?,
     onOpen: (WyuTool, SharedCardSnapshot?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -87,6 +94,13 @@ fun ToolsContent(
                 WyuTool.Schedule -> ScheduleToolEntry(
                     focus = scheduleFocus,
                     week = scheduleWeek,
+                    route = tool.route,
+                    onClick = { snapshot -> onOpen(tool, snapshot) },
+                )
+
+                WyuTool.Today -> TodayToolEntry(
+                    todoCount = todayTodoCount,
+                    courseCount = todayCourseCount,
                     route = tool.route,
                     onClick = { snapshot -> onOpen(tool, snapshot) },
                 )
@@ -314,6 +328,73 @@ private fun ToolEntry(
                     text = summary,
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+            )
+        }
+    }
+}
+
+/**
+ * 今日在常用页的卡片。它比其它工具多一行「数字」：今天还有几项待办、几节课，
+ * 不进页面就能看出来——这正是把它放上常用页的意义。
+ */
+@Composable
+private fun TodayToolEntry(
+    todoCount: Int,
+    courseCount: Int?,
+    route: String,
+    onClick: (SharedCardSnapshot?) -> Unit,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val secondary = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val onSurface = MiuixTheme.colorScheme.onSurface
+    val number = SpanStyle(fontWeight = FontWeight.SemiBold, color = onSurface)
+    val summary = buildAnnotatedString {
+        withStyle(number) { append(todoCount.toString()) }
+        append(" 项待办 · ")
+        if (courseCount == null) {
+            // 没有课表就说「未导入」，比显示 0 节诚实。
+            append("课表未导入")
+        } else {
+            withStyle(number) { append(courseCount.toString()) }
+            append(" 节课")
+        }
+    }
+    ToolCard(title = "今日", onClick = onClick, route = route) { titleModifier, onTitleLayout ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Today,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = primary,
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = "今日",
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Medium,
+                    modifier = titleModifier,
+                    onTextLayout = onTitleLayout,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = summary,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = secondary,
                 )
             }
             Icon(

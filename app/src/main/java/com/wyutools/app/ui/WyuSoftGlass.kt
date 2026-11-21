@@ -332,8 +332,11 @@ private val WyuStaticGlassShader: String by lazy {
         .replace(branchAnchor, branchAnchor + WyuStaticGlassInterior)
 }
 
-private const val RawShapeEdgePx = 128f
-private const val RawShapeEdgePow = 3f
+// The shipped rim geometry is the tuned one: a slightly narrower, softer edge
+// than HyperLight's stock numbers, so the refraction reads as a rim rather than
+// a bevel on 30 dp pills as well as on tall cards.
+private const val RawShapeEdgePx = 106f
+private const val RawShapeEdgePow = 4.25f
 private const val RawRefractionThickness = 124f
 private const val RawReflectionThickness = 800f
 private const val RawReflectionLighten = 0.3f
@@ -342,7 +345,7 @@ private const val RawBgSaturationLight = 2f
 private const val RawReflectionStrength = 0f
 private const val RawRefractionIor = 4f
 private const val RawBlurPercent = 15
-private const val RawCardTintAlpha = 0.68f
+private const val RawCardTintAlpha = 0.5f
 // Dark cards get no tint by default (the old shader used a transparent base in
 // dark mode); the slider raises a smoky black wash from zero.
 private const val RawCardTintAlphaDark = 0f

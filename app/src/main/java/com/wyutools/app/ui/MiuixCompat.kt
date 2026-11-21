@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +40,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -67,6 +69,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 
 private val DialogCardCorner = 32.dp
+
+/** M3 Expressive extra-large corner: dialogs, sheets and cards. */
+private val Md3DialogCorner = 28.dp
 private val DialogScreenMargin = 16.dp
 private const val DialogCardTint = 0.62f
 // Dialogs keep their own fixed blur instead of following the soft-glass slider;
@@ -147,6 +152,8 @@ fun WyuOverlayDialog(
         else -> surface.copy(alpha = DialogCardTint)
     }
     val dialogShape = remember { WyuSquircleShape(DialogCardCorner) }
+    // 莫奈/MD3E uses the extra-large 28dp rounded corner, no squircle and no rim.
+    val md3DialogShape = remember { RoundedCornerShape(Md3DialogCorner) }
     val frostModifier = if (backdrop != null && !md3) {
         if (useSoftGlass) {
             Modifier.wyuSoftGlass(
@@ -240,19 +247,31 @@ fun WyuOverlayDialog(
                         }
                         .widthIn(max = 440.dp)
                         .fillMaxWidth()
-                        .squircleClip(DialogCardCorner)
+                        .then(
+                            if (md3) {
+                                Modifier.clip(md3DialogShape)
+                            } else {
+                                Modifier.squircleClip(DialogCardCorner)
+                            },
+                        )
                         .then(frostModifier)
                         .background(cardColor)
-                        .squircleBorder(
-                            width = { 0.5.dp },
-                            color = {
-                                if (dark) {
-                                    Color.White.copy(alpha = 0.16f)
-                                } else {
-                                    Color.White.copy(alpha = 0.5f)
-                                }
+                        .then(
+                            if (md3) {
+                                Modifier
+                            } else {
+                                Modifier.squircleBorder(
+                                    width = { 0.5.dp },
+                                    color = {
+                                        if (dark) {
+                                            Color.White.copy(alpha = 0.16f)
+                                        } else {
+                                            Color.White.copy(alpha = 0.5f)
+                                        }
+                                    },
+                                    cornerRadius = DialogCardCorner,
+                                )
                             },
-                            cornerRadius = DialogCardCorner,
                         )
                         .pointerInput(Unit) { detectTapGestures { } }
                         .padding(horizontal = 20.dp, vertical = 24.dp),

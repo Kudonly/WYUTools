@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -84,11 +85,21 @@ fun HomeScreen(
     val layout by WyuToolLayoutStore.state.collectAsState()
     var moreEditing by remember { mutableStateOf(false) }
     val now = rememberCurrentMinute()
+    val today = now.toLocalDate()
+    // 今日卡片上的「待办 n 项」要开屏就对，所以首页也负责按天装载一次清单；
+    // 跨天时这个 effect 重跑，顺手把昨天的清单清掉。
+    val context = LocalContext.current
+    val todayTodos by WyuTodos.items.collectAsState()
+    LaunchedEffect(today) { WyuTodos.ensureLoaded(context, today) }
     val scheduleData = scheduleUi.data
     val scheduleFocus = scheduleData?.focusCourse(scheduleUi.weekAnchor, now)
     val scheduleWeek = scheduleData
         ?.currentWeek(scheduleUi.weekAnchor, now.toLocalDate())
         ?: 1
+    // 今天几节课：课表还没到手时保持 null，卡片显示「课表未导入」而不是 0 节。
+    val todayCourseCount = scheduleData?.let {
+        it.coursesOn(today.dayOfWeek.value, scheduleWeek).size
+    }
     // 首页卡片依赖课表缓存，首次启动或缓存失效时静默补一次数据，
     // 避免用户未进课表页前摘要误显示“没有课哦”。
     LaunchedEffect(authUi.restoring, authUi.loggedIn) {
@@ -234,6 +245,8 @@ fun HomeScreen(
                         tools = layout.commonTools,
                         scheduleFocus = scheduleFocus,
                         scheduleWeek = scheduleWeek,
+                        todayTodoCount = todayTodos.size,
+                        todayCourseCount = todayCourseCount,
                         onOpen = onOpenCard,
                     )
 

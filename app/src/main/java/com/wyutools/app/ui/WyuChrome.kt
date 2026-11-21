@@ -24,6 +24,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -85,6 +86,7 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -185,6 +187,14 @@ internal object WyuMorphPageState {
     var exitTitleBounds: Rect? = null
     var exitTitleFontPx = 0f
     var exitTitleLinePx = 0f
+
+    /** Where the bar title actually sits on pages that never show a large
+     *  title. The opening morph has no large-title slot to fly into there, so
+     *  it lands on this instead; state (not a plain field) so the flight picks
+     *  it up on the first frame the destination has laid out. */
+    var collapsedTitleBounds: Rect? by mutableStateOf(null)
+    var collapsedTitleFontPx by mutableFloatStateOf(0f)
+    var collapsedTitleLinePx by mutableFloatStateOf(0f)
 
     /** While true the page scaffold skips its own wallpaper. A morph capture
      *  sets it for exactly one frame so the NavHost records the page content on
@@ -330,6 +340,10 @@ fun WyuPageScaffold(
     maskCollapseHeight: Dp = 0.dp,
     maskExtension: Dp = 0.dp,
     maskBaseAlpha: Float = 0f,
+    // Off for pages whose bar never expands: the progressive blur costs a live
+    // texture pass every frame and only pays off when a large title sits over
+    // it.
+    topBarBlur: Boolean = true,
     backgroundBrush: Brush? = null,
     overlay: @Composable (LayerBackdrop?) -> Unit = {},
     topBar: @Composable () -> Unit,
@@ -352,6 +366,10 @@ fun WyuPageScaffold(
     val customDim = wyuCustomWallpaperDim(if (dark) brightnessDark else brightnessLight)
     val softGlassEnabled by WyuAppearance.softGlass.collectAsState()
     val softGlassPercent by WyuAppearance.softGlassBlur.collectAsState()
+    // 莫奈 draws opaque containers and never samples a backdrop, so both
+    // pre-blurred underlays are dead weight there: skipping them saves a
+    // full-screen blur bake per wallpaper change.
+    val md3Surfaces = LocalWyuMd3Style.current
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val windowSize = LocalWindowInfo.current.containerSize
@@ -376,7 +394,9 @@ fun WyuPageScaffold(
     // only the bars, tiny buttons and the week header keep live backdrops.
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     val bounds = pageBounds.value
-    val glassUnderlay = if (softGlassEnabled && customWallpaper != null && bounds != null) {
+    val glassUnderlay = if (
+        !md3Surfaces && softGlassEnabled && customWallpaper != null && bounds != null
+    ) {
         val current = glassUnderlayState.value
         if (current == null || current.source !== customWallpaper) {
             // The first frame of a scaffold must already show the static
@@ -398,7 +418,7 @@ fun WyuPageScaffold(
         null
     }
     LaunchedEffect(customWallpaper, customDim, softGlassEnabled, softGlassPercent, bounds) {
-        if (!softGlassEnabled || customWallpaper == null) {
+        if (md3Surfaces || !softGlassEnabled || customWallpaper == null) {
             glassUnderlayState.value = null
             return@LaunchedEffect
         }
@@ -429,7 +449,9 @@ fun WyuPageScaffold(
     // textureBlur pipeline for every card on every frame.
     val gaussianSigmaPx = remember(density) { wyuGaussianSigmaPx(CardBlurRadius, density.density) }
     val gaussianUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
-    val gaussianUnderlay = if (!softGlassEnabled && customWallpaper != null && bounds != null) {
+    val gaussianUnderlay = if (
+        !md3Surfaces && !softGlassEnabled && customWallpaper != null && bounds != null
+    ) {
         val current = gaussianUnderlayState.value
         if (current == null || current.source !== customWallpaper) {
             wyuGlassUnderlay(
@@ -447,7 +469,7 @@ fun WyuPageScaffold(
         null
     }
     LaunchedEffect(customWallpaper, customDim, softGlassEnabled, gaussianSigmaPx, bounds) {
-        if (softGlassEnabled || customWallpaper == null) {
+        if (md3Surfaces || softGlassEnabled || customWallpaper == null) {
             gaussianUnderlayState.value = null
             return@LaunchedEffect
         }
@@ -595,6 +617,7 @@ fun WyuPageScaffold(
                                 .coerceIn(0f, 1f)
                         },
                         baseAlpha = maskBaseAlpha,
+                        blur = topBarBlur,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }.map { it.measure(Constraints.fixed(constraints.maxWidth, maskHeight)) }
@@ -629,9 +652,10 @@ private fun WyuTopBarMaterial(
     backdrop: LayerBackdrop?,
     progress: () -> Float,
     baseAlpha: Float,
+    blur: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    val blurModifier = if (backdrop != null) {
+    val blurModifier = if (backdrop != null && blur) {
         Modifier.progressiveTextureBlur(
             backdrop = backdrop,
             shape = RectangleShape,
@@ -693,6 +717,18 @@ fun WyuActionBar(
     val largeTitleBounds = remember { mutableStateOf<Rect?>(null) }
     val collapsedTitleBounds = remember { mutableStateOf<Rect?>(null) }
     val boost = LocalWyuCollapseBoost.current
+    // A bar without a large title publishes the collapsed spot as the morph
+    // target; every other bar clears it so a stale rect can never be used.
+    DisposableEffect(largeTitle) {
+        if (largeTitle) {
+            WyuMorphPageState.collapsedTitleBounds = null
+        }
+        onDispose {
+            if (!largeTitle) {
+                WyuMorphPageState.collapsedTitleBounds = null
+            }
+        }
+    }
     val effectiveFraction: () -> Float = {
         (collapsedFraction() + boost()).coerceIn(0f, 1f)
     }
@@ -701,8 +737,16 @@ fun WyuActionBar(
     // the layout callbacks and the draw phase call it: layout settles the very
     // first frame, while draw keeps the value fresh as the fraction moves.
     fun captureExitTitle() {
-        val large = largeTitleBounds.value ?: return
         val collapsed = collapsedTitleBounds.value ?: return
+        val large = largeTitleBounds.value
+        if (large == null) {
+            // Pages that keep the bar collapsed have no large title to
+            // interpolate from; the collapsed spot is the only geometry there is.
+            WyuMorphPageState.exitTitleBounds = collapsed
+            WyuMorphPageState.exitTitleFontPx = collapsedFontPx
+            WyuMorphPageState.exitTitleLinePx = collapsedLinePx
+            return
+        }
         val f = effectiveFraction()
         WyuMorphPageState.exitTitleBounds = Rect(
             lerp(large.left, collapsed.left, f),
@@ -752,6 +796,11 @@ fun WyuActionBar(
                         },
                         onBounds = {
                             collapsedTitleBounds.value = it
+                            if (!largeTitle) {
+                                WyuMorphPageState.collapsedTitleBounds = it
+                                WyuMorphPageState.collapsedTitleFontPx = collapsedFontPx
+                                WyuMorphPageState.collapsedTitleLinePx = collapsedLinePx
+                            }
                             captureExitTitle()
                         },
                     )
@@ -879,6 +928,126 @@ private const val TabsGlassEdgePow = 2.2f
 private const val TabsGlassRefractionPx = 56f
 
 /**
+ * The frosted surface shared by the top-bar buttons and the small text pills.
+ * 莫奈 paints a flat tonal block; every other appearance samples the live page
+ * content behind it. Keeping it in one place makes the disc and the capsule
+ * read as the same material.
+ */
+@Composable
+internal fun WyuChromeGlassSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = CircleShape,
+    glassShape: WyuSoftGlassShape = WyuSoftGlassShape.Circle,
+    cornerRadius: Dp = 0.dp,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val dark = LocalWyuDarkTheme.current
+    val backdrop = LocalWyuPageBackdrop.current
+    val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
+    // 莫奈: opaque tonal block, no shadow, no sampling and no rim light.
+    val md3 = LocalWyuMd3Style.current
+    val useSoftGlass = !md3 && softGlass && wyuSoftGlassSupported
+    Box(
+        modifier = modifier.then(
+            if (md3) {
+                Modifier
+                    .clip(shape)
+                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            } else {
+                Modifier
+                    .shadow(
+                        elevation = 3.dp,
+                        shape = shape,
+                        clip = false,
+                        ambientColor = Color.Black.copy(alpha = 0.10f),
+                        spotColor = Color.Black.copy(alpha = 0.16f),
+                    )
+                    .then(
+                        when {
+                            backdrop == null -> Modifier
+                            useSoftGlass -> Modifier.wyuSoftGlass(
+                                backdrop = backdrop,
+                                shape = shape,
+                                glassShape = glassShape,
+                                cornerRadius = cornerRadius,
+                                blurPercent = softGlassBlur,
+                                baseTint = if (dark) {
+                                    Color.Transparent
+                                } else {
+                                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                                },
+                                refractionThicknessPx = TopBarGlassRefractionPx,
+                                reflectionThicknessPx = TopBarGlassReflectionPx,
+                                shapeEdgePx = softGlassTuning.shapeEdgePx,
+                                shapeEdgePow = softGlassTuning.shapeEdgePow,
+                                reflectionLighten = softGlassTuning.reflectLighten,
+                                bgSaturation = softGlassTuning.saturation(dark),
+                                reflectionStrength = softGlassTuning.reflectionStrength,
+                                refractionIor = softGlassTuning.refractionIor,
+                            )
+
+                            else -> Modifier.textureBlur(
+                                backdrop = backdrop,
+                                shape = shape,
+                                blurRadius = 24f,
+                            )
+                        },
+                    )
+                    .clip(shape)
+                    .then(
+                        if (useSoftGlass && backdrop != null) {
+                            Modifier
+                        } else {
+                            Modifier.background(
+                                if (dark) {
+                                    Color.White.copy(alpha = 0.16f)
+                                } else {
+                                    Color.White.copy(alpha = 0.55f)
+                                },
+                            )
+                        },
+                    )
+                    .border(
+                        width = 0.5.dp,
+                        color = if (dark) {
+                            Color.White.copy(alpha = 0.14f)
+                        } else {
+                            Color.Black.copy(alpha = 0.06f)
+                        },
+                        shape = shape,
+                    )
+            },
+        ),
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
+/**
+ * A wide glass strip for a control that has no card of its own — the schedule
+ * week slider. It borrows the pills' rim numbers rather than a card's: both are
+ * the same 30dp height class, while a card-sized rim would swallow the band and
+ * leave its middle flat grey.
+ */
+@Composable
+internal fun WyuGlassCapsule(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 15.dp,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
+    WyuChromeGlassSurface(
+        modifier = modifier,
+        shape = shape,
+        glassShape = WyuSoftGlassShape.RoundedRect,
+        cornerRadius = cornerRadius,
+        content = content,
+    )
+}
+
+/**
  * Icon-only top bar button. The frosted glass disc stays behind the icon in
  * both the expanded and collapsed states.
  */
@@ -893,13 +1062,6 @@ private fun WyuTopBarGlassButton(
 ) {
     val dark = LocalWyuDarkTheme.current
     val onSurface = MiuixTheme.colorScheme.onSurface
-    val backdrop = LocalWyuPageBackdrop.current
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
-    // 莫奈: opaque tonal circle, no shadow, no sampling and no rim light.
-    val md3 = LocalWyuMd3Style.current
-    val useSoftGlass = !md3 && softGlass && wyuSoftGlassSupported
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -930,87 +1092,91 @@ private fun WyuTopBarGlassButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .then(
-                    if (md3) {
-                        Modifier
-                            .clip(CircleShape)
-                            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                    } else {
-                        Modifier
-                            .shadow(
-                                elevation = 3.dp,
-                                shape = CircleShape,
-                                clip = false,
-                                ambientColor = Color.Black.copy(alpha = 0.10f),
-                                spotColor = Color.Black.copy(alpha = 0.16f),
-                            )
-                            .then(
-                                when {
-                                    backdrop == null -> Modifier
-                                    useSoftGlass -> Modifier.wyuSoftGlass(
-                                        backdrop = backdrop,
-                                        shape = CircleShape,
-                                        glassShape = WyuSoftGlassShape.Circle,
-                                        blurPercent = softGlassBlur,
-                                        baseTint = if (dark) {
-                                            Color.Transparent
-                                        } else {
-                                            Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                                        },
-                                        refractionThicknessPx = TopBarGlassRefractionPx,
-                                        reflectionThicknessPx = TopBarGlassReflectionPx,
-                                        shapeEdgePx = softGlassTuning.shapeEdgePx,
-                                        shapeEdgePow = softGlassTuning.shapeEdgePow,
-                                        reflectionLighten = softGlassTuning.reflectLighten,
-                                        bgSaturation = softGlassTuning.saturation(dark),
-                                        reflectionStrength = softGlassTuning.reflectionStrength,
-                                        refractionIor = softGlassTuning.refractionIor,
-                                    )
+        WyuChromeGlassSurface(Modifier.size(44.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = onSurface.copy(alpha = 0.9f),
+                modifier = Modifier
+                    .size(iconSize)
+                    .graphicsLayer { alpha = iconAlpha },
+            )
+        }
+    }
+}
 
-                                    else -> Modifier.textureBlur(
-                                        backdrop = backdrop,
-                                        shape = CircleShape,
-                                        blurRadius = 24f,
-                                    )
-                                },
-                            )
-                            .clip(CircleShape)
-                            .then(
-                                if (useSoftGlass && backdrop != null) {
-                                    Modifier
-                                } else {
-                                    Modifier.background(
-                                        if (dark) {
-                                            Color.White.copy(alpha = 0.16f)
-                                        } else {
-                                            Color.White.copy(alpha = 0.55f)
-                                        },
-                                    )
-                                },
-                            )
-                            .border(
-                                width = 0.5.dp,
-                                color = if (dark) {
-                                    Color.White.copy(alpha = 0.14f)
-                                } else {
-                                    Color.Black.copy(alpha = 0.06f)
-                                },
-                                shape = CircleShape,
-                            )
-                    },
-                ),
-        )
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = onSurface.copy(alpha = 0.9f),
-            modifier = Modifier
-                .size(iconSize)
-                .graphicsLayer { alpha = iconAlpha },
-        )
+private val WyuGlassPillHeight = 30.dp
+
+// Half the pill's height, so both ends are semicircles like the discs above.
+private val WyuGlassPillCorner = 15.dp
+
+/**
+ * Word-labelled sibling of the glass disc, for chrome that needs a label rather
+ * than an icon (返回本周 under the timetable). Same material, capsule instead of
+ * a circle; [enabled] = false keeps it in place as a "you are here" tag.
+ *
+ * [width] pins the capsule to one size so a label that changes length (本周 ⇄
+ * 返回本周) does not resize the control under the finger.
+ */
+@Composable
+fun WyuGlassPillButton(
+    text: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    width: Dp? = null,
+) {
+    val dark = LocalWyuDarkTheme.current
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val shape = remember { RoundedCornerShape(WyuGlassPillCorner) }
+    // A disabled pill is not a dead control here: it is the "you are already
+    // on this week" tag, so it dims only enough to read as inactive.
+    val alpha by animateFloatAsState(
+        targetValue = when {
+            !enabled -> if (dark) 0.55f else 0.62f
+            pressed -> if (dark) 0.53f else 0.6f
+            else -> 1f
+        },
+        animationSpec = tween(100),
+        label = "glassPillAlpha",
+    )
+    Box(
+        modifier = modifier
+            .height(WyuGlassPillHeight)
+            .then(if (width != null) Modifier.width(width) else Modifier)
+            .clip(shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+            ) {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                onClick()
+            }
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        WyuChromeGlassSurface(
+            modifier = if (width != null) Modifier.fillMaxSize() else Modifier.fillMaxHeight(),
+            shape = shape,
+            glassShape = WyuSoftGlassShape.RoundedRect,
+            cornerRadius = WyuGlassPillCorner,
+        ) {
+            Text(
+                text = text,
+                style = TextStyle(fontSize = 11.sp, lineHeight = 13.sp),
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.9f * alpha),
+                modifier = Modifier.padding(horizontal = 11.dp),
+            )
+        }
     }
 }
 

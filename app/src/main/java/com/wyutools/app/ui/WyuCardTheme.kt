@@ -14,8 +14,11 @@ enum class WyuCardTheme(val label: String, val summary: String) {
     /** The liquid-glass material: refraction, reflection and edge highlight. */
     SoftGlass("柔光玻璃", "带折射与反射的液态玻璃材质"),
 
-    /** Material Design 3: filled tonal cards and solid buttons, no blur. */
-    Monet("莫奈", "Material Design 3 风格，实色卡片与按钮"),
+    /** Material 3 Expressive: filled tonal cards, big corners, pill buttons. */
+    Monet(
+        "莫奈",
+        "M3E 2025 取色 · 大圆角实色卡片与胶囊按钮，不叠玻璃，取色方案可选",
+    ),
 }
 
 /**

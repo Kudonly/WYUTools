@@ -1,6 +1,5 @@
 package com.wyutools.app
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,9 +24,7 @@ import com.wyutools.app.ui.WyuWallpaper
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemeController
-import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 
 @Composable
@@ -48,11 +45,12 @@ fun WyuTheme(
     val hasCustomWallpaper by WyuAppearance.hasCustomWallpaper.collectAsState()
     val monetSeed by WyuAppearance.monetSeed.collectAsState()
     val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
     val md3 = cardTheme == WyuCardTheme.Monet
     LaunchedEffect(hasCustomWallpaper) {
         if (hasCustomWallpaper) WyuAppearance.loadCustomWallpaper(appContext)
     }
-    val controller = remember(darkTheme, wallpaper, monetSeed, md3) {
+    val controller = remember(darkTheme, wallpaper, monetSeed, md3, paletteScheme) {
         // 默认/柔光玻璃 only take a custom photo's seed; 莫奈 always derives one,
         // falling back to the gradient's middle stop for stock wallpapers.
         val seed = if (md3) {
@@ -65,15 +63,14 @@ fun WyuTheme(
             monetSeed?.takeIf { wallpaper == WyuWallpaper.Custom }
         }
         if (seed != null) {
+            // 2025 规范只重定义了 均衡 / 鲜艳 / 表达 / 柔和；选到仍然沿用 2021
+            // 映射的方案（单色）时，colorSpec 必须跟着降级，否则颜色会被裁成默认。
+            val palette = paletteScheme
             ThemeController(
                 colorSchemeMode = ColorSchemeMode.MonetSystem,
                 keyColor = Color(seed),
-                colorSpec = if (Build.VERSION.SDK_INT >= 36) {
-                    ThemeColorSpec.Spec2025
-                } else {
-                    ThemeColorSpec.Spec2021
-                },
-                paletteStyle = ThemePaletteStyle.TonalSpot,
+                colorSpec = palette.spec,
+                paletteStyle = palette.style(darkTheme),
                 isDark = darkTheme,
             )
         } else {
