@@ -57,9 +57,6 @@ import com.wyutools.app.schedule.ScheduleNotice
 import com.wyutools.app.schedule.ScheduleSections
 import com.wyutools.app.schedule.ScheduleUiState
 import com.wyutools.app.schedule.ScheduleViewModel
-// 课程卡片保持 Miuix 原样（进行中会整块染成主色，压玻璃会糊）；待办卡片走本
-// 应用的玻璃 Card，圆角与其它页面统一。
-import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
@@ -567,7 +564,7 @@ private fun TodayCourseCard(
     val startTimeText = course.startTime.ifBlank {
         ScheduleSections.defaultStart(course.startSection).orEmpty()
     }
-    MiuixCard(
+    Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
