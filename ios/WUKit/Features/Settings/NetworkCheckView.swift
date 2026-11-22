@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// P0 最小验证：直接打五个域，看 iOS 能不能拿到响应。
-/// 这里只看连通性，不做登录与解析；能返回 HTML / JSON / 401 / 302 都算通。
+/// 只看连通性，不做登录与解析；能返回 HTML / JSON / 401 / 302 都算通。
 struct NetworkCheckView: View {
+    @Environment(AppSettings.self) private var settings
     @State private var rows: [CheckRow] = CheckRow.seeds
     @State private var running = false
 
@@ -16,23 +17,26 @@ struct NetworkCheckView: View {
                         Text("200/301/302/401 都说明网络可达；超时或 -1009 说明当前网络访问不到（电费必须校园网）。")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
                         Button {
                             Task { await run() }
                         } label: {
-                            HStack {
+                            HStack(spacing: 8) {
                                 if running {
                                     ProgressView().controlSize(.small)
                                 }
                                 Text(running ? "检测中…" : "开始检测")
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.system(size: 15, weight: .semibold))
                             }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
                             .foregroundStyle(.white)
-                            .background(WKPalette.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(settings.accentColor.gradient, in: Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WKPressStyle())
                         .disabled(running)
+                        .opacity(running ? 0.7 : 1)
                     }
                 }
 
@@ -59,12 +63,14 @@ struct NetworkCheckView: View {
                 }
             }
             .padding(.horizontal, WK.pagePadding)
-            .padding(.top, 8)
-            .padding(.bottom, 40)
+            .padding(.top, 6)
+            .padding(.bottom, 36)
         }
-        .background(PageBackground())
+        .background(WKWallpaperBackground())
+        .scrollIndicators(.hidden)
         .navigationTitle("接口连通性")
         .navigationBarTitleDisplayMode(.inline)
+        .wkFullScreenDetail()
     }
 
     private func run() async {
@@ -109,7 +115,7 @@ struct CheckRow: Identifiable {
     var tint: Color {
         switch state {
         case .idle: return .secondary
-        case .running: return WKPalette.accent
+        case .running: return .blue
         case .done: return .green
         case .failed: return .red
         }
@@ -132,4 +138,11 @@ struct CheckRow: Identifiable {
         case .failed(let message): return message
         }
     }
+}
+
+#Preview {
+    NavigationStack {
+        NetworkCheckView()
+    }
+    .environment(AppSettings.shared)
 }

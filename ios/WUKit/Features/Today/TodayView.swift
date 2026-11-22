@@ -1,6 +1,8 @@
 import SwiftUI
 
+/// 今日：待办清单 + 今天的课。版式跟 Android 今日页一致，只是换成原生控件。
 struct TodayView: View {
+    @Environment(AppSettings.self) private var settings
     @State private var todos = TodoStore.shared
     @State private var schedule = ScheduleStore.shared
     @State private var draft = ""
@@ -15,26 +17,26 @@ struct TodayView: View {
                 header
                 todoCard
                 courseSection
-                Color.clear.frame(height: 40)
             }
             .padding(.horizontal, WK.pagePadding)
-            .padding(.top, 8)
+            .padding(.top, 4)
+            .padding(.bottom, 28)
         }
-        .background(PageBackground())
+        .background(WKWallpaperBackground())
         .scrollIndicators(.hidden)
         .navigationTitle("今日")
-        .navigationBarTitleDisplayMode(.inline)
+        .wkFullScreenDetail()
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(DateFormatter.wkToday.string(from: Date()))
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 26, weight: .bold))
             Text("周\(WKDate.weekdayTitle(WKDate.todayWeekday)) · \(todayCourses.count) 节课")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     private var todoCard: some View {
@@ -68,7 +70,7 @@ struct TodayView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 40, height: 40)
-                            .background(WKPalette.accent, in: Circle())
+                            .background(settings.accentColor, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -85,7 +87,7 @@ struct TodayView: View {
                         ForEach(Array(todos.items.enumerated()), id: \.element.id) { index, item in
                             todoRow(item)
                             if index < todos.items.count - 1 {
-                                Divider().padding(.leading, 30)
+                                WKDivider().padding(.leading, 30)
                             }
                         }
                     }
@@ -97,8 +99,10 @@ struct TodayView: View {
     private var courseSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("今天的课")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+                .padding(.top, 2)
 
             if todayCourses.isEmpty {
                 GlassCard {
@@ -123,7 +127,7 @@ struct TodayView: View {
             } label: {
                 Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20))
-                    .foregroundStyle(item.done ? WKPalette.accent : Color.secondary)
+                    .foregroundStyle(item.done ? settings.accentColor : Color.secondary)
             }
             .buttonStyle(.plain)
 
@@ -148,9 +152,9 @@ struct TodayView: View {
 
     private func courseRow(_ course: Course) -> some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(CoursePalette.color(course.colorIndex))
-                .frame(width: 4, height: 36)
+                .frame(width: 4, height: 38)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(course.name)
@@ -170,14 +174,12 @@ struct TodayView: View {
     }
 
     private func sectionTimeText(_ course: Course) -> String {
-        let start = schedule.sections.first { $0.number == course.startSection }
-        let end = schedule.sections.first { $0.number == course.endSection }
-        let startText = start?.start ?? ""
-        let endText = end?.end ?? ""
-        if startText.isEmpty || endText.isEmpty {
+        let start = schedule.sections.first { $0.number == course.startSection }?.start ?? ""
+        let end = schedule.sections.first { $0.number == course.endSection }?.end ?? ""
+        if start.isEmpty || end.isEmpty {
             return "第 \(course.startSection)-\(course.endSection) 节"
         }
-        return "\(startText)–\(endText)"
+        return "\(start)–\(end)"
     }
 
     private func addTodo() {
@@ -190,4 +192,5 @@ struct TodayView: View {
     NavigationStack {
         TodayView()
     }
+    .environment(AppSettings.shared)
 }

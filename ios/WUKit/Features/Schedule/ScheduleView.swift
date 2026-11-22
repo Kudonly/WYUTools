@@ -1,54 +1,74 @@
 import SwiftUI
 
+/// 课表：左侧节次轴 + 七列网格，课程块按节次高度铺。
 struct ScheduleView: View {
+    @Environment(AppSettings.self) private var settings
     @State private var store = ScheduleStore.shared
     @State private var showAdd = false
 
-    private let rowHeight: CGFloat = 64
-    private let axisWidth: CGFloat = 44
-    private let columnWidth: CGFloat = 96
+    private let rowHeight: CGFloat = 66
+    private let axisWidth: CGFloat = 42
+    private let columnSpacing: CGFloat = 4
 
-    private var weekdays: [Int] { Array(1...7) }
+    private var weekdays: [Int] {
+        settings.showWeekend ? Array(1...7) : Array(1...5)
+    }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            VStack(spacing: 6) {
-                headerRow
-                HStack(alignment: .top, spacing: 4) {
-                    axis
-                    ForEach(weekdays, id: \.self) { day in
-                        dayColumn(day)
+        GeometryReader { proxy in
+            let width = columnWidth(totalWidth: proxy.size.width)
+            ScrollView([.horizontal, .vertical]) {
+                VStack(spacing: 6) {
+                    headerRow(width: width)
+                    HStack(alignment: .top, spacing: columnSpacing) {
+                        axis
+                        ForEach(weekdays, id: \.self) { day in
+                            dayColumn(day, width: width)
+                        }
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 40)
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 40)
         }
-        .background(PageBackground())
+        .background(WKWallpaperBackground())
+        .scrollIndicators(.hidden)
         .navigationTitle("课表")
-        .navigationBarTitleDisplayMode(.inline)
+        .wkFullScreenDetail()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showAdd = true
                 } label: {
                     Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .semibold))
                 }
+                .accessibilityLabel("添加课程")
             }
         }
         .sheet(isPresented: $showAdd) {
             AddCourseView(store: store)
         }
+        .onChange(of: store.courses) { _, _ in
+            CourseReminder.sync()
+        }
     }
 
-    private var headerRow: some View {
-        HStack(spacing: 4) {
-            Color.clear.frame(width: axisWidth, height: 28)
+    /// 每列宽度按屏幕摊开，不硬编码设备宽度。
+    private func columnWidth(totalWidth: CGFloat) -> CGFloat {
+        let count = CGFloat(weekdays.count)
+        let usable = totalWidth - 24 - axisWidth - columnSpacing * count
+        return max(58, usable / count)
+    }
+
+    private func headerRow(width: CGFloat) -> some View {
+        HStack(spacing: columnSpacing) {
+            Color.clear.frame(width: axisWidth, height: 26)
             ForEach(weekdays, id: \.self) { day in
                 Text("周\(WKDate.weekdayTitle(day))")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(day == WKDate.todayWeekday ? WKPalette.accent : Color.secondary)
-                    .frame(width: columnWidth, height: 28)
+                    .foregroundStyle(day == WKDate.todayWeekday ? settings.accentColor : Color.secondary)
+                    .frame(width: width, height: 26)
             }
         }
     }
@@ -56,7 +76,7 @@ struct ScheduleView: View {
     private var axis: some View {
         VStack(spacing: 0) {
             ForEach(store.sections) { section in
-                VStack(spacing: 2) {
+                VStack(spacing: 1) {
                     Text("\(section.number)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -71,12 +91,12 @@ struct ScheduleView: View {
         }
     }
 
-    private func dayColumn(_ weekday: Int) -> some View {
+    private func dayColumn(_ weekday: Int, width: CGFloat) -> some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 ForEach(store.sections) { _ in
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.035))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
                         .frame(height: rowHeight)
                         .padding(.vertical, 1)
                 }
@@ -88,7 +108,7 @@ struct ScheduleView: View {
                     .offset(y: CGFloat(course.startSection - 1) * rowHeight + 2)
             }
         }
-        .frame(width: columnWidth)
+        .frame(width: width)
     }
 
     private func courseBlock(_ course: Course) -> some View {
@@ -107,12 +127,16 @@ struct ScheduleView: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.20), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(color)
                 .frame(width: 3)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(color.opacity(0.22), lineWidth: 0.6)
         }
     }
 }
@@ -165,6 +189,7 @@ struct AddCourseView: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     private func save() {
@@ -188,4 +213,5 @@ struct AddCourseView: View {
     NavigationStack {
         ScheduleView()
     }
+    .environment(AppSettings.shared)
 }

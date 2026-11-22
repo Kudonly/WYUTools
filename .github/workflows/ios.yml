@@ -10,16 +10,34 @@ on:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show toolchain
+      # 选镜像里最新的正式版 Xcode：iOS 26 的液态玻璃要 SDK 26+ 才会编进去，
+      # 老 SDK 下相关代码被 #if compiler 跳过，构建仍然能出包。
+      - name: Select latest Xcode
         run: |
+          set -euo pipefail
+          echo "已安装的 Xcode："
+          ls -1 /Applications | grep -i xcode || true
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -E '/Xcode(_[0-9.]+)?\.app$' | sort -V | tail -1)
+          if [ -z "${LATEST:-}" ]; then
+            echo "::error::没有找到可用的正式版 Xcode"
+            exit 1
+          fi
+          echo "选择 $LATEST"
+          sudo xcode-select -s "$LATEST/Contents/Developer"
           xcodebuild -version
-          xcodebuild -showsdks | grep -i iphoneos | head -5
+          SDK=$(xcodebuild -showsdks | grep -o 'iphoneos[0-9.]*' | sort -V | tail -1)
+          echo "IPHONEOS_SDK=$SDK" >> "$GITHUB_ENV"
+          echo "iPhoneOS SDK: $SDK"
+          MAJOR=$(echo "$SDK" | sed 's/iphoneos//' | cut -d. -f1)
+          if [ "${MAJOR:-0}" -lt 26 ]; then
+            echo "::warning::当前 SDK 低于 26，液态玻璃相关代码会被跳过"
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -52,16 +70,20 @@ jobs:
             find build/Build/Products -maxdepth 3 -name "*.app" || true
             exit 1
           fi
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
+          STAMP=$(date +%Y%m%d-%H%M)
+          NAME="WUKit-iOS-${VERSION}-unsigned-${STAMP}.ipa"
+          echo "IPA_NAME=$NAME" >> "$GITHUB_ENV"
           mkdir -p out/Payload
           cp -R "$APP_PATH" out/Payload/
           cd out
-          zip -qry WUKit-unsigned.ipa Payload
-          ls -lh WUKit-unsigned.ipa
+          zip -qry "$NAME" Payload
+          ls -lh "$NAME"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: WUKit-unsigned-ipa
-          path: ios/out/WUKit-unsigned.ipa
+          path: ios/out/${{ env.IPA_NAME }}
           if-no-files-found: error
           retention-days: 14
