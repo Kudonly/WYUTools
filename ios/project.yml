@@ -1,0 +1,62 @@
+name: WUKit
+options:
+  bundleIdPrefix: com.wyutools
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+
+targets:
+  WUKit:
+    type: application
+    platform: iOS
+    sources:
+      - path: WUKit
+        excludes:
+          - "Resources/Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wyutools.app
+        PRODUCT_NAME: WUKit
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: "YES"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+    info:
+      path: WUKit/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: WUKit
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            202.192.240.231:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
+
+schemes:
+  WUKit:
+    build:
+      targets:
+        WUKit: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release

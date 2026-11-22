@@ -20,3 +20,10 @@ app/build/
 *.mp4
 .vscode/
 screenshots/
+
+# iOS（.xcodeproj 与 Info.plist 由 XcodeGen 生成）
+ios/WUKit.xcodeproj/
+ios/WUKit/Resources/Info.plist
+ios/build/
+ios/out/
+ios/.xcodegen/
