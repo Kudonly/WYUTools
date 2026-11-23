@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -917,6 +918,11 @@ internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { 
 /** Stable [Backdrop] over the baked soft-glass underlay; wallpaper-only cards
  *  sample this instead of the live recorded layer. */
 internal val LocalWyuBakedBackdrop = compositionLocalOf<Backdrop?> { null }
+
+/** The unblurred wallpaper copy backing [LocalWyuBakedBackdrop]. Static soft
+ *  glass reads its identity so a regenerated underlay invalidates the baked
+ *  glass layer instead of replaying a stale bitmap. */
+internal val LocalWyuBakedUnderlayState = compositionLocalOf<State<WyuGlassUnderlay?>?> { null }
 
 /**
  * Screen-space blur sigma (px) behind the static card glass. The bottom bar

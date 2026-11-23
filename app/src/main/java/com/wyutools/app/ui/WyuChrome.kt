@@ -708,6 +708,7 @@ fun WyuPageScaffold(
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
             LocalWyuBakedBackdrop provides publishedBakedBackdrop,
+            LocalWyuBakedUnderlayState provides rawUnderlayState,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
