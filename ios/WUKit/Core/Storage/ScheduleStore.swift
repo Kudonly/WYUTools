@@ -1,47 +1,88 @@
 import Foundation
 import Observation
 
-/// 课表数据：10 节时间轴 + 课程列表，存 UserDefaults。
-/// 教务导入（jxgl）在 P1 接进来，先保证手工添加可用。
+/// 课表数据：节次轴 + 课程 + 周次锚点，全部存 UserDefaults。
 @Observable
 final class ScheduleStore {
     static let shared = ScheduleStore()
 
     private static let sectionsKey = "wukit.sections"
     private static let coursesKey = "wukit.courses"
+    private static let anchorKey = "wukit.weekAnchor"
+    private static let sectionsVersionKey = "wukit.sectionsVersion"
+    /// 节次表版本。2 = 改用校方 14 节作息，老数据一次性升级。
+    private static let sectionsVersion = 2
 
     private(set) var sections: [ScheduleSection] = ScheduleStore.defaultSections()
     private(set) var courses: [Course] = []
+    /// 本学期第 1 周的周一。
+    private(set) var anchor: WeekAnchor = ScheduleStore.defaultAnchor()
 
     init() {
         load()
     }
 
+    static func defaultAnchor() -> WeekAnchor {
+        let term = TermCode.current()
+        return WeekAnchor(termCode: term, monday: ScheduleTerm.startMonday(termCode: term))
+    }
+
+    /// 与安卓同一份校方作息：14 节，第 13、14 节是中午时段，排在最后。
     static func defaultSections() -> [ScheduleSection] {
         let times: [(String, String)] = [
-            ("08:00", "08:45"),
-            ("08:55", "09:40"),
-            ("10:00", "10:45"),
-            ("10:55", "11:40"),
-            ("14:30", "15:15"),
-            ("15:25", "16:10"),
-            ("16:30", "17:15"),
-            ("17:25", "18:10"),
-            ("19:30", "20:15"),
-            ("20:25", "21:10")
+            ("08:15", "09:05"),
+            ("09:05", "09:50"),
+            ("10:10", "11:00"),
+            ("11:00", "11:45"),
+            ("14:30", "15:20"),
+            ("15:20", "16:05"),
+            ("16:25", "17:15"),
+            ("17:15", "18:00"),
+            ("19:30", "20:20"),
+            ("20:20", "21:05"),
+            ("21:20", "22:15"),
+            ("22:15", "23:00"),
+            ("12:30", "13:20"),
+            ("13:20", "14:05")
         ]
         return times.enumerated().map { index, pair in
             ScheduleSection(number: index + 1, start: pair.0, end: pair.1)
         }
     }
 
-    func courses(on weekday: Int) -> [Course] {
+    // MARK: - 周次
+
+    /// 与安卓一致：至少 20 周，最多到课程覆盖到的周，封顶 30。
+    var maxWeek: Int {
+        let used = courses.reduce(0) { max($0, $1.weeks.max() ?? 0) }
+        return min(30, max(20, used))
+    }
+
+    /// 今天是第几周；开学前算第 1 周。
+    var currentWeek: Int { week(of: Date()) }
+
+    func week(of date: Date) -> Int {
+        let start = ScheduleTerm.monday(onOrBefore: date)
+        let days = Calendar.wk.dateComponents([.day], from: anchor.monday, to: start).day ?? 0
+        let week = Int((Double(days) / 7).rounded(.down)) + 1
+        return min(max(week, 1), maxWeek)
+    }
+
+    /// 某一周第 day 天的日期（1 = 周一）。
+    func date(week: Int, day: Int) -> Date {
+        let offset = (week - 1) * 7 + (day - 1)
+        return Calendar.wk.date(byAdding: .day, value: offset, to: anchor.monday) ?? anchor.monday
+    }
+
+    func courses(on weekday: Int, week: Int) -> [Course] {
         courses
-            .filter { $0.weekday == weekday }
+            .filter { $0.weekday == weekday && $0.occurs(in: week) }
             .sorted { $0.startSection < $1.startSection }
     }
 
     var hasCourses: Bool { !courses.isEmpty }
+
+    // MARK: - 编辑
 
     func add(_ course: Course) {
         courses.append(course)
@@ -87,14 +128,28 @@ final class ScheduleStore {
 
     private func load() {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: Self.sectionsKey),
-           let decoded = try? JSONDecoder().decode([ScheduleSection].self, from: data),
-           !decoded.isEmpty {
+        if defaults.integer(forKey: Self.sectionsVersionKey) < Self.sectionsVersion {
+            // 老版本是 10 节、时间也不对；iOS 侧没有节次编辑器，直接换成校方作息。
+            sections = Self.defaultSections()
+            defaults.set(Self.sectionsVersion, forKey: Self.sectionsVersionKey)
+            saveSections()
+        } else if let data = defaults.data(forKey: Self.sectionsKey),
+                  let decoded = try? JSONDecoder().decode([ScheduleSection].self, from: data),
+                  !decoded.isEmpty {
             sections = decoded
         }
         if let data = defaults.data(forKey: Self.coursesKey),
            let decoded = try? JSONDecoder().decode([Course].self, from: data) {
             courses = decoded
+        }
+        let term = TermCode.current()
+        if let data = defaults.data(forKey: Self.anchorKey),
+           let decoded = try? JSONDecoder().decode(WeekAnchor.self, from: data),
+           decoded.termCode == term {
+            anchor = decoded
+        } else {
+            anchor = Self.defaultAnchor()
+            saveAnchor()
         }
     }
 
@@ -106,5 +161,10 @@ final class ScheduleStore {
     private func saveCourses() {
         guard let data = try? JSONEncoder().encode(courses) else { return }
         UserDefaults.standard.set(data, forKey: Self.coursesKey)
+    }
+
+    private func saveAnchor() {
+        guard let data = try? JSONEncoder().encode(anchor) else { return }
+        UserDefaults.standard.set(data, forKey: Self.anchorKey)
     }
 }

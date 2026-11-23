@@ -8,7 +8,7 @@ struct TodayView: View {
     @State private var draft = ""
 
     private var todayCourses: [Course] {
-        schedule.courses(on: WKDate.todayWeekday)
+        schedule.courses(on: WKDate.todayWeekday, week: schedule.currentWeek)
     }
 
     var body: some View {

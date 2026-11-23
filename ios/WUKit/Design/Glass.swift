@@ -80,6 +80,7 @@ struct GlassCard<Content: View>: View {
     private let padding: CGFloat
     private let tint: Color?
     private let style: WKCardStyle?
+    private let interactive: Bool
     private let content: Content
 
     init(
@@ -87,12 +88,14 @@ struct GlassCard<Content: View>: View {
         padding: CGFloat = WK.cardPadding,
         tint: Color? = nil,
         style: WKCardStyle? = nil,
+        interactive: Bool = true,
         @ViewBuilder content: () -> Content
     ) {
         self.radius = radius
         self.padding = padding
         self.tint = tint
         self.style = style
+        self.interactive = interactive
         self.content = content()
     }
 
@@ -105,7 +108,9 @@ struct GlassCard<Content: View>: View {
                 style: style ?? settings.cardStyle,
                 tint: tint,
                 strength: settings.glassStrength,
-                interactive: true
+                // interactive 玻璃会自己接住触摸做按压高光，可点卡片里它会把
+                // 点击吞掉；卡片本身已经有按压反馈，这里默认关掉。
+                interactive: interactive
             )
     }
 }

@@ -34,20 +34,38 @@ struct ToolGlyph: View {
     }
 }
 
-/// 课程色块用同一套调色板，最多 8 种。
+/// 课程色块：与安卓 `LightCourseColors` / `DarkCourseColors` 同一套底色与文字色。
 enum CoursePalette {
-    static let colors: [Color] = [
-        Color(hex: 0x4F78E6),
-        Color(hex: 0x339F90),
-        Color(hex: 0xE08539),
-        Color(hex: 0xB8619E),
-        Color(hex: 0x5C9448),
-        Color(hex: 0xD95C5C),
-        Color(hex: 0x4785B3),
-        Color(hex: 0x8C70B8)
+    struct Pair {
+        let background: Color
+        let content: Color
+    }
+
+    private static let lightPairs: [Pair] = [
+        Pair(background: Color(hex: 0xDCE9FF), content: Color(hex: 0x173A6B)),
+        Pair(background: Color(hex: 0xD9F2DE), content: Color(hex: 0x14522A)),
+        Pair(background: Color(hex: 0xFFE8C7), content: Color(hex: 0x7A3D00)),
+        Pair(background: Color(hex: 0xEADFFF), content: Color(hex: 0x4A2578)),
+        Pair(background: Color(hex: 0xD2F2EE), content: Color(hex: 0x0D4F47)),
+        Pair(background: Color(hex: 0xFFDEE8), content: Color(hex: 0x7A1F3D))
     ]
 
+    private static let darkPairs: [Pair] = [
+        Pair(background: Color(hex: 0x233A5C), content: Color(hex: 0xD6E6FF)),
+        Pair(background: Color(hex: 0x1E4431), content: Color(hex: 0xC7F0D3)),
+        Pair(background: Color(hex: 0x4A3417), content: Color(hex: 0xFFDFA8)),
+        Pair(background: Color(hex: 0x3A2A52), content: Color(hex: 0xEAD9FF)),
+        Pair(background: Color(hex: 0x17453F), content: Color(hex: 0xC6F3E9)),
+        Pair(background: Color(hex: 0x4B2333), content: Color(hex: 0xFFD6E2))
+    ]
+
+    static func pair(_ index: Int, dark: Bool) -> Pair {
+        let list = dark ? darkPairs : lightPairs
+        return list[abs(index) % list.count]
+    }
+
+    /// 今日页的小色条只用到底色。
     static func color(_ index: Int) -> Color {
-        colors[abs(index) % colors.count]
+        pair(index, dark: false).background
     }
 }

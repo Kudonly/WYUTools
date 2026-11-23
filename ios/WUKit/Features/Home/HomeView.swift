@@ -6,13 +6,23 @@ struct HomeView: View {
     @State private var todos = TodoStore.shared
     @State private var schedule = ScheduleStore.shared
     @State private var showCardPicker = false
+    /// 点卡片先落到这里再推页：NavigationLink 配可交互玻璃时，触摸会被
+    /// 玻璃的按压手势先接走，偶发点击没反应。
+    @State private var route: WKTool?
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: WK.sectionSpacing) {
                 ForEach(settings.commonTools) { tool in
-                    NavigationLink(value: tool) {
+                    Button {
+                        route = tool
+                    } label: {
                         card(for: tool)
+                            // 整块矩形的命中区域：卡片是玻璃材质，空白处按
+                            // 绘制内容命中时点不中，这里显式铺满。
+                            .contentShape(
+                                RoundedRectangle(cornerRadius: WK.cardRadius, style: .continuous)
+                            )
                     }
                     .buttonStyle(WKPressStyle())
                 }
@@ -42,7 +52,7 @@ struct HomeView: View {
                 .accessibilityLabel("常用卡片显示")
             }
         }
-        .navigationDestination(for: WKTool.self) { tool in
+        .navigationDestination(item: $route) { tool in
             ToolDestination(tool: tool)
         }
         .sheet(isPresented: $showCardPicker) {
@@ -66,7 +76,7 @@ struct HomeView: View {
 
     /// 课表卡：和 Android 一样多一段「正在上课 / 接下来」和课程大字。
     private var scheduleCard: some View {
-        GlassCard(padding: 0) {
+        GlassCard(padding: 0, interactive: false) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     ToolGlyph(tool: .schedule, size: 26)
@@ -98,7 +108,7 @@ struct HomeView: View {
     }
 
     private var todayCard: some View {
-        GlassCard {
+        GlassCard(interactive: false) {
             HStack(spacing: 14) {
                 ToolGlyph(tool: .today, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
@@ -115,7 +125,7 @@ struct HomeView: View {
     }
 
     private func standardCard(_ tool: WKTool) -> some View {
-        GlassCard {
+        GlassCard(interactive: false) {
             HStack(spacing: 14) {
                 ToolGlyph(tool: tool, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
@@ -177,7 +187,7 @@ struct HomeView: View {
     // MARK: - 课表焦点
 
     private var todayCourses: [Course] {
-        schedule.courses(on: WKDate.todayWeekday)
+        schedule.courses(on: WKDate.todayWeekday, week: schedule.currentWeek)
     }
 
     private var focus: (course: Course, ongoing: Bool)? {
