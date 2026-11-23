@@ -193,8 +193,19 @@ object WyuAppearance {
     private const val KeySoftGlassTuningCardTintLight = "soft_glass_tuning_card_tint_light"
     private const val KeySoftGlassTuningCardTintDark = "soft_glass_tuning_card_tint_dark"
     private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
-    private const val SoftGlassDefaultsVersion = 5
-    private const val SoftGlassBlurDefault = 15
+    private const val SoftGlassDefaultsVersion = 6
+    private const val SoftGlassBlurDefault = 20
+    private const val KeyBlendAmount = "glass_blend_amount"
+    private const val KeyBlendSaturation = "glass_blend_saturation"
+    private const val KeyBlendBrightness = "glass_blend_brightness"
+    private const val KeyInnerBottom = "glass_inner_bottom"
+    private const val KeyInnerColorWhite = "glass_inner_color_white"
+    private const val KeyInnerColorMix = "glass_inner_color_mix"
+    private const val KeyInnerColorPow = "glass_inner_color_pow"
+    private const val KeyLightIntensity = "glass_light_intensity"
+    private const val KeyLightOpposite = "glass_light_opposite"
+    private const val KeyBackgroundBrightness = "glass_background_brightness"
+    private const val KeyNoise = "glass_noise_coefficient"
     private const val KeyMonetSeed = "monet_seed"
     private const val KeyPaletteScheme = "monet_palette_scheme"
     private const val CustomFileName = "custom_wallpaper.jpg"
@@ -258,8 +269,8 @@ object WyuAppearance {
         val appContext = context.applicationContext
         val loaded = appContext.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
         prefs = loaded
-        // v5 ships the tuned soft-glass defaults, so drop any saved slider
-        // overrides (including the retired card-tint keys) and reset blur.
+        // v6 switches every default to miuix-glass recommended values, so drop
+        // saved slider overrides and reset blur.
         if (loaded.getInt(KeySoftGlassDefaultsVersion, 0) < SoftGlassDefaultsVersion) {
             val brightnessLight = loaded
                 .getFloat(KeyCustomBrightnessLight, loaded.getFloat(KeyCustomBrightness, 1f))
@@ -284,6 +295,17 @@ object WyuAppearance {
                 .remove(KeySoftGlassTuningCardTint)
                 .remove(KeySoftGlassTuningCardTintLight)
                 .remove(KeySoftGlassTuningCardTintDark)
+                .remove(KeyBlendAmount)
+                .remove(KeyBlendSaturation)
+                .remove(KeyBlendBrightness)
+                .remove(KeyInnerBottom)
+                .remove(KeyInnerColorWhite)
+                .remove(KeyInnerColorMix)
+                .remove(KeyInnerColorPow)
+                .remove(KeyLightIntensity)
+                .remove(KeyLightOpposite)
+                .remove(KeyBackgroundBrightness)
+                .remove(KeyNoise)
                 .putInt(KeySoftGlassDefaultsVersion, SoftGlassDefaultsVersion)
                 .apply()
         }
@@ -350,6 +372,17 @@ object WyuAppearance {
             cardTintAlphaDark = loaded
                 .getFloat(KeySoftGlassTuningCardTintDark, tuningDefaults.cardTintAlphaDark)
                 .coerceIn(0f, 1f),
+            blendAmount = loaded.getFloat(KeyBlendAmount, tuningDefaults.blendAmount).coerceIn(0f, 1f),
+            blendSaturation = loaded.getFloat(KeyBlendSaturation, tuningDefaults.blendSaturation).coerceIn(0f, 4f),
+            blendBrightness = loaded.getFloat(KeyBlendBrightness, tuningDefaults.blendBrightness).coerceIn(0f, 1f),
+            innerBottom = loaded.getFloat(KeyInnerBottom, tuningDefaults.innerBottom).coerceIn(0f, 1f),
+            innerColorWhite = loaded.getFloat(KeyInnerColorWhite, tuningDefaults.innerColorWhite).coerceIn(0f, 1f),
+            innerColorMix = loaded.getFloat(KeyInnerColorMix, tuningDefaults.innerColorMix).coerceIn(0f, 2f),
+            innerColorPow = loaded.getFloat(KeyInnerColorPow, tuningDefaults.innerColorPow).coerceIn(0.1f, 4f),
+            lightIntensity = loaded.getFloat(KeyLightIntensity, tuningDefaults.lightIntensity).coerceIn(0f, 4f),
+            lightOppositeIntensity = loaded.getFloat(KeyLightOpposite, tuningDefaults.lightOppositeIntensity).coerceIn(0f, 4f),
+            backgroundBrightness = loaded.getFloat(KeyBackgroundBrightness, tuningDefaults.backgroundBrightness).coerceIn(-1f, 1f),
+            noiseCoefficient = loaded.getFloat(KeyNoise, tuningDefaults.noiseCoefficient).coerceIn(0f, 0.03f),
         )
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         _paletteScheme.value = WyuPaletteScheme.fromStored(loaded.getString(KeyPaletteScheme, null))
@@ -469,6 +502,17 @@ object WyuAppearance {
             reflectLighten = ((tuning.reflectLighten.coerceIn(-4.8f, 7.2f) * 20f).roundToInt() / 20f),
             cardTintAlphaLight = ((tuning.cardTintAlphaLight.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
             cardTintAlphaDark = ((tuning.cardTintAlphaDark.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
+            blendAmount = (tuning.blendAmount.coerceIn(0f, 1f) * 100f).roundToInt() / 100f,
+            blendSaturation = (tuning.blendSaturation.coerceIn(0f, 4f) * 100f).roundToInt() / 100f,
+            blendBrightness = (tuning.blendBrightness.coerceIn(0f, 1f) * 100f).roundToInt() / 100f,
+            innerBottom = (tuning.innerBottom.coerceIn(0f, 1f) * 100f).roundToInt() / 100f,
+            innerColorWhite = (tuning.innerColorWhite.coerceIn(0f, 1f) * 100f).roundToInt() / 100f,
+            innerColorMix = (tuning.innerColorMix.coerceIn(0f, 2f) * 100f).roundToInt() / 100f,
+            innerColorPow = (tuning.innerColorPow.coerceIn(0.1f, 4f) * 100f).roundToInt() / 100f,
+            lightIntensity = (tuning.lightIntensity.coerceIn(0f, 4f) * 100f).roundToInt() / 100f,
+            lightOppositeIntensity = (tuning.lightOppositeIntensity.coerceIn(0f, 4f) * 100f).roundToInt() / 100f,
+            backgroundBrightness = (tuning.backgroundBrightness.coerceIn(-1f, 1f) * 100f).roundToInt() / 100f,
+            noiseCoefficient = (tuning.noiseCoefficient.coerceIn(0f, 0.03f) * 10000f).roundToInt() / 10000f,
         )
         if (_softGlassTuning.value == clamped) return
         _softGlassTuning.value = clamped
@@ -484,6 +528,17 @@ object WyuAppearance {
             ?.putFloat(KeySoftGlassTuningReflectLighten, clamped.reflectLighten)
             ?.putFloat(KeySoftGlassTuningCardTintLight, clamped.cardTintAlphaLight)
             ?.putFloat(KeySoftGlassTuningCardTintDark, clamped.cardTintAlphaDark)
+            ?.putFloat(KeyBlendAmount, clamped.blendAmount)
+            ?.putFloat(KeyBlendSaturation, clamped.blendSaturation)
+            ?.putFloat(KeyBlendBrightness, clamped.blendBrightness)
+            ?.putFloat(KeyInnerBottom, clamped.innerBottom)
+            ?.putFloat(KeyInnerColorWhite, clamped.innerColorWhite)
+            ?.putFloat(KeyInnerColorMix, clamped.innerColorMix)
+            ?.putFloat(KeyInnerColorPow, clamped.innerColorPow)
+            ?.putFloat(KeyLightIntensity, clamped.lightIntensity)
+            ?.putFloat(KeyLightOpposite, clamped.lightOppositeIntensity)
+            ?.putFloat(KeyBackgroundBrightness, clamped.backgroundBrightness)
+            ?.putFloat(KeyNoise, clamped.noiseCoefficient)
             ?.remove(KeySoftGlassTuningCardTint)
             ?.apply()
     }

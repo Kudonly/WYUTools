@@ -12,81 +12,69 @@ import top.yukonga.miuix.kmp.material.GlassShape
 import top.yukonga.miuix.kmp.material.GlassStyle
 import top.yukonga.miuix.kmp.material.GlassStyles
 
-/**
- * Upstream miuix-glass surface for cards. The local 11-knob tuning is mapped
- * onto the closest GlassStyle fields; everything else keeps the upstream
- * preset. Pixel uniforms are authored at [GlassDefaults.SourceDensity] (3x),
- * so they are scaled by sourceDensity / actualDensity before being passed in.
- */
+/** Cards and the dropdown popup share one style so the two materials match. */
 @Composable
-internal fun Modifier.wyuUpstreamCardGlass(
-    backdrop: Backdrop,
-    cornerRadius: Dp,
+internal fun wyuUpstreamGlassStyle(
+    tuning: WyuSoftGlassTuning,
     dark: Boolean,
     blurPercent: Int,
-    tint: Color,
-    edgePx: Float,
-    edgePow: Float,
-    refractionPx: Float,
-    reflectionPx: Float,
-    reflectionLighten: Float,
-    reflectionStrength: Float,
-    refractionIor: Float,
-    bgSaturation: Float,
-): Modifier {
+): GlassStyle {
     val density = LocalDensity.current.density.coerceAtLeast(0.1f)
     val scale = GlassDefaults.SourceDensity / density
-    val style = wyuCardGlassStyle(
-        dark = dark,
-        blurSmall = (wyuSoftGlassScreenBlurPx(blurPercent) * scale).coerceIn(4f, 120f),
-        edgeWidth = edgePx * scale,
-        edgePow = edgePow,
-        thickness = refractionPx * scale,
-        reflectOffset = reflectionPx * scale,
-        reflectLighten = reflectionLighten,
-        reflectStrength = reflectionStrength,
-        ior = refractionIor,
-        saturation = bgSaturation,
-    )
-    return glass(
-        backdrop = backdrop,
-        shape = GlassShape(cornerRadius),
-        style = style,
-        tint = tint,
-        shading = true,
-    )
-}
-
-private fun wyuCardGlassStyle(
-    dark: Boolean,
-    blurSmall: Float,
-    edgeWidth: Float,
-    edgePow: Float,
-    thickness: Float,
-    reflectOffset: Float,
-    reflectLighten: Float,
-    reflectStrength: Float,
-    ior: Float,
-    saturation: Float,
-): GlassStyle {
     val base = if (dark) {
         GlassStyles.CommonMediumRegularDark
     } else {
         GlassStyles.CommonMediumRegularLowLight
     }
-    return base.copy(
+    return GlassStyle(
+        blend = base.blend.copy(
+            amount = tuning.blendAmount,
+            saturation = tuning.blendSaturation,
+            brightness = tuning.blendBrightness,
+        ),
+        inner = base.inner.copy(
+            bottom = tuning.innerBottom,
+            colorWhite = tuning.innerColorWhite,
+            colorMix = tuning.innerColorMix,
+            colorPow = tuning.innerColorPow,
+        ),
         edge = base.edge.copy(
-            width = edgeWidth.coerceIn(4f, 240f),
-            pow = edgePow.coerceIn(0.5f, 8f),
-            thickness = thickness.coerceIn(0f, 400f),
-            reflectOffset = reflectOffset.coerceIn(0f, 1600f),
+            width = tuning.shapeEdgePx * scale,
+            pow = tuning.shapeEdgePow,
+            thickness = tuning.edgeThickness * scale,
+            reflectOffset = tuning.reflectOffset * scale,
         ),
         reflect = base.reflect.copy(
-            lighten = reflectLighten.coerceIn(0f, 2f),
-            strength = reflectStrength.coerceIn(0f, 2f),
+            lighten = tuning.reflectLighten,
+            strength = tuning.reflectionStrength,
         ),
-        refract = base.refract.copy(ior = ior.coerceIn(0.1f, 10f)),
-        background = base.background.copy(saturation = saturation.coerceIn(0f, 3f)),
-        blur = base.blur.copy(small = blurSmall),
+        light = base.light.copy(
+            intensity = tuning.lightIntensity,
+            oppositeIntensity = tuning.lightOppositeIntensity,
+        ),
+        refract = base.refract.copy(ior = tuning.refractionIor),
+        background = base.background.copy(
+            saturation = tuning.saturation(dark),
+            brightness = tuning.backgroundBrightness,
+        ),
+        blur = base.blur.copy(
+            small = (wyuSoftGlassScreenBlurPx(blurPercent) * 4f * scale).coerceIn(4f, 160f),
+        ),
     )
 }
+
+@Composable
+internal fun Modifier.wyuUpstreamCardGlass(
+    backdrop: Backdrop,
+    cornerRadius: Dp,
+    tuning: WyuSoftGlassTuning,
+    dark: Boolean,
+    blurPercent: Int,
+    tint: Color,
+): Modifier = glass(
+    backdrop = backdrop,
+    shape = GlassShape(cornerRadius),
+    style = wyuUpstreamGlassStyle(tuning, dark, blurPercent),
+    tint = tint,
+    shading = true,
+)

@@ -248,17 +248,10 @@ fun Card(
             softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
                 backdrop = glass,
                 cornerRadius = cornerRadius,
+                tuning = tuning,
                 dark = dark,
                 blurPercent = softGlassBlur,
                 tint = softGlassCardTint,
-                edgePx = edgePx,
-                edgePow = edgePow,
-                refractionPx = refractionPx,
-                reflectionPx = reflectionPx,
-                reflectionLighten = tuning.reflectLighten,
-                reflectionStrength = tuning.reflectionStrength,
-                refractionIor = tuning.refractionIor,
-                bgSaturation = tuning.saturation(dark),
             )
             !samplePageContent && gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
@@ -329,17 +322,10 @@ fun Card(
             softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
                 backdrop = glass,
                 cornerRadius = cornerRadius,
+                tuning = tuning,
                 dark = dark,
                 blurPercent = softGlassBlur,
                 tint = softGlassCardTint,
-                edgePx = tuning.shapeEdgePx,
-                edgePow = tuning.shapeEdgePow,
-                refractionPx = tuning.edgeThickness,
-                reflectionPx = tuning.reflectOffset,
-                reflectionLighten = tuning.reflectLighten,
-                reflectionStrength = tuning.reflectionStrength,
-                refractionIor = tuning.refractionIor,
-                bgSaturation = tuning.saturation(dark),
             )
             gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
@@ -417,6 +403,7 @@ fun LiveGlassCard(
             useSoftGlass -> shadowed.wyuUpstreamCardGlass(
                 backdrop = backdrop,
                 cornerRadius = cornerRadius,
+                tuning = tuning,
                 dark = dark,
                 blurPercent = softGlassBlur,
                 tint = if (dark) {
@@ -424,14 +411,6 @@ fun LiveGlassCard(
                 } else {
                     Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
                 },
-                edgePx = tuning.shapeEdgePx,
-                edgePow = tuning.shapeEdgePow,
-                refractionPx = TopBarGlassRefractionPx,
-                reflectionPx = TopBarGlassReflectionPx,
-                reflectionLighten = tuning.reflectLighten,
-                reflectionStrength = tuning.reflectionStrength,
-                refractionIor = tuning.refractionIor,
-                bgSaturation = tuning.saturation(dark),
             )
             else -> shadowed.textureBlur(
                 backdrop = backdrop,

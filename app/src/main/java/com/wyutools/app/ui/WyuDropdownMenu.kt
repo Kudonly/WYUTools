@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +52,11 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.layout.LayoutCoordinates
+import top.yukonga.miuix.kmp.blur.Backdrop
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -71,7 +77,6 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import top.yukonga.miuix.kmp.glass.glass
 import top.yukonga.miuix.kmp.material.GlassShape
-import top.yukonga.miuix.kmp.material.GlassStyles
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -167,6 +172,8 @@ internal fun WyuDropdownMenu(
     val hostView = LocalView.current
     LaunchedEffect(hostView) { hostOrigin = hostView.rootView.screenOrigin() }
     val dark = LocalWyuDarkTheme.current
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val md3 = LocalWyuMd3Style.current
     // 玻璃面板：模糊身后的页面内容，再压一层卡片同档的容器色。
     val glassBackdrop = LocalWyuPageBackdrop.current
@@ -175,7 +182,7 @@ internal fun WyuDropdownMenu(
         // 没有可模糊的底时（不支持模糊的机器）退回不透明容器色，
         // 否则半透明面板会直接透出下面的页面。
         glassBackdrop == null -> MiuixTheme.colorScheme.surfaceContainer
-        else -> MiuixTheme.colorScheme.surfaceContainer.copy(alpha = DropdownGlassTint)
+        else -> MiuixTheme.colorScheme.surfaceContainer.copy(alpha = tuning.cardTintAlpha(dark))
     }
     // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
     // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
@@ -235,6 +242,13 @@ internal fun WyuDropdownMenu(
                     val end = Size(panelSize.width.toFloat(), panelSize.height.toFloat())
                     // anchor 是宿主窗口坐标，先加上宿主窗口在屏幕上的位置，再减掉弹出窗口的位置。
                     val shift = Offset(host.x - popup.x, host.y - popup.y)
+                    // The popup lives in a different window; its LayoutCoordinates report
+                    // positions relative to that window while the page layer was recorded
+                    // in the host window. Apply the same screen-space shift used for the
+                    // anchor so the glass samples the pixels actually behind the panel.
+                    val sampledBackdrop = remember(glassBackdrop, shift) {
+                        glassBackdrop?.let { ShiftedBackdrop(it, shift) }
+                    }
                     val anchorInPopup = anchor.translate(shift)
                     val window = Rect(
                         left = 0f,
@@ -280,11 +294,11 @@ internal fun WyuDropdownMenu(
                             .then(
                                 if (useUpstreamGlass && glassBackdrop != null) {
                                     Modifier.glass(
-                                        backdrop = glassBackdrop,
+                                        backdrop = sampledBackdrop ?: glassBackdrop,
                                         shape = GlassShape(
                                             with(density) { frame.cornerRadius.toDp() },
                                         ),
-                                        style = GlassStyles.CommonSmallRegular,
+                                        style = wyuUpstreamGlassStyle(tuning, dark, softGlassBlur),
                                         tint = panelColor,
                                         shading = true,
                                     )
@@ -636,4 +650,25 @@ private object WindowOriginPositionProvider : PopupPositionProvider {
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize,
     ): IntOffset = IntOffset.Zero
+}
+
+/** Rebases a host-window backdrop into the popup window coordinate system. */
+private class ShiftedBackdrop(
+    private val delegate: Backdrop,
+    private val shift: Offset,
+) : Backdrop {
+    override val isCoordinatesDependent: Boolean get() = delegate.isCoordinatesDependent
+    override val offsetResidualX: Float get() = delegate.offsetResidualX
+    override val offsetResidualY: Float get() = delegate.offsetResidualY
+
+    override fun DrawScope.drawBackdrop(
+        density: Density,
+        coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?,
+        downscaleFactor: Float,
+    ) {
+        withTransform({ translate(shift.x, shift.y) }) {
+            with(delegate) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
+        }
+    }
 }

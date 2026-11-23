@@ -368,18 +368,53 @@ private const val GlassDrawScale = 0.75f
  * material; the settings screen exposes them temporarily for tuning.
  * Saturation is split per mode (vivid in light, gentler in dark).
  */
+// Defaults follow miuix-glass GlassStyles.CommonMediumRegular* (source-density units).
+private const val UpstreamIor = 3.0f
+private const val UpstreamEdgeWidth = 60f
+private const val UpstreamEdgePow = 4.0f
+private const val UpstreamThickness = 80f
+private const val UpstreamReflectOffset = 600f
+private const val UpstreamReflectLighten = 1.0f
+private const val UpstreamReflectStrength = 0.8f
+private const val UpstreamSaturationLight = 2.0f
+private const val UpstreamSaturationDark = 3.0f
+private const val UpstreamTintLight = 0.5f
+private const val UpstreamTintDark = 0.4f
+private const val UpstreamBlendAmount = 0.2f
+private const val UpstreamBlendSaturation = 2.0f
+private const val UpstreamBlendBrightness = 0.2f
+private const val UpstreamInnerBottom = 0.04f
+private const val UpstreamInnerColorWhite = 0.0f
+private const val UpstreamInnerColorMix = 1.0f
+private const val UpstreamInnerColorPow = 1.0f
+private const val UpstreamLightIntensity = 1.4f
+private const val UpstreamLightOpposite = 0.8f
+private const val UpstreamBackgroundBrightness = 0.0f
+private const val UpstreamNoise = 0.0045f
+
 data class WyuSoftGlassTuning(
-    val refractionIor: Float = RawRefractionIor,
-    val saturationLight: Float = RawBgSaturationLight,
-    val saturationDark: Float = RawBgSaturation,
-    val edgeThickness: Float = RawRefractionThickness,
-    val shapeEdgePx: Float = RawShapeEdgePx,
-    val shapeEdgePow: Float = RawShapeEdgePow,
-    val reflectOffset: Float = RawReflectionThickness,
-    val reflectionStrength: Float = RawReflectionStrength,
-    val reflectLighten: Float = RawReflectionLighten,
-    val cardTintAlphaLight: Float = RawCardTintAlpha,
-    val cardTintAlphaDark: Float = RawCardTintAlphaDark,
+    val refractionIor: Float = UpstreamIor,
+    val saturationLight: Float = UpstreamSaturationLight,
+    val saturationDark: Float = UpstreamSaturationDark,
+    val edgeThickness: Float = UpstreamThickness,
+    val shapeEdgePx: Float = UpstreamEdgeWidth,
+    val shapeEdgePow: Float = UpstreamEdgePow,
+    val reflectOffset: Float = UpstreamReflectOffset,
+    val reflectionStrength: Float = UpstreamReflectStrength,
+    val reflectLighten: Float = UpstreamReflectLighten,
+    val cardTintAlphaLight: Float = UpstreamTintLight,
+    val cardTintAlphaDark: Float = UpstreamTintDark,
+    val blendAmount: Float = UpstreamBlendAmount,
+    val blendSaturation: Float = UpstreamBlendSaturation,
+    val blendBrightness: Float = UpstreamBlendBrightness,
+    val innerBottom: Float = UpstreamInnerBottom,
+    val innerColorWhite: Float = UpstreamInnerColorWhite,
+    val innerColorMix: Float = UpstreamInnerColorMix,
+    val innerColorPow: Float = UpstreamInnerColorPow,
+    val lightIntensity: Float = UpstreamLightIntensity,
+    val lightOppositeIntensity: Float = UpstreamLightOpposite,
+    val backgroundBrightness: Float = UpstreamBackgroundBrightness,
+    val noiseCoefficient: Float = UpstreamNoise,
 ) {
     fun saturation(dark: Boolean): Float = if (dark) saturationDark else saturationLight
     fun cardTintAlpha(dark: Boolean): Float = if (dark) cardTintAlphaDark else cardTintAlphaLight
