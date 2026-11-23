@@ -246,6 +246,13 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
             if (!hasDorm) {
                 QueryCard(ui = ui, vm = vm)
                 Spacer(Modifier.height(16.dp))
+            } else {
+                // 输入卡藏起来之后，错误总得有个落点：缓存好宿舍的场景下
+                // 查询失败（断网、内网不通）只会在顶栏亮一下，用户看不到原因。
+                ui.error?.let { message ->
+                    ElecErrorBanner(message = message, onRetry = vm::query)
+                    Spacer(Modifier.height(16.dp))
+                }
             }
             // The cards are laid out before any data exists, so the page is
             // whole from the first frame; the query result simply fills in.
@@ -410,6 +417,29 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** 已有宿舍缓存时的查询失败提示：一行文字加重试，不占一整张卡。 */
+@Composable
+private fun ElecErrorBanner(message: String, onRetry: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        colors = CardDefaults.defaultColors(
+            color = MiuixTheme.colorScheme.errorContainer,
+            contentColor = MiuixTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = message,
+                style = MiuixTheme.textStyles.footnote1,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(text = "重试", onClick = onRetry)
         }
     }
 }
