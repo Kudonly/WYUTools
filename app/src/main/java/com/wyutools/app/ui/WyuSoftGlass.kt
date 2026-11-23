@@ -1359,6 +1359,15 @@ internal fun Modifier.wyuWallpaperGlass(
     val originState = remember { mutableStateOf(Offset.Zero) }
     val layer = rememberGraphicsLayer()
     val drawGlass = remember(runtimeShader, paint, shape, glassShape, underlay, layer) {
+        // The recorded layer is pixel-identical while geometry and uniforms are
+        // unchanged. Re-recording it on every frame runs the whole RuntimeShader
+        // into an offscreen layer again — on a page of tall glass cards (the
+        // tuning screen) that alone stalls the first frames. Cache the record
+        // and only replay drawLayer until something actually changes.
+        var recordedW = -1
+        var recordedH = -1
+        var recordedX = Float.NaN
+        var recordedY = Float.NaN
         Modifier.drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
             val path = Path()
@@ -1379,26 +1388,34 @@ internal fun Modifier.wyuWallpaperGlass(
                 val shiftY = (underlay.origin.y - local.y) * GlassDrawScale
                 val layerW = (size.width * GlassDrawScale).roundToInt().coerceAtLeast(1)
                 val layerH = (size.height * GlassDrawScale).roundToInt().coerceAtLeast(1)
-                layer.record(
-                    density = this,
-                    layoutDirection = layoutDirection,
-                    size = IntSize(layerW, layerH),
+                if (recordedW != layerW || recordedH != layerH ||
+                    recordedX != shiftX || recordedY != shiftY
                 ) {
+                    layer.record(
+                        density = this,
+                        layoutDirection = layoutDirection,
+                        size = IntSize(layerW, layerH),
+                    ) {
                     runtimeShader.setFloatUniform(
-                        "uGeoPx_pos_size",
-                        shiftX,
-                        shiftY,
-                        layerW.toFloat(),
-                        layerH.toFloat(),
-                    )
-                    runtimeShader.setFloatUniform("uBgOrigin_pad", shiftX, shiftY, 0f, 0f)
-                    if (glassShape == WyuSoftGlassShape.Circle) {
-                        runtimeShader.setFloatUniform(
-                            "uCornerRadius",
-                            min(layerW, layerH) * 0.5f,
+                            "uGeoPx_pos_size",
+                            shiftX,
+                            shiftY,
+                            layerW.toFloat(),
+                            layerH.toFloat(),
                         )
+                        runtimeShader.setFloatUniform("uBgOrigin_pad", shiftX, shiftY, 0f, 0f)
+                        if (glassShape == WyuSoftGlassShape.Circle) {
+                            runtimeShader.setFloatUniform(
+                                "uCornerRadius",
+                                min(layerW, layerH) * 0.5f,
+                            )
+                        }
+                        drawIntoCanvas { it.nativeCanvas.drawPath(scaledPath, paint) }
                     }
-                    drawIntoCanvas { it.nativeCanvas.drawPath(scaledPath, paint) }
+                    recordedW = layerW
+                    recordedH = layerH
+                    recordedX = shiftX
+                    recordedY = shiftY
                 }
                 // Upscale the reduced layer; linear filtering keeps the blurred
                 // rim smooth instead of blocky.

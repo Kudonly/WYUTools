@@ -176,6 +176,7 @@ internal fun WyuDropdownMenu(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     // 玻璃面板：模糊身后的页面内容，再压一层卡片同档的容器色。
     val glassBackdrop = LocalWyuPageBackdrop.current
+    val gaussianUnderlay = LocalWyuGaussianUnderlay.current
     val panelColor = when {
         // 没有可模糊的底时（不支持模糊的机器）退回不透明容器色，
         // 否则半透明面板会直接透出下面的页面。
@@ -188,7 +189,8 @@ internal fun WyuDropdownMenu(
     val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val useUpstreamGlass = glassBackdrop != null && !isLiquid
+    val useUpstreamGlass = glassBackdrop != null && !isLiquid &&
+        currentCardTheme == WyuCardTheme.SoftGlass
     val useLiquidGlass = glassBackdrop != null && isLiquid && wyuSoftGlassSupported
     val strokeColor = if (dark) {
         Color.White.copy(alpha = 0.08f)
@@ -245,6 +247,22 @@ internal fun WyuDropdownMenu(
                     val end = Size(panelSize.width.toFloat(), panelSize.height.toFloat())
                     // anchor 是宿主窗口坐标，先加上宿主窗口在屏幕上的位置，再减掉弹出窗口的位置。
                     val shift = Offset(host.x - popup.x, host.y - popup.y)
+                    // Default cards blur a baked, pre-Gaussian wallpaper copy.
+                    // Reuse that exact bitmap here; only its origin is rebased
+                    // into the popup window so the panel samples what is really
+                    // behind it instead of the host-window coordinates.
+                    val popupGaussian = gaussianUnderlay?.let { u ->
+                        WyuGlassUnderlay(
+                            bitmap = u.bitmap,
+                            scale = u.scale,
+                            origin = u.origin + shift,
+                            source = u.source,
+                            dim = u.dim,
+                            blurSigmaPx = u.blurSigmaPx,
+                            widthPx = u.widthPx,
+                            heightPx = u.heightPx,
+                        )
+                    }
                     // The popup lives in a different window; its LayoutCoordinates report
                     // positions relative to that window while the page layer was recorded
                     // in the host window. Apply the same screen-space shift used for the
@@ -304,6 +322,11 @@ internal fun WyuDropdownMenu(
                                         dark = dark,
                                         baseTint = wyuLiquidControlTint(),
                                         blurPercent = liquidBlur,
+                                    )
+                                } else if (popupGaussian != null) {
+                                    Modifier.wyuWallpaperBlur(
+                                        underlay = popupGaussian,
+                                        shape = shape,
                                     )
                                 } else if (useUpstreamGlass && glassBackdrop != null) {
                                     Modifier.glass(
@@ -681,7 +704,12 @@ private class ShiftedBackdrop(
         layerBlock: (GraphicsLayerScope.() -> Unit)?,
         downscaleFactor: Float,
     ) {
-        withTransform({ translate(shift.x, shift.y) }) {
+        // LayerBackdrop maps the surface offset into the reduced sampling
+        // buffer with 1/downscaleFactor. The host-vs-popup window shift is in
+        // full pixels, so it needs the same reduction — otherwise a 4x blur
+        // downscale lands the sample 4 windows apart.
+        val sampled = if (downscaleFactor > 1f) 1f / downscaleFactor else 1f
+        withTransform({ translate(shift.x * sampled, shift.y * sampled) }) {
             with(delegate) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
         }
     }
