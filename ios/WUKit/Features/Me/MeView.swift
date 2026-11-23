@@ -3,13 +3,16 @@ import SwiftUI
 /// 我：资料卡 + 教务账号 + 设置，排布和 Android 的「我」页一致。
 struct MeView: View {
     @Environment(AppSettings.self) private var settings
-    @AppStorage("profile.name") private var name = "演示同学"
-    @AppStorage("profile.account") private var account = "20230001"
-    @AppStorage("profile.dept") private var dept = "示例学院 · 示例专业"
+    @State private var auth = AuthStore.shared
 
-    @State private var showEdit = false
+    @AppStorage("profile.name") private var localName = ""
+    @AppStorage("profile.account") private var localAccount = ""
+    @AppStorage("profile.dept") private var localDept = ""
+
     @State private var showLogin = false
     @State private var showSettings = false
+    @State private var showEdit = false
+    @State private var confirmLogout = false
 
     var body: some View {
         ScrollView {
@@ -17,6 +20,10 @@ struct MeView: View {
                 profileCard
                 jxglCard
                 settingsCard
+
+                if auth.loggedIn {
+                    logoutCard
+                }
 
                 Text("WUKit for iOS · \(Self.version)")
                     .font(.system(size: 12))
@@ -32,6 +39,7 @@ struct MeView: View {
         .background(WKWallpaperBackground())
         .scrollIndicators(.hidden)
         .navigationTitle("我")
+        .toolbarTitleDisplayMode(.inlineLarge)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -47,47 +55,67 @@ struct MeView: View {
             ProfileEditView()
         }
         .sheet(isPresented: $showLogin) {
-            LoginPlaceholderSheet()
+            LoginView()
         }
         .navigationDestination(isPresented: $showSettings) {
             SettingsView()
+        }
+        .confirmationDialog("退出统一身份认证？", isPresented: $confirmLogout, titleVisibility: .visible) {
+            Button("退出登录", role: .destructive) {
+                Task { await auth.logout() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("退出后课表、成绩、体育馆等需要重新登录才能查看。")
         }
     }
 
     // MARK: - 资料
 
+    private var displayName: String {
+        if auth.loggedIn { return auth.profile?.name ?? "同学" }
+        return localName.isEmpty ? "未登录" : localName
+    }
+
+    private var displayAccount: String {
+        if auth.loggedIn { return auth.profile?.account ?? "" }
+        return localAccount
+    }
+
+    private var displayDept: String {
+        if auth.loggedIn { return auth.profile?.dept ?? "统一身份认证已登录" }
+        return localDept.isEmpty ? "点按可编辑本机资料" : localDept
+    }
+
     private var profileCard: some View {
-        GlassCardButton(action: { showEdit = true }) {
+        GlassCardButton(action: {
+            if auth.loggedIn { showEdit = false } else { showEdit = true }
+        }) {
             HStack(spacing: 14) {
                 avatar
 
-                if settings.demoMode {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(name)
-                            .font(.system(size: 20, weight: .semibold))
-                        Text(account)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                        Text(dept)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("未登录")
-                            .font(.system(size: 20, weight: .semibold))
-                        Text("点按可编辑本机资料")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(displayName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .lineLimit(1)
+                    if !displayAccount.isEmpty {
+                        Text(displayAccount)
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
+                    Text(displayDept)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
 
-                Image(systemName: "pencil")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                if !auth.loggedIn {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
     }
@@ -96,7 +124,7 @@ struct MeView: View {
         ZStack {
             Circle()
                 .fill(settings.accentColor.opacity(0.16))
-            Text(String(name.prefix(1)))
+            Text(String(displayName.prefix(1)))
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(settings.accentColor)
         }
@@ -106,7 +134,13 @@ struct MeView: View {
     // MARK: - 教务
 
     private var jxglCard: some View {
-        GlassCardButton(action: { showLogin = true }) {
+        GlassCardButton(action: {
+            if auth.loggedIn {
+                Task { await auth.prepareJxgl() }
+            } else {
+                showLogin = true
+            }
+        }) {
             HStack(spacing: 14) {
                 Image(systemName: "graduationcap")
                     .font(.system(size: 20, weight: .medium))
@@ -116,21 +150,35 @@ struct MeView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("教务系统")
                         .font(.system(size: 16, weight: .semibold))
-                    Text("登录后同步课表、成绩、考试与教评")
+                    Text(jxglSummary)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
 
-                Text("未登录")
+                Text(jxglStatusText)
                     .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(auth.jxglReady ? Color.green : Color.secondary)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(WKInk.tertiary)
             }
         }
+    }
+
+    private var jxglSummary: String {
+        if !auth.loggedIn { return "登录后同步课表、成绩、考试与教评" }
+        if auth.jxglConnecting { return "正在建立教务会话…" }
+        if let error = auth.jxglError { return error }
+        return "课表、成绩、考试、教评、体测已接通"
+    }
+
+    private var jxglStatusText: String {
+        if !auth.loggedIn { return "未登录" }
+        if auth.jxglConnecting { return "连接中" }
+        return auth.jxglReady ? "已连接" : "点按重连"
     }
 
     private var settingsCard: some View {
@@ -146,6 +194,24 @@ struct MeView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(WKInk.tertiary)
+            }
+        }
+    }
+
+    private var logoutCard: some View {
+        GlassCardButton(action: { confirmLogout = true }) {
+            HStack(spacing: 14) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.red)
+                    .frame(width: 30)
+                Text("退出登录")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.red)
+                Spacer(minLength: 8)
+                if auth.loggingOut {
+                    ProgressView().controlSize(.small)
+                }
             }
         }
     }
@@ -181,60 +247,6 @@ struct ProfileEditView: View {
                 }
             }
             .navigationTitle("编辑资料")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-/// 教务登录入口。SSO 与滑块验证属于 P1，这里先把链路讲清楚，
-/// 不做假登录，也不让按钮假装成功。
-struct LoginPlaceholderSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(AppSettings.self) private var settings
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    GlassCard {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("登录还没接上")
-                                .font(.system(size: 17, weight: .semibold))
-                            Text("五邑大学统一身份认证要过 AES 加密与滑块验证，这部分排在 P1。现在可以先用本地课表、待办和主题设置。")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    NavigationLink {
-                        NetworkCheckView()
-                    } label: {
-                        GlassCard {
-                            WKSettingRow(
-                                title: "接口连通性检测",
-                                summary: "先确认五个后端域在 iOS 上能否访问",
-                                showsChevron: true
-                            )
-                        }
-                    }
-                    .buttonStyle(WKPressStyle())
-
-                    Text("已经验证过的域：authserver / jxgl / ehall / 电费 / 热水")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
-                }
-                .padding(WK.pagePadding)
-            }
-            .scrollIndicators(.hidden)
-            .navigationTitle("教务账号")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

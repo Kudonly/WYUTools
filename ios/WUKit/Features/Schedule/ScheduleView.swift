@@ -4,7 +4,12 @@ import SwiftUI
 struct ScheduleView: View {
     @Environment(AppSettings.self) private var settings
     @State private var store = ScheduleStore.shared
+    @State private var auth = AuthStore.shared
     @State private var showAdd = false
+    @State private var showLogin = false
+    @State private var showImportConfirm = false
+    @State private var importing = false
+    @State private var importMessage: String?
 
     private let rowHeight: CGFloat = 66
     private let axisWidth: CGFloat = 42
@@ -34,24 +39,129 @@ struct ScheduleView: View {
         .background(WKWallpaperBackground())
         .scrollIndicators(.hidden)
         .navigationTitle("课表")
+        .navigationBarTitleDisplayMode(.inline)
         .wkFullScreenDetail()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showAdd = true
+                Menu {
+                    Button {
+                        if auth.loggedIn {
+                            if store.hasCourses { showImportConfirm = true } else { importSchedule() }
+                        } else {
+                            showLogin = true
+                        }
+                    } label: {
+                        Label("从教务导入", systemImage: "arrow.down.doc")
+                    }
+
+                    Button {
+                        showAdd = true
+                    } label: {
+                        Label("手动添加课程", systemImage: "plus")
+                    }
+
+                    if store.hasCourses {
+                        Button(role: .destructive) {
+                            store.replaceAll([])
+                            importMessage = "已清空本课表。"
+                        } label: {
+                            Label("清空课表", systemImage: "trash")
+                        }
+                    }
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .semibold))
+                    if importing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
                 }
-                .accessibilityLabel("添加课程")
+                .accessibilityLabel("课表操作")
+            }
+        }
+        .overlay(alignment: .top) {
+            if let importMessage {
+                Text(importMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .task {
+                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        withAnimation { self.importMessage = nil }
+                    }
             }
         }
         .sheet(isPresented: $showAdd) {
             AddCourseView(store: store)
         }
+        .sheet(isPresented: $showLogin) {
+            LoginView()
+        }
+        .confirmationDialog(
+            "导入会替换当前 \(store.courses.count) 门课",
+            isPresented: $showImportConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("替换并导入") { importSchedule() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("导入的是本学期教务课表，手动添加的课程会被清掉。")
+        }
         .onChange(of: store.courses) { _, _ in
             CourseReminder.sync()
         }
+    }
+
+    /// 拉当前学期课表并整体替换。
+    private func importSchedule() {
+        guard !importing else { return }
+        importing = true
+        importMessage = nil
+        Task {
+            do {
+                let term = TermCode.current()
+                let imported = try await ScheduleImporter.fetch(term: term)
+                let courses = imported.map { item in
+                    Course(
+                        name: item.name,
+                        teacher: item.teacher,
+                        room: item.room,
+                        weekday: item.weekday,
+                        startSection: max(1, min(item.startSection, store.sections.count)),
+                        endSection: max(1, min(item.endSection, store.sections.count)),
+                        colorIndex: Self.colorIndex(for: item.name)
+                    )
+                }
+                await MainActor.run {
+                    store.replaceAll(courses)
+                    importMessage = imported.isEmpty
+                        ? "教务没有返回本学期课程。"
+                        : "已导入 \(courses.count) 门课。"
+                    WKHaptics.notify(.success)
+                }
+            } catch {
+                await MainActor.run {
+                    importMessage = auth.friendly(error)
+                    if (error as? SsoError)?.sessionExpired == true {
+                        auth.noteSessionExpired()
+                    }
+                    WKHaptics.notify(.error)
+                }
+            }
+            await MainActor.run { importing = false }
+        }
+    }
+
+    /// 同名课程每次导入都落到同一个颜色，换学期也不会整片变色。
+    private static func colorIndex(for name: String) -> Int {
+        var hash = 5381
+        for scalar in name.unicodeScalars {
+            hash = (hash &* 33) &+ Int(scalar.value)
+        }
+        return abs(hash) % 8
     }
 
     /// 每列宽度按屏幕摊开，不硬编码设备宽度。

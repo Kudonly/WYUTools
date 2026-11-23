@@ -30,6 +30,7 @@ struct HomeView: View {
         .background(WKWallpaperBackground())
         .scrollIndicators(.hidden)
         .navigationTitle("常用")
+        .toolbarTitleDisplayMode(.inlineLarge)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

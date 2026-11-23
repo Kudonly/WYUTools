@@ -13,6 +13,10 @@ struct WUKitApp: App {
             if phase == .active {
                 CourseReminder.sync()
             }
+            // 退到后台存一次 cookie：下次冷启动才能直接恢复登录态。
+            if phase == .background {
+                AuthStore.shared.persistCookies()
+            }
         }
     }
 }

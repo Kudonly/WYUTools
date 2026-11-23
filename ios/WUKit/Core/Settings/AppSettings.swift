@@ -320,11 +320,6 @@ final class AppSettings {
     // MARK: - 其它
 
     var accentColor: Color { accent.color }
-
-    /// 卡片玻璃的着色：强度为 0 时不着色。
-    var glassTint: Color? {
-        glassStrength <= 0.01 ? nil : accent.color
-    }
 }
 
 extension UIImage {

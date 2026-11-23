@@ -24,7 +24,7 @@ extension View {
                 .overlay { shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5) }
                 .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 6)
         case .liquid:
-            liquid(shape, tint: tint, strength: strength, interactive: interactive)
+            liquid(shape, interactive: interactive)
         }
     }
 
@@ -34,24 +34,16 @@ extension View {
         return base.opacity(alpha)
     }
 
-    private func glassTint(_ tint: Color?, _ strength: Double) -> Color? {
-        guard let tint, strength > 0.01 else { return nil }
-        return tint.opacity(0.10 + strength.clamped(to: 0...1) * 0.22)
-    }
-
+    /// 液态玻璃保持系统原样：不叠任何着色，只交给 glassEffect 的折射与高光。
     @ViewBuilder
     private func liquid<S: InsettableShape>(
         _ shape: S,
-        tint: Color?,
-        strength: Double,
         interactive: Bool
     ) -> some View {
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             self.glassEffect(
-                .regular
-                    .tint(glassTint(tint, strength))
-                    .interactive(interactive),
+                .regular.interactive(interactive),
                 in: shape
             )
         } else {
@@ -111,7 +103,7 @@ struct GlassCard<Content: View>: View {
             .wkSurface(
                 RoundedRectangle(cornerRadius: radius, style: .continuous),
                 style: style ?? settings.cardStyle,
-                tint: tint ?? settings.glassTint,
+                tint: tint,
                 strength: settings.glassStrength,
                 interactive: true
             )

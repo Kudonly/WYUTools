@@ -53,6 +53,12 @@ final class ScheduleStore {
         saveCourses()
     }
 
+    /// 教务导入成功后整体替换本课表。
+    func replaceAll(_ newCourses: [Course]) {
+        courses = newCourses
+        saveCourses()
+    }
+
     func updateSection(number: Int, start: String, end: String) {
         guard let index = sections.firstIndex(where: { $0.number == number }) else { return }
         sections[index].start = start

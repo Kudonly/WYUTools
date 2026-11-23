@@ -239,22 +239,11 @@ struct SettingsView: View {
                 }
 
                 if settings.cardStyle == .liquid {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("着色强度")
-                                .font(.system(size: 14))
-                            Spacer()
-                            Text("\(Int(settings.glassStrength * 100))%")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(value: $settings.glassStrength, in: 0...1)
-                            .tint(settings.accentColor)
-                        Text("跟着系统液态玻璃的高光与折射，数值只改强调色的比例。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 4)
+                    Text("液态玻璃保持系统原样：不加着色，只保留折射与高光；需要颜色时用「实色」。")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
