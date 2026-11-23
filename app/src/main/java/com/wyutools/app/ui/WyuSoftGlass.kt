@@ -866,6 +866,10 @@ internal val LocalWyuGlassUnderlay = compositionLocalOf<WyuGlassUnderlay?> { nul
 /** Cached Gaussian-blurred wallpaper for the non-soft-glass card path. */
 internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { null }
 
+/** Stable [Backdrop] over the baked soft-glass underlay; wallpaper-only cards
+ *  sample this instead of the live recorded layer. */
+internal val LocalWyuBakedBackdrop = compositionLocalOf<WyuBitmapBackdrop?> { null }
+
 /**
  * Screen-space blur sigma (px) behind the static card glass. The bottom bar
  * reuses it so both surfaces blur by the same amount at every slider value.

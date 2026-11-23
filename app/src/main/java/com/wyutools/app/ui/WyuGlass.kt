@@ -208,6 +208,7 @@ fun Card(
     }
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
+    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
@@ -279,6 +280,16 @@ fun Card(
                     refractionThicknessPx = liquidRefractionPx,
                     reflectionThicknessPx = liquidReflectionPx,
                 )
+            softGlass && wyuSoftGlassSupported && !isLiquid && !samplePageContent && bakedBackdrop != null ->
+                shadowed.wyuUpstreamCardGlass(
+                    backdrop = bakedBackdrop,
+                    cornerRadius = cornerRadius,
+                    tuning = tuningForTheme,
+                    dark = dark,
+                    blurPercent = softGlassBlur,
+                    tint = softGlassCardTint,
+                    baked = true,
+                )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
                     backdrop = glass,
@@ -324,6 +335,7 @@ fun Card(
     val glassReady = LocalWyuGlassReady.current
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
+    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
@@ -377,6 +389,16 @@ fun Card(
                     dark = dark,
                     baseTint = liquidCardTint,
                     blurPercent = liquidBlur,
+                )
+            softGlass && wyuSoftGlassSupported && !isLiquid && bakedBackdrop != null ->
+                shadowed.wyuUpstreamCardGlass(
+                    backdrop = bakedBackdrop,
+                    cornerRadius = cornerRadius,
+                    tuning = tuningForTheme,
+                    dark = dark,
+                    blurPercent = softGlassBlur,
+                    tint = softGlassCardTint,
+                    baked = true,
                 )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(

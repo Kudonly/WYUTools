@@ -955,11 +955,27 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
+    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
     val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
     val blur = when {
         // 课程块很小，液态玻璃用收窄的边缘参数，避免 rim 吃掉整块高度。
+        // 烘焙底图可用时直接采样静态位图，与液态玻璃卡片的烘焙层一致。
+        isLiquid && softGlass && wyuSoftGlassSupported && underlay != null ->
+            wyuLiquidGlass(
+                backdrop = null,
+                underlay = underlay,
+                shape = shape,
+                cornerRadius = 11.dp,
+                tuning = liquidTuning,
+                dark = dark,
+                baseTint = Color.Transparent,
+                shapeEdgePx = 40f,
+                shapeEdgePow = 2.2f,
+                refractionThicknessPx = 56f,
+                reflectionThicknessPx = 800f,
+            )
         isLiquid && softGlass && wyuSoftGlassSupported && wallpaper != null ->
             wyuLiquidGlass(
                 backdrop = wallpaper,
@@ -973,6 +989,16 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
                 shapeEdgePow = 2.2f,
                 refractionThicknessPx = 56f,
                 reflectionThicknessPx = 800f,
+            )
+        softGlass && !isLiquid && wyuSoftGlassSupported && bakedBackdrop != null ->
+            wyuUpstreamCardGlass(
+                backdrop = bakedBackdrop,
+                cornerRadius = 11.dp,
+                tuning = tuning.resolvedFor(dark),
+                dark = dark,
+                blurPercent = softGlassBlur,
+                tint = Color.Transparent,
+                baked = true,
             )
         softGlass && !isLiquid && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
             wyuUpstreamCardGlass(

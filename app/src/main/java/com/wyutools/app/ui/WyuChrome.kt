@@ -446,6 +446,10 @@ fun WyuPageScaffold(
     var glassLayerReady by remember { mutableStateOf(false) }
     var pageLayerReady by remember { mutableStateOf(false) }
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
+    // One stable backdrop per scaffold: cards sample the baked wallpaper
+    // through it and never rebuild the glass node when the underlay is
+    // regenerated (wallpaper, dim or blur slider changes).
+    val bakedBackdrop = remember { WyuBitmapBackdrop(glassUnderlayState) }
     val bounds = pageBounds.value
     val glassUnderlay = if (
         softGlassEnabled && customWallpaper != null && bounds != null
@@ -630,6 +634,7 @@ fun WyuPageScaffold(
             LocalWyuGlassReady provides (glassLayerReady && pageLayerReady),
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
+            LocalWyuBakedBackdrop provides bakedBackdrop,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
