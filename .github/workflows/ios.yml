@@ -46,9 +46,13 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
+      # 编译日志动辄上万行，job 日志又常常取不下来；失败时把每条 error 打成注解，
+      # 用 check-runs/annotations 接口就能直接读到具体报错。
       - name: Build unsigned app
         working-directory: ios
         run: |
+          set -o pipefail
+          set +e
           xcodebuild \
             -project WUKit.xcodeproj \
             -scheme WUKit \
@@ -59,7 +63,15 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "xcodebuild 退出码 $status"
+            grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          fi
+          exit "$status"
 
       - name: Package IPA
         working-directory: ios
