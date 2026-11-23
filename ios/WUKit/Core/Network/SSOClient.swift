@@ -50,7 +50,7 @@ struct SsoError: LocalizedError {
 
 /// 服务端未登录时会把字段返回成 JSON null，字符串化后就是 "null"。
 func sanitizeWyuText(_ raw: String?) -> String? {
-    guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+    guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
         return nil
     }
     if text.caseInsensitiveCompare("null") == .orderedSame { return nil }
@@ -188,7 +188,7 @@ final class SSOClient {
         let response = try await execute(
             post(
                 "https://authserver.wyu.edu.cn/authserver/common/verifySliderCaptcha.htl",
-                form: ["sign": sign],
+                form: [("sign", sign)],
                 userAgent: Const.userAgent
             )
         )
@@ -797,7 +797,7 @@ enum SSOCrypto {
     static func encrypt(_ plain: String, salt: String) -> String {
         guard !salt.isEmpty else { return plain }
         let prefixed = randomString(64) + plain
-        let iv = randomString(16)
+        let ivBytes = Array(randomString(16).utf8)
         var keyBytes = Array(salt.utf8)
         if keyBytes.count < 16 {
             keyBytes.append(contentsOf: Array(repeating: 0, count: 16 - keyBytes.count))
@@ -816,8 +816,8 @@ enum SSOCrypto {
 
         let status = buffer.withUnsafeMutableBytes { outBytes -> CCCryptorStatus in
             guard let out = outBytes.baseAddress else { return CCCryptorStatus(kCCMemoryFailure) }
-            return iv.withUnsafeBytes { ivBytes -> CCCryptorStatus in
-                guard let ivPtr = ivBytes.baseAddress else { return CCCryptorStatus(kCCMemoryFailure) }
+            return ivBytes.withUnsafeBytes { ivBuffer -> CCCryptorStatus in
+                guard let ivPtr = ivBuffer.baseAddress else { return CCCryptorStatus(kCCMemoryFailure) }
                 return keyBytes.withUnsafeBytes { keyPtr -> CCCryptorStatus in
                     guard let key = keyPtr.baseAddress else { return CCCryptorStatus(kCCMemoryFailure) }
                     return input.withUnsafeBytes { inBytes -> CCCryptorStatus in

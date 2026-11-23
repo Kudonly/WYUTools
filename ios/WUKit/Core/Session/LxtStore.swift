@@ -203,7 +203,7 @@ final class LxtStore {
                 token: token,
                 machineId: machine.machineId,
                 communicationVal: machine.deviceMac
-            ), let status {
+            ) {
                 valveStatusText = LxtAPI.isRunning(status) ? "正在出水" : "阀门未开启（状态 \(status)）"
                 if !LxtAPI.isRunning(status) { valveUsing = nil }
             } else {

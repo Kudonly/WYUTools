@@ -45,7 +45,7 @@ final class GymStore {
             if user == nil { user = try await GymAPI.shared.validateSession() }
             venues = try await GymAPI.shared.fetchVenues(date: self.date)
         } catch {
-            error = error.localizedDescription
+            self.error = error.localizedDescription
             if (error as? SsoError)?.sessionExpired == true {
                 AuthStore.shared.noteSessionExpired()
             }
