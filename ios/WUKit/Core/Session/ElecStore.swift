@@ -24,6 +24,11 @@ final class ElecStore {
     var loading = false
     var error: String?
 
+    /// 本机读数快照与由它推出来的用电统计。
+    private(set) var snapshots: [ElecSnapshot] = []
+    private(set) var stats = ElecStats()
+    private(set) var lastQueryAt: Date?
+
     var history: ElecRechargePage?
     var historyLoading = false
     var historyError: String?
@@ -47,15 +52,31 @@ final class ElecStore {
         guard canQuery, !loading else { return }
         loading = true
         error = nil
+        let house = building.trimmingCharacters(in: .whitespaces)
+        let roomNo = room.trimmingCharacters(in: .whitespaces)
         do {
-            info = try await ElecAPI.query(
-                building: building.trimmingCharacters(in: .whitespaces),
-                room: room.trimmingCharacters(in: .whitespaces)
-            )
+            let result = try await ElecAPI.query(building: house, room: roomNo)
+            info = result
+            lastQueryAt = Date()
+            snapshots = ElecHistory.append(result, building: house, room: roomNo)
+            stats = ElecHistory.computeStats(snapshots, remainingKwh: result.remainingKwh)
         } catch {
             self.error = error.localizedDescription
         }
         loading = false
+    }
+
+    /// 冷启动先把本机读数读出来，曲线不用等一次查询。
+    func loadSnapshots() {
+        let house = building.trimmingCharacters(in: .whitespaces)
+        let roomNo = room.trimmingCharacters(in: .whitespaces)
+        guard !house.isEmpty, !roomNo.isEmpty else {
+            snapshots = []
+            stats = ElecStats()
+            return
+        }
+        snapshots = ElecHistory.load(building: house, room: roomNo)
+        stats = ElecHistory.computeStats(snapshots, remainingKwh: info?.remainingKwh ?? 0)
     }
 
     func loadHistory(period: ElecPeriod? = nil) async {

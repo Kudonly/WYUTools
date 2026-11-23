@@ -14,6 +14,8 @@ final class GymStore {
 
     var date: Date = Date()
     var venues: [GymVenue] = []
+    /// 体育项目筛选，空串表示全部。
+    var sportFilter = ""
     var records: [GymRecord] = []
 
     var loading = false

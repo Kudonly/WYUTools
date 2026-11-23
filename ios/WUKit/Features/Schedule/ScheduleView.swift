@@ -1,7 +1,10 @@
 import SwiftUI
 
 /// 课表。版式对齐 Android 的 ScheduleScreen：顶部日期胶囊、左侧冻结节次轴、
-/// 每周一页的横向 pager（一次只显示一周，只能左右滑动换周）、底部周滑块。
+/// 每周一页的横向 pager（一次只显示一周，只能左右滑动换周）、底部实色周滑块。
+///
+/// 所有横向位置都从同一套数算出来：`左右各 10 的 gutter + 42 的节次轴`，
+/// 剩下的宽度按天均分。日期胶囊用完全相同的算式，所以日期永远压在列上。
 struct ScheduleView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorScheme) private var scheme
@@ -20,13 +23,16 @@ struct ScheduleView: View {
     /// pager 停住的页（周编号），横滑结束就同步回 selectedWeek。
     @State private var visibleWeek: Int? = ScheduleStore.shared.currentWeek
 
-    // 尺寸照搬安卓：64 行高、42 节次轴、16 圆角、10 页边距。
-    private let rowHeight: CGFloat = 64
+    // 尺寸照搬安卓：10 页边距、42 节次轴、64 行高、40 胶囊、16 圆角。
+    private let gutter: CGFloat = 10
     private let axisWidth: CGFloat = 42
-    private let pageGutter: CGFloat = 10
-    private let cardCorner: CGFloat = 16
+    private let rowHeight: CGFloat = 64
     private let capsuleHeight: CGFloat = 40
+    private let capsuleTop: CGFloat = 8
+    private let capsuleGap: CGFloat = 10
     private let weekBarHeight: CGFloat = 30
+    private let weekBarGap: CGFloat = 3
+    private let weekBarSide: CGFloat = 40
     private let pillWidth: CGFloat = 86
 
     private var dayCount: Int { settings.showWeekend ? 7 : 5 }
@@ -35,33 +41,34 @@ struct ScheduleView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let pagerWidth = max(120, proxy.size.width - pageGutter - axisWidth)
-            let columnWidth = max(28, (pagerWidth - pageGutter) / CGFloat(dayCount))
+            // 列区宽度 = 总宽 - 左 gutter - 节次轴 - 右 gutter。
+            let columnsWidth = max(120, proxy.size.width - gutter * 2 - axisWidth)
+            let columnWidth = columnsWidth / CGFloat(dayCount)
 
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
-                    // 给胶囊让出位置：胶囊是浮层，网格从它下面开始。
-                    Color.clear.frame(height: capsuleHeight + 16)
+                    // 给悬浮的日期胶囊让位。
+                    Color.clear.frame(height: capsuleTop + capsuleHeight + capsuleGap)
 
                     HStack(alignment: .top, spacing: 0) {
                         axisCard
-                        weekPager(pagerWidth: pagerWidth, columnWidth: columnWidth)
+                        weekPager(columnsWidth: columnsWidth, columnWidth: columnWidth)
                     }
+                    .padding(.horizontal, gutter)
 
-                    Color.clear.frame(height: weekBarHeight + 24)
+                    Color.clear.frame(height: weekBarHeight + weekBarGap + 10)
                 }
-                .padding(.leading, pageGutter)
             }
             .scrollIndicators(.hidden)
             .overlay(alignment: .top) {
-                dateCapsule
-                    .padding(.horizontal, 6)
-                    .padding(.top, 4)
+                dateCapsule(columnsWidth: columnsWidth, columnWidth: columnWidth)
+                    .padding(.horizontal, gutter)
+                    .padding(.top, capsuleTop)
             }
             .overlay(alignment: .bottom) {
                 weekBar
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 3)
+                    .padding(.horizontal, weekBarSide)
+                    .padding(.bottom, weekBarGap)
             }
         }
         .background(WKWallpaperBackground())
@@ -88,6 +95,11 @@ struct ScheduleView: View {
         }
         .onChange(of: store.courses) { _, _ in
             CourseReminder.sync()
+            let week = min(max(selectedWeek, 1), store.maxWeek)
+            if week != selectedWeek {
+                selectedWeek = week
+                visibleWeek = week
+            }
         }
         .sheet(isPresented: $showAdd) {
             AddCourseView(store: store)
@@ -179,13 +191,15 @@ struct ScheduleView: View {
 
     // MARK: - 日期胶囊
 
-    private var dateCapsule: some View {
+    /// 胶囊内部的列宽与网格完全一致：周数占住节次轴那 42，后面每天占一列。
+    private func dateCapsule(columnsWidth: CGFloat, columnWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             Text("\(selectedWeek)周")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(selectedWeek == store.currentWeek ? settings.accentColor : Color.primary)
                 .lineLimit(1)
-                .frame(width: axisWidth)
+                .minimumScaleFactor(0.8)
+                .frame(width: axisWidth, height: capsuleHeight)
 
             ForEach(1...dayCount, id: \.self) { day in
                 let date = store.date(week: selectedWeek, day: day)
@@ -198,11 +212,10 @@ struct ScheduleView: View {
                         .opacity(isToday ? 1 : 0.82)
                 }
                 .foregroundStyle(isToday ? settings.accentColor : Color.secondary)
-                .frame(maxWidth: .infinity)
+                .frame(width: columnWidth, height: capsuleHeight)
             }
         }
-        .padding(.horizontal, 4)
-        .frame(height: capsuleHeight)
+        .frame(width: axisWidth + columnsWidth, height: capsuleHeight, alignment: .leading)
         .wkSurface(
             Capsule(),
             style: settings.cardStyle,
@@ -219,6 +232,7 @@ struct ScheduleView: View {
 
     // MARK: - 节次轴
 
+    /// 安卓的轴卡在 42 宽里再留 1dp 边，卡片本身 40 宽。
     private var axisCard: some View {
         VStack(spacing: 0) {
             ForEach(store.sections) { section in
@@ -235,23 +249,25 @@ struct ScheduleView: View {
                 .frame(height: rowHeight)
             }
         }
-        .frame(width: axisWidth)
+        .frame(width: axisWidth - 2, height: gridHeight)
         .wkSurface(
-            RoundedRectangle(cornerRadius: cardCorner, style: .continuous),
+            RoundedRectangle(cornerRadius: 16, style: .continuous),
             style: settings.cardStyle,
             strength: settings.glassStrength
         )
+        .frame(width: axisWidth, alignment: .center)
+        .zIndex(0)
     }
 
     // MARK: - 每周一页
 
-    /// 一周一页。pager 占满节次轴右侧，一次只露一页，横滑整页切换。
-    private func weekPager(pagerWidth: CGFloat, columnWidth: CGFloat) -> some View {
+    /// 一周一页。pager 正好等于列区宽度，一次只露一页，横滑整页切换。
+    private func weekPager(columnsWidth: CGFloat, columnWidth: CGFloat) -> some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(1...store.maxWeek, id: \.self) { week in
                     weekPage(week, columnWidth: columnWidth)
-                        .frame(width: pagerWidth, height: gridHeight, alignment: .leading)
+                        .frame(width: columnsWidth, height: gridHeight, alignment: .topLeading)
                         .id(week)
                 }
             }
@@ -260,15 +276,42 @@ struct ScheduleView: View {
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $visibleWeek)
         .scrollIndicators(.hidden)
-        .frame(width: pagerWidth, height: gridHeight)
+        .frame(width: columnsWidth, height: gridHeight)
+        .zIndex(1)
     }
 
     private func weekPage(_ week: Int, columnWidth: CGFloat) -> some View {
-        let totalWidth = columnWidth * CGFloat(dayCount)
-        return ZStack(alignment: .topLeading) {
-            gridLines(columnWidth: columnWidth, totalWidth: totalWidth)
+        ZStack(alignment: .topLeading) {
+            horizontalRules(columnWidth: columnWidth)
 
-            if let index = todayColumn(week: week) {
+            HStack(spacing: 0) {
+                ForEach(1...dayCount, id: \.self) { day in
+                    dayColumn(day, week: week, columnWidth: columnWidth, isLast: day == dayCount)
+                }
+            }
+        }
+        .frame(width: columnWidth * CGFloat(dayCount), height: gridHeight, alignment: .topLeading)
+        .clipped()
+    }
+
+    /// 横向分隔线跨整周画一条，避免每列各画一段留下接缝。
+    private func horizontalRules(columnWidth: CGFloat) -> some View {
+        Path { path in
+            guard sectionCount > 1 else { return }
+            for index in 1..<sectionCount {
+                let y = rowHeight * CGFloat(index) - 0.25
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: columnWidth * CGFloat(dayCount), y: y))
+            }
+        }
+        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+    }
+
+    private func dayColumn(_ day: Int, week: Int, columnWidth: CGFloat, isLast: Bool) -> some View {
+        let isToday = week == store.currentWeek && day == WKDate.todayWeekday
+
+        return ZStack(alignment: .topLeading) {
+            if isToday {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.primary.opacity(0.045))
                     .overlay {
@@ -276,60 +319,42 @@ struct ScheduleView: View {
                             .strokeBorder(settings.accentColor.opacity(0.45), lineWidth: 1)
                     }
                     .frame(width: columnWidth, height: gridHeight)
-                    .offset(x: CGFloat(index) * columnWidth)
             }
 
-            HStack(spacing: 0) {
-                ForEach(1...dayCount, id: \.self) { day in
-                    dayColumn(day, week: week, columnWidth: columnWidth)
+            if !isLast {
+                Path { path in
+                    let x = columnWidth - 0.25
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: gridHeight))
                 }
+                .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
             }
-        }
-        .frame(width: totalWidth, height: gridHeight, alignment: .topLeading)
-    }
 
-    /// 今天落在这一页时返回列号（0 起）。周末隐藏时不算。
-    private func todayColumn(week: Int) -> Int? {
-        guard week == store.currentWeek else { return nil }
-        let day = WKDate.todayWeekday
-        guard day <= dayCount else { return nil }
-        return day - 1
-    }
-
-    private func gridLines(columnWidth: CGFloat, totalWidth: CGFloat) -> some View {
-        Path { path in
-            if sectionCount > 1 {
-                for index in 1..<sectionCount {
-                    let y = rowHeight * CGFloat(index)
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: totalWidth, y: y))
-                }
-            }
-            if dayCount > 1 {
-                for index in 1..<dayCount {
-                    let x = columnWidth * CGFloat(index)
-                    path.move(to: CGPoint(x: x - 0.25, y: 0))
-                    path.addLine(to: CGPoint(x: x - 0.25, y: gridHeight))
-                }
-            }
-        }
-        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
-    }
-
-    private func dayColumn(_ day: Int, week: Int, columnWidth: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
             ForEach(store.courses(on: day, week: week)) { course in
-                Button {
-                    detail = SelectedCourse(course: course, week: week)
-                } label: {
-                    courseBlock(course)
-                }
-                .buttonStyle(.plain)
-                .frame(width: columnWidth - 4, height: CGFloat(course.span) * rowHeight - 4)
-                .offset(y: CGFloat(course.startSection - 1) * rowHeight + 2)
+                courseCell(course, columnWidth: columnWidth)
             }
         }
         .frame(width: columnWidth, height: gridHeight, alignment: .topLeading)
+    }
+
+    /// 课程块左右各留 2、上下各留 2 —— 和安卓的 padding(horizontal = 2.dp)
+    /// 加 offset(y = ... + 2.dp) 同一套留白，左边不会再贴住节次轴。
+    private func courseCell(_ course: Course, columnWidth: CGFloat) -> some View {
+        let start = min(max(course.startSection, 1), sectionCount)
+        let end = min(max(course.endSection, start), sectionCount)
+        let span = max(1, end - start + 1)
+
+        return Button {
+            detail = SelectedCourse(course: course, week: selectedWeek)
+        } label: {
+            courseBlock(course)
+        }
+        .buttonStyle(.plain)
+        .frame(
+            width: max(1, columnWidth - 4),
+            height: max(1, rowHeight * CGFloat(span) - 4)
+        )
+        .offset(x: 2, y: rowHeight * CGFloat(start - 1) + 2)
     }
 
     private func courseBlock(_ course: Course) -> some View {
@@ -363,6 +388,7 @@ struct ScheduleView: View {
         }
     }
 
+    /// 实色滑块：不再套玻璃，轨道、进度条和圆点都是不透明填充。
     private var weekSlider: some View {
         GeometryReader { proxy in
             let thumb: CGFloat = 22
@@ -372,7 +398,9 @@ struct ScheduleView: View {
 
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(settings.accentColor.opacity(0.85))
+                    .fill(Color.primary.opacity(0.12))
+                Capsule()
+                    .fill(settings.accentColor)
                     .frame(width: thumb / 2 + travel * progress)
                 Circle()
                     .fill(Color.white)
@@ -392,11 +420,6 @@ struct ScheduleView: View {
             )
         }
         .frame(height: weekBarHeight)
-        .wkSurface(
-            Capsule(),
-            style: settings.cardStyle,
-            strength: settings.glassStrength
-        )
         .accessibilityElement()
         .accessibilityLabel("周次滑块")
         .accessibilityValue("第 \(selectedWeek) 周")
@@ -418,15 +441,14 @@ struct ScheduleView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(isCurrent ? Color.secondary : Color.primary)
                 .frame(width: pillWidth, height: weekBarHeight)
+                .background(Color.primary.opacity(isCurrent ? 0.05 : 0.09), in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                }
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(isCurrent)
-        .wkSurface(
-            Capsule(),
-            style: settings.cardStyle,
-            strength: settings.glassStrength
-        )
         .accessibilityLabel(isCurrent ? "当前是本周" : "返回本周")
     }
 

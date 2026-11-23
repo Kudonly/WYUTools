@@ -138,7 +138,8 @@ enum ScheduleImporter {
             if start > 0, end >= start, end <= 30 { return Array(start...end) }
         }
         var numbers: [Int] = []
-        for match in text.matches(#"(\d+)\s*[-~至—－]\s*(\d+)"#) {
+        // 同上：取整段匹配，不能取 group 1（那只会拿到起始节次）。
+        for match in text.matches(#"(\d+)\s*[-~至—－]\s*(\d+)"#, group: 0) {
             let parts = match.components(separatedBy: CharacterSet.decimalDigits.inverted)
                 .compactMap(Int.init)
             if parts.count >= 2, (1...30).contains(parts[0]), parts[1] >= parts[0], parts[1] <= 30 {
@@ -146,7 +147,7 @@ enum ScheduleImporter {
             }
         }
         if numbers.isEmpty {
-            numbers = text.matches(#"\d+"#).compactMap(Int.init).filter { (1...30).contains($0) }
+            numbers = text.matches(#"\d+"#, group: 0).compactMap(Int.init).filter { (1...30).contains($0) }
         }
         let unique = Array(Set(numbers)).sorted()
         return unique.isEmpty ? nil : unique
@@ -159,6 +160,11 @@ enum ScheduleImporter {
         return high - low > 12 ? (low, low) : (low, high)
     }
 
+    /// 解析教务的 `zc`（上课周次）。
+    ///
+    /// 注意 `matches` 的默认 group 是 1（取捕获组），而 `\d+` 这类模式没有捕获组，
+    /// 取 group 1 会越界返回空数组 —— 之前所有课都退化成「每周都上」就是栽在这里。
+    /// 这里一律显式取整段匹配（group 0）。
     private static func parseWeeks(_ value: Any?) -> Set<Int>? {
         guard let value else { return nil }
         if let array = value as? [Any] {
@@ -166,22 +172,38 @@ enum ScheduleImporter {
             return weeks.isEmpty ? nil : Set(weeks)
         }
         guard let raw = JSON.text(value) else { return nil }
+        // 20 位以上的 0/1 串：第 n 位为 1 表示第 n 周上课。
         if raw.count >= 8, raw.allSatisfy({ $0 == "0" || $0 == "1" }) {
             var weeks = Set<Int>()
             for (index, char) in raw.enumerated() where char == "1" {
-                weeks.insert(index + 1)
+                if (1...30).contains(index + 1) { weeks.insert(index + 1) }
             }
             return weeks.isEmpty ? nil : weeks
         }
+        guard raw.rangeOfCharacter(from: .decimalDigits) != nil else { return nil }
+
+        // “1-16单周”：先按单双周过滤，和安卓的 parity 处理一致。
+        let parity: Int
+        if raw.contains("单") {
+            parity = 1
+        } else if raw.contains("双") {
+            parity = 0
+        } else {
+            parity = -1
+        }
+
         var weeks = Set<Int>()
-        for chunk in raw.matches(#"(\d+)\s*[-~至—－]\s*(\d+)"#) {
+        for chunk in raw.matches(#"(\d+)\s*[-~至—－]\s*(\d+)"#, group: 0) {
             let parts = chunk.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
-            if parts.count >= 2, (1...30).contains(parts[0]), parts[1] >= parts[0], parts[1] <= 30 {
-                weeks.formUnion(parts[0]...parts[1])
+            guard parts.count >= 2, (1...30).contains(parts[0]), parts[1] >= parts[0] else { continue }
+            for week in parts[0]...min(30, parts[1]) where parity < 0 || week % 2 == parity {
+                weeks.insert(week)
             }
         }
         if weeks.isEmpty {
-            weeks.formUnion(raw.matches(#"\d+"#).compactMap(Int.init).filter { (1...30).contains($0) })
+            for week in raw.matches(#"\d+"#, group: 0).compactMap(Int.init) where (1...30).contains(week) {
+                if parity < 0 || week % 2 == parity { weeks.insert(week) }
+            }
         }
         return weeks.isEmpty ? nil : weeks
     }
@@ -215,8 +237,11 @@ enum ScheduleImporter {
     private static func merge(_ courses: [ImportedCourse]) -> [ImportedCourse] {
         var result: [ImportedCourse] = []
         for course in courses {
+            // 教师也进合并键：同一门课不同老师、不同周次是两条课，
+            // 只按名字合并会把两段周次并成一条，看起来就像「这门课每周都上」。
             if let index = result.firstIndex(where: {
-                $0.name == course.name && $0.weekday == course.weekday
+                $0.name == course.name && $0.teacher == course.teacher
+                    && $0.weekday == course.weekday
                     && $0.startSection == course.startSection && $0.endSection == course.endSection
             }) {
                 if !result[index].room.contains(course.room), !course.room.isEmpty {

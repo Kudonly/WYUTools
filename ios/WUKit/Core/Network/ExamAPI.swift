@@ -110,7 +110,8 @@ enum ExamAPI {
 
     private static func timeRange(_ raw: String?) -> (String?, String?) {
         guard let raw, !raw.isEmpty else { return (nil, nil) }
-        let times = raw.matches(#"(\d{1,2})\s*[:：]\s*(\d{2})"#).map { chunk -> String in
+        // group 0：整段「08:15」，取捕获组只会拿到小时。
+        let times = raw.matches(#"(\d{1,2})\s*[:：]\s*(\d{2})"#, group: 0).map { chunk -> String in
             let numbers = chunk.components(separatedBy: CharacterSet.decimalDigits.inverted)
                 .filter { !$0.isEmpty }
             guard numbers.count >= 2, let hour = Int(numbers[0]) else { return chunk }

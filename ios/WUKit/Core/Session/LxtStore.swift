@@ -12,6 +12,7 @@ final class LxtStore {
         static let password = "wk.lxt.password"
         static let remember = "wk.lxt.remember"
         static let machine = "wk.lxt.machine"
+        static let machineId = "wk.lxt.machineId"
         static let siteId = "wk.lxt.siteId"
         static let siteFlag = "wk.lxt.siteFlag"
     }
@@ -47,6 +48,9 @@ final class LxtStore {
     var boundRoomName: String
     var boundSiteId: String
     var boundSiteFlag: Int
+    /// 冷水钱包用设备 id 当 walletKey，所以必须单独存下来 ——
+    /// `machine` 是查询出来的对象，冷启动后就没有了。
+    var boundMachineId: String
     var machine: LxtMachine?
 
     var valveOpening = false
@@ -64,6 +68,7 @@ final class LxtStore {
         boundRoomName = defaults.string(forKey: Key.machine) ?? ""
         boundSiteId = defaults.string(forKey: Key.siteId) ?? ""
         boundSiteFlag = defaults.integer(forKey: Key.siteFlag)
+        boundMachineId = defaults.string(forKey: Key.machineId) ?? ""
     }
 
     // MARK: - 登录
@@ -138,14 +143,28 @@ final class LxtStore {
             hotError = error.localizedDescription
             if (error as? LxtError)?.code == -44 { sessionExpired() }
         }
-        if !boundSiteId.isEmpty || !boundRoomName.isEmpty {
-            // 冷水钱包需要 walletKey，绑定时用站点 id 代替。
-            if let cold = try? await LxtAPI.queryCold(token: token, walletKey: boundSiteId) {
-                coldCent = Self.cents(cold["canUseMoney"])
+        // 冷水钱包的 walletKey 是**设备 id**（安卓传的是 bind.machineId），
+        // 不是站点 id；用站点 id 查会一直拿不到数据。
+        if !coldWalletKey.isEmpty {
+            do {
+                if let cold = try await LxtAPI.queryCold(token: token, walletKey: coldWalletKey) {
+                    coldCent = Self.cents(cold["canUseMoney"])
+                }
+            } catch {
+                coldError = error.localizedDescription
+                if (error as? LxtError)?.code == -44 { sessionExpired() }
             }
         }
         balanceBusy = false
     }
+
+    /// 冷水钱包查询键：优先用本次会话查到的设备，退回落盘的设备 id。
+    var coldWalletKey: String {
+        if let machine, !machine.machineId.isEmpty { return machine.machineId }
+        return boundMachineId
+    }
+
+    var hasColdWallet: Bool { !coldWalletKey.isEmpty }
 
     private func sessionExpired() {
         token = ""
@@ -182,10 +201,14 @@ final class LxtStore {
         boundRoomName = roomName.isEmpty ? machine.roomName : roomName
         boundSiteId = machine.siteId
         boundSiteFlag = machine.siteFlag
+        boundMachineId = machine.machineId
         defaults.set(boundRoomName, forKey: Key.machine)
         defaults.set(boundSiteId, forKey: Key.siteId)
         defaults.set(boundSiteFlag, forKey: Key.siteFlag)
+        defaults.set(boundMachineId, forKey: Key.machineId)
         message = "已绑定 \(boundRoomName)"
+        // 刚绑定完就把冷水余额补上，不用等下一次刷新。
+        Task { await refreshBalances() }
     }
 
     // MARK: - 开阀

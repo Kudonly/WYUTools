@@ -11,6 +11,7 @@ struct LxtView: View {
         WKPageScroll {
             if store.loggedIn {
                 balanceCard
+                coldCard
                 deviceCard
                 valveCard
                 logoutCard
@@ -152,18 +153,6 @@ struct LxtView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let cold = store.coldCent {
-                    WKDivider()
-                    HStack {
-                        Text("冷水余额")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(centsText(cold) + " 元")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    }
-                }
-
                 if let error = store.hotError {
                     Text(error).font(.system(size: 12)).foregroundStyle(.red)
                 }
@@ -174,6 +163,71 @@ struct LxtView: View {
     private func centsText(_ cents: Int?) -> String {
         guard let cents else { return "—" }
         return String(format: "%.2f", Double(cents) / 100)
+    }
+
+    // MARK: - 冷水余额
+
+    /// 冷水余额来自宿舍冷水表钱包，和热水余额是两个账户，所以单独一张卡。
+    private var coldCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    Text("冷水余额")
+                        .font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    Button {
+                        showBind = true
+                    } label: {
+                        Text(store.hasColdWallet ? "更换宿舍" : "绑定宿舍")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.primary.opacity(0.07), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if store.hasColdWallet {
+                    if !store.boundRoomName.isEmpty {
+                        Text(store.boundRoomName)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let error = store.coldError {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.red)
+                    } else if store.balanceBusy && store.coldCent == nil {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("正在读取冷水余额…")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(centsText(store.coldCent))
+                                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                                .foregroundStyle(store.coldCent == nil ? Color.secondary : Color.primary)
+                            Text("元")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Text("尚未绑定宿舍")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("绑定后可按房间冷水表查询余额")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("冷水余额来自宿舍冷水表钱包。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     // MARK: - 设备

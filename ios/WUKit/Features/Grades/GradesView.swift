@@ -8,6 +8,8 @@ struct GradesView: View {
     @State private var showLogin = false
     @State private var tab = 0
     @State private var selected: GradeEntry?
+    /// 当前查看的学期代码；空串表示还没选过，默认取最新学期。
+    @State private var selectedTerm = ""
 
     var body: some View {
         WKPageScroll {
@@ -59,6 +61,10 @@ struct GradesView: View {
             guard auth.loggedIn else { return }
             await store.loadGrades()
         }
+        .onChange(of: store.grades?.terms.first?.code) { _, code in
+            guard let code, selectedTerm.isEmpty else { return }
+            selectedTerm = code
+        }
         .onChange(of: tab) { _, value in
             guard auth.loggedIn else { return }
             if value == 1 { Task { await store.loadGpa() } }
@@ -79,15 +85,23 @@ struct GradesView: View {
         }
 
         if let data = store.grades {
-            GlassCard {
-                HStack(spacing: 16) {
-                    WKStatTile(title: "平均绩点", value: gpaText(data.overallGpa), tint: settings.accentColor)
-                    WKStatTile(title: "已修学分", value: creditText(data.totalCredit), unit: "分")
-                    WKStatTile(title: "课程", value: "\(data.all.count)", unit: "门", tint: .secondary)
-                }
-            }
+            if data.terms.isEmpty {
+                WKStatusCard(kind: .empty, message: "教务还没有返回成绩。")
+            } else {
+                // 最新学期在前，默认就停在这一学期。
+                let terms = Array(data.terms.reversed())
+                let term = terms.first { $0.code == selectedTerm } ?? terms[0]
 
-            ForEach(data.terms.reversed()) { term in
+                GlassCard {
+                    HStack(spacing: 16) {
+                        WKStatTile(title: "平均绩点", value: gpaText(data.overallGpa), tint: settings.accentColor)
+                        WKStatTile(title: "已修学分", value: creditText(data.totalCredit), unit: "分")
+                        WKStatTile(title: "课程", value: "\(data.all.count)", unit: "门", tint: .secondary)
+                    }
+                }
+
+                termPicker(terms)
+
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         WKSectionTitle(text: term.name)
@@ -115,12 +129,47 @@ struct GradesView: View {
                         }
                     }
                 }
-            }
 
-            if data.terms.isEmpty {
-                WKStatusCard(kind: .empty, message: "教务还没有返回成绩。")
+                Text("共 \(data.terms.count) 个学期 · \(data.all.count) 门课程")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 4)
             }
         }
+    }
+
+    /// 学期横排胶囊，和安卓的 TermChips 一致：一次选一个学期。
+    private func termPicker(_ terms: [GradeTerm]) -> some View {
+        // 数据刚到、selectedTerm 还没落值时，也把最新学期点亮。
+        let effective = selectedTerm.isEmpty ? terms.first?.code : selectedTerm
+        return ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(terms) { term in
+                    let active = term.code == (effective ?? "")
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) { selectedTerm = term.code }
+                        WKHaptics.selection()
+                    } label: {
+                        Text(term.name)
+                            .font(.system(size: 12, weight: active ? .semibold : .medium))
+                            .lineLimit(1)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                active
+                                    ? AnyShapeStyle(settings.accentColor)
+                                    : AnyShapeStyle(Color.primary.opacity(0.06)),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(active ? Color.white : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
     }
 
     private func gradeRow(_ entry: GradeEntry) -> some View {

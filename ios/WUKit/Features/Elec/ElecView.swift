@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 import CoreImage.CIFilterBuiltins
 
-/// 电费：查询剩余电量、充值记录、扫码充值。
+/// 电费：查剩余电量 → 统计（日均 / 可用天数 / 本月用电）→ 充值 → 记录。
+/// 版式对齐 Android 的 ElecScreen：查询卡、结果卡、充值入口、用电趋势、充值记录。
 struct ElecView: View {
     @Environment(AppSettings.self) private var settings
     @State private var store = ElecStore.shared
@@ -29,6 +30,7 @@ struct ElecView: View {
                 rechargeCard
             }
 
+            trendCard
             historyCard
 
             Text("电费接口为校园内网，需连接校园 Wi-Fi 或 VPN。")
@@ -53,6 +55,7 @@ struct ElecView: View {
             ElecPaySheet()
         }
         .task {
+            store.loadSnapshots()
             if store.info == nil && store.canQuery {
                 await store.refresh()
             }
@@ -64,7 +67,7 @@ struct ElecView: View {
     private var queryCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
-                Text("查询宿舍电量")
+                Text("输入宿舍信息")
                     .font(.system(size: 16, weight: .semibold))
 
                 HStack(spacing: 12) {
@@ -72,14 +75,20 @@ struct ElecView: View {
                         get: { store.building },
                         set: { store.building = $0 }
                     ), placeholder: "如 1")
-                    field("房间", text: Binding(
+                    field("房间号", text: Binding(
                         get: { store.room },
                         set: { store.room = $0 }
                     ), placeholder: "如 204")
                 }
 
+                if let error = store.error {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                }
+
                 WKProminentButton(
-                    title: store.loading ? "查询中…" : "查询",
+                    title: store.loading ? "查询中…" : "查询电费",
                     symbol: "bolt.fill",
                     enabled: store.canQuery && !store.loading
                 ) {
@@ -89,7 +98,11 @@ struct ElecView: View {
         }
     }
 
-    private func field(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+    private func field(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 12))
@@ -99,46 +112,77 @@ struct ElecView: View {
                 .font(.system(size: 16, weight: .medium))
                 .padding(.horizontal, 12)
                 .frame(height: 42)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 余额
 
     private func balanceCard(_ info: ElecInfo) -> some View {
-        GlassCard {
+        let low = info.remainingKwh < 20
+        let stats = store.stats
+        return GlassCard {
             VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(settings.accentColor.opacity(0.12))
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(settings.accentColor)
+                    }
+                    .frame(width: 40, height: 40)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("剩余电量")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                        if let name = info.buildingName, let room = info.roomName, !name.isEmpty {
+                            Text("\(name) · \(room)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    WKChip(text: low ? "电量偏低" : "电量正常", tint: low ? .orange : .green)
+                }
+
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(String(format: "%.2f", info.remainingKwh))
                         .font(.system(size: 40, weight: .bold, design: .rounded))
-                    Text("kWh")
-                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(low ? Color.orange : Color.primary)
+                    Text("度 (kWh)")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    WKChip(
-                        text: info.remainingKwh <= 10 ? "余额偏低" : "电量正常",
-                        tint: info.remainingKwh <= 10 ? .orange : .green
-                    )
                 }
 
-                Text("剩余电量")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                if low {
+                    Label("电量偏低，请及时充值", systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.orange)
+                }
 
                 WKDivider()
 
-                if let used = info.usedKwh {
-                    WKInfoRow(label: "已用电量", value: String(format: "%.2f kWh", used))
-                }
-                if let name = info.buildingName, let room = info.roomName {
-                    WKInfoRow(label: "房间", value: "\(name) · \(room)")
-                }
-                if let type = info.userTypeName {
-                    WKInfoRow(label: "用电类型", value: type)
-                }
-                if let updated = info.updatedAt {
-                    WKInfoRow(label: "更新时间", value: updated)
-                }
+                WKInfoRow(label: "抄表时间", value: info.updatedAt ?? "—")
+                WKInfoRow(
+                    label: "折合电费",
+                    value: String(format: "≈ ¥%.2f", info.remainingKwh * ElecHistory.pricePerKwh)
+                )
+                WKInfoRow(
+                    label: "近期日均",
+                    value: stats.dailyUsageKwh.map { formatKwh($0) + " 度" } ?? "—"
+                )
+                WKInfoRow(
+                    label: "预计可用",
+                    value: stats.daysLeft.map { formatDays($0) } ?? "—"
+                )
+
+                Text("折合电费按 0.63 元/度估算；日均与可用天数来自本机查询记录")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -146,23 +190,147 @@ struct ElecView: View {
     // MARK: - 充值
 
     private var rechargeCard: some View {
-        GlassCardButton(action: { showPay = true }) {
-            HStack(spacing: 14) {
-                Image(systemName: "qrcode")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(settings.accentColor)
-                    .frame(width: 30)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("扫码充值")
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "qrcode")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(settings.accentColor)
+                    Text("电费充值")
                         .font(.system(size: 16, weight: .semibold))
-                    Text("生成微信 / 支付宝二维码，用手机扫一下付款")
+                    Spacer()
+                    Text("微信 / 支付宝")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("输入充值金额，生成学校电费系统支付二维码，扫码完成支付。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                WKProminentButton(title: "充值电费", symbol: "qrcode", enabled: store.canQuery) {
+                    showPay = true
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    // MARK: - 用电趋势
+
+    private var trendCard: some View {
+        let recent = Array(store.snapshots.suffix(30))
+        let stats = store.stats
+        return GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(settings.accentColor)
+                    Text("用电趋势")
+                        .font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    Text("本机记录")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                if recent.count >= 2 {
+                    sparkline(recent.map(\.remainingKwh))
+                        .frame(height: 92)
+
+                    HStack(spacing: 8) {
+                        Text(recordTime(recent.first?.recordedAt))
+                        Spacer()
+                        Text("近 \(recent.count) 次查询")
+                        Spacer()
+                        Text(recordTime(recent.last?.recordedAt))
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
+                    WKDivider()
+                } else {
+                    Text("每次查询会自动记录读数，积累 2 条以上后显示趋势。")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(WKInk.tertiary)
+
+                HStack(spacing: 8) {
+                    statCell("近 7 日日均", stats.dailyUsageKwh.map { formatKwh($0) + " 度" } ?? "—")
+                    statCell("本月用电", stats.monthUsageKwh.map { formatKwh($0) + " 度" } ?? "—")
+                    statCell("本月电费", stats.monthCostYuan.map { String(format: "¥%.2f", $0) } ?? "—")
+                }
+
+                if let daysLeft = stats.daysLeft {
+                    Text("按近期用电速度，当前剩余电量约可用 \(formatDays(daysLeft))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func statCell(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// 剩余电量折线 + 淡淡的面积填充。
+    private func sparkline(_ values: [Double]) -> some View {
+        GeometryReader { proxy in
+            let minValue = values.min() ?? 0
+            let maxValue = values.max() ?? 1
+            let span = max(maxValue - minValue, 0.5)
+            let pad: CGFloat = 6
+            let height = max(1, proxy.size.height - pad * 2)
+            let stepX = proxy.size.width / CGFloat(max(1, values.count - 1))
+
+            ZStack {
+                Path { path in
+                    for (index, value) in values.enumerated() {
+                        let point = CGPoint(
+                            x: stepX * CGFloat(index),
+                            y: pad + (1 - CGFloat((value - minValue) / span)) * height
+                        )
+                        if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                    }
+                }
+                .stroke(
+                    settings.accentColor,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                )
+
+                Path { path in
+                    guard values.count > 1 else { return }
+                    let bottom = proxy.size.height
+                    path.move(to: CGPoint(x: 0, y: bottom))
+                    for (index, value) in values.enumerated() {
+                        let point = CGPoint(
+                            x: stepX * CGFloat(index),
+                            y: pad + (1 - CGFloat((value - minValue) / span)) * height
+                        )
+                        path.addLine(to: point)
+                    }
+                    path.addLine(to: CGPoint(x: stepX * CGFloat(values.count - 1), y: bottom))
+                    path.closeSubpath()
+                }
+                .fill(
+                    LinearGradient(
+                        colors: [settings.accentColor.opacity(0.20), settings.accentColor.opacity(0.02)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
             }
         }
     }
@@ -210,12 +378,21 @@ struct ElecView: View {
                                 unit: "笔",
                                 tint: .secondary
                             )
+                            WKStatTile(
+                                title: "笔均",
+                                value: String(format: "%.0f", page.averageAmountYuan),
+                                unit: "元",
+                                tint: .secondary
+                            )
                         }
+
+                        rechargeBars(page.records)
+
                         WKDivider()
                         ForEach(page.records.prefix(20)) { record in
                             HStack(alignment: .firstTextBaseline) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(record.paidAtRaw)
+                                    Text(recordTime(record.paidAt, fallback: record.paidAtRaw))
                                         .font(.system(size: 13))
                                     Text(record.method)
                                         .font(.system(size: 11))
@@ -242,11 +419,87 @@ struct ElecView: View {
             }
         }
     }
+
+    /// 最近 6 个月的充值柱状图，与安卓的 RechargeMonthlyBars 同一套比例。
+    @ViewBuilder
+    private func rechargeBars(_ records: [ElecRechargeRecord]) -> some View {
+        let bars = monthBars(records)
+        if !bars.isEmpty {
+            let peak = max(bars.map(\.amount).max() ?? 1, 1)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("按月充值")
+                    .font(.system(size: 14, weight: .semibold))
+                HStack(alignment: .bottom, spacing: 10) {
+                    ForEach(bars) { bar in
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.0f", bar.amount))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(settings.accentColor.opacity(0.75))
+                                .frame(width: 26, height: CGFloat(12 + 70 * (bar.amount / peak)))
+                            Text(bar.label)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 130, alignment: .bottom)
+            }
+        }
+    }
+
+    private struct MonthBar: Identifiable {
+        var label: String
+        var amount: Double
+        var id: String { label }
+    }
+
+    private func monthBars(_ records: [ElecRechargeRecord]) -> [MonthBar] {
+        var buckets: [Date: Double] = [:]
+        let calendar = Calendar.current
+        for record in records {
+            guard let date = record.paidAt else { continue }
+            let parts = calendar.dateComponents([.year, .month], from: date)
+            guard let month = calendar.date(from: parts) else { continue }
+            buckets[month, default: 0] += record.amountYuan
+        }
+        return buckets.keys.sorted().suffix(6).map { month in
+            MonthBar(
+                label: "\(calendar.component(.month, from: month))月",
+                amount: buckets[month] ?? 0
+            )
+        }
+    }
+
+    // MARK: - 格式化
+
+    private func formatKwh(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.2f", value)
+    }
+
+    private func formatDays(_ days: Double) -> String {
+        if days >= 100 { return "99+ 天" }
+        if days >= 10 { return "\(Int(days)) 天" }
+        return String(format: "%.1f 天", days)
+    }
+
+    private func recordTime(_ date: Date?, fallback: String = "") -> String {
+        guard let date else { return fallback.isEmpty ? "—" : fallback }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: Date())
+            ? "MM-dd HH:mm"
+            : "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
 }
 
-/// 扫码充值：金额 → 生成二维码 → 轮询支付状态。
+/// 充值：金额 → 生成二维码 → 轮询支付状态。
 struct ElecPaySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppSettings.self) private var settings
     @State private var store = ElecStore.shared
     @State private var amount = 30
     @State private var channel: ElecPayChannel = .wechat
@@ -271,7 +524,7 @@ struct ElecPaySheet: View {
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 44)
                                         .background(
-                                            amount == value ? Color.accentColor : Color.primary.opacity(0.06),
+                                            amount == value ? settings.accentColor : Color.primary.opacity(0.06),
                                             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                                         )
                                         .foregroundStyle(amount == value ? Color.white : Color.primary)
@@ -332,6 +585,9 @@ struct ElecPaySheet: View {
                                 Text(resultText)
                                     .font(.system(size: 13, weight: .medium))
                             }
+                            Text("二维码 \(order.expireSeconds / 60) 分钟内有效")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity)
                     }

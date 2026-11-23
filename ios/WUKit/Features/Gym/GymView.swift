@@ -19,6 +19,7 @@ struct GymView: View {
                 }
             } else {
                 dayPicker
+                sportFilterRow
 
                 if store.loading && store.venues.isEmpty {
                     WKStatusCard(kind: .loading, message: "正在查询 \(dayLabel(store.date)) 的场地…")
@@ -28,11 +29,16 @@ struct GymView: View {
                         Task { await store.loadVenues() }
                     }
                 }
-                if !store.loading && store.error == nil && store.venues.isEmpty {
-                    WKStatusCard(kind: .empty, message: "这天没有开放预约的场地，换一天看看。")
+                if !store.loading && store.error == nil && filteredVenues.isEmpty {
+                    WKStatusCard(
+                        kind: .empty,
+                        message: store.sportFilter.isEmpty
+                            ? "这天没有开放预约的场地，换一天看看。"
+                            : "没有符合筛选条件的场地。"
+                    )
                 }
 
-                ForEach(store.venues) { venue in
+                ForEach(filteredVenues) { venue in
                     venueCard(venue)
                 }
 
@@ -87,35 +93,96 @@ struct GymView: View {
 
     // MARK: - 日期
 
+    /// 只给未来 5 天，和安卓一样一格占一份宽度、整行铺满。
     private var dayPicker: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(0..<7, id: \.self) { offset in
-                    let date = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: Date())) ?? Date()
-                    let selected = calendar.isDate(date, inSameDayAs: store.date)
-                    Button {
-                        Task { await store.loadVenues(date: date) }
-                    } label: {
-                        VStack(spacing: 2) {
-                            Text(offset == 0 ? "今天" : weekday(date))
-                                .font(.system(size: 11, weight: .medium))
-                            Text(dayOnly(date))
-                                .font(.system(size: 16, weight: .semibold))
-                        }
-                        .frame(width: 54, height: 48)
-                        .background(
-                            selected ? AnyShapeStyle(settings.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        )
-                        .foregroundStyle(selected ? Color.white : Color.primary)
+        HStack(spacing: 8) {
+            ForEach(0..<5, id: \.self) { offset in
+                let date = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: Date())) ?? Date()
+                let selected = calendar.isDate(date, inSameDayAs: store.date)
+                Button {
+                    Task { await store.loadVenues(date: date) }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(offset == 0 ? "今天" : weekday(date))
+                            .font(.system(size: 11, weight: .medium))
+                        Text(dayOnly(date))
+                            .font(.system(size: 15, weight: .semibold))
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(
+                        selected ? AnyShapeStyle(settings.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+                    .foregroundStyle(selected ? Color.white : Color.primary)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 2)
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - 体育项目
+
+    /// 场地里出现过的项目名，去重后按字母序，选项多于一个才显示筛选行。
+    private var sportOptions: [String] {
+        let names = store.venues.compactMap { venue -> String? in
+            guard let name = venue.sportName?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
+                return nil
+            }
+            return name
+        }
+        return Array(Set(names)).sorted()
+    }
+
+    private var filteredVenues: [GymVenue] {
+        let project = store.sportFilter
+        guard !project.isEmpty else { return store.venues }
+        return store.venues.filter { $0.sportName == project }
+    }
+
+    @ViewBuilder
+    private var sportFilterRow: some View {
+        let options = sportOptions
+        if options.count > 1 {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    sportChip("全部", active: store.sportFilter.isEmpty) {
+                        store.sportFilter = ""
+                    }
+                    ForEach(options, id: \.self) { name in
+                        sportChip(name, active: store.sportFilter == name) {
+                            store.sportFilter = name
+                        }
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private func sportChip(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) { action() }
+            WKHaptics.selection()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: active ? .semibold : .medium))
+                .lineLimit(1)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(
+                    active
+                        ? AnyShapeStyle(settings.accentColor)
+                        : AnyShapeStyle(Color.primary.opacity(0.06)),
+                    in: Capsule()
+                )
+                .foregroundStyle(active ? Color.white : Color.secondary)
+        }
+        .buttonStyle(.plain)
     }
 
     private func weekday(_ date: Date) -> String {
