@@ -7,7 +7,11 @@ plugins {
 
 android {
     namespace = "com.wyutools.app"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
 
     defaultConfig {
         applicationId = "com.wyutools.app"
@@ -57,8 +61,9 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.4")
-    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.5-beta03")
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.5-beta03")
+    implementation("top.yukonga.miuix.kmp:miuix-glass-android:0.9.5-beta03")
     implementation("com.materialkolor:material-color-utilities:5.0.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(files("libs/core-3.5.3.jar"))

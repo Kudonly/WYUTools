@@ -134,7 +134,7 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -2227,9 +2227,8 @@ fun WyuNavigatorBar(
                                     refractionAmount = 40.dp.toPx(),
                                 )
                             },
-                            highlight = {
-                                pillSpecular?.copy(alpha = 0.75f)
-                                    ?: WyuGlassSpecular.copy(alpha = 0f)
+                            onDrawFront = {
+                                drawWyuSpecular(pillSpecular ?: WyuGlassSpecular, 0.75f)
                             },
                             layerBlock = {
                                 val width = size.width.coerceAtLeast(1f)
@@ -2441,8 +2440,8 @@ fun WyuNavigatorBar(
                                 chromaticAberration = 0.5f,
                             )
                         },
-                        highlight = {
-                            thumbSpecular.copy(alpha = damped.pressProgress)
+                        onDrawFront = {
+                            drawWyuSpecular(thumbSpecular, damped.pressProgress)
                         },
                         layerBlock = {
                             val velocity = damped.velocity / 10f

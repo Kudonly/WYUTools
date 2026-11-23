@@ -69,7 +69,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
-import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.glass.glass
+import top.yukonga.miuix.kmp.material.GlassShape
+import top.yukonga.miuix.kmp.material.GlassStyles
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -175,6 +177,9 @@ internal fun WyuDropdownMenu(
         glassBackdrop == null -> MiuixTheme.colorScheme.surfaceContainer
         else -> MiuixTheme.colorScheme.surfaceContainer.copy(alpha = DropdownGlassTint)
     }
+    // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
+    // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
+    val useUpstreamGlass = glassBackdrop != null && !md3
     val strokeColor = if (dark) {
         Color.White.copy(alpha = 0.08f)
     } else {
@@ -273,18 +278,29 @@ internal fun WyuDropdownMenu(
                             .shadow(elevation = 12.dp, shape = shape, clip = false)
                             .clip(shape)
                             .then(
-                                if (glassBackdrop != null && !md3) {
-                                    Modifier.textureBlur(
+                                if (useUpstreamGlass && glassBackdrop != null) {
+                                    Modifier.glass(
                                         backdrop = glassBackdrop,
-                                        shape = shape,
-                                        blurRadius = DropdownGlassBlur,
+                                        shape = GlassShape(
+                                            with(density) { frame.cornerRadius.toDp() },
+                                        ),
+                                        style = GlassStyles.CommonSmallRegular,
+                                        tint = panelColor,
+                                        shading = true,
                                     )
                                 } else {
                                     Modifier
                                 },
                             )
-                            .background(panelColor)
-                            .border(width = 0.5.dp, color = strokeColor, shape = shape)
+                            .then(
+                                if (useUpstreamGlass) {
+                                    Modifier
+                                } else {
+                                    Modifier
+                                        .background(panelColor)
+                                        .border(width = 0.5.dp, color = strokeColor, shape = shape)
+                                },
+                            )
                             // 吃掉落在面板空白处的点击，免得误触到背景的关闭区。
                             .clickable(interactionSource = panelInteraction, indication = null) {},
                     ) {

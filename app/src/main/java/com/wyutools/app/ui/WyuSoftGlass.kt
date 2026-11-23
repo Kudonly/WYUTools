@@ -415,7 +415,7 @@ private class WyuSoftGlassEffects(
         if (!(w > 0f) || !(h > 0f) || !(density > 0f)) {
             scope.padding = 0f
             scope.renderEffect = null
-            scope.downscaleFactor = 1
+            scope.downscaleFactor = 1f
             scope.noiseCoefficient = 0f
             return
         }
@@ -430,7 +430,7 @@ private class WyuSoftGlassEffects(
             else -> 16
         }
         scope.padding = pad
-        scope.downscaleFactor = factor
+        scope.downscaleFactor = factor.toFloat()
         scope.noiseCoefficient = 0f
         val densityScale = (density / ReferenceDensity).coerceIn(0.5f, 1f)
         val cornerPx = if (glassShape == WyuSoftGlassShape.Circle) {

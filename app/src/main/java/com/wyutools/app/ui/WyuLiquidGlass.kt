@@ -9,11 +9,16 @@ package com.wyutools.app.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
@@ -32,11 +37,7 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.colorControls
-import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
-import top.yukonga.miuix.kmp.blur.highlight.LightPosition
-import top.yukonga.miuix.kmp.blur.highlight.LightSource
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.runtimeShaderEffect
 import kotlin.math.abs
 import kotlin.time.TimeSource
@@ -65,7 +66,7 @@ internal fun BackdropEffectScope.lens(
         }
     val key = if (dispersionEnabled) "WyuLiquidGlassLensDispersion" else "WyuLiquidGlassLens"
 
-    val sf = downscaleFactor.coerceAtLeast(1).toFloat()
+    val sf = downscaleFactor.coerceAtLeast(1f)
     val scaledSizeW = size.width / sf
     val scaledSizeH = size.height / sf
     val scaledPadding = padding / sf
@@ -115,7 +116,7 @@ internal class WyuCombinedBackdrop(
         density: Density,
         coordinates: LayoutCoordinates?,
         layerBlock: (GraphicsLayerScope.() -> Unit)?,
-        downscaleFactor: Int,
+        downscaleFactor: Float,
     ) {
         with(first) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
         with(second) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
@@ -237,31 +238,32 @@ internal class WyuDampedDragAnimation(
 /**
  * The rim highlight, fixed in place.
  *
- * It used to be re-aimed from the device's gravity vector, so the light slid
- * around the edge as the phone tilted. Real glass in a phone does not do that —
- * the highlight belongs to the surface, not to how the surface is held — and on
- * a moving bar the constant re-aim read as the rim swimming. The two lights keep
- * their fixed angles: one from the upper left, a weaker one from the bottom.
+ * Miuix 0.9.5 dropped `blur.highlight`, so the bloom stroke is replaced by a
+ * simple fixed rim: the light belongs to the surface, not to how the phone is
+ * held. The glass module's EdgeStroke takes over once a surface migrates to
+ * `Modifier.glass`.
  */
-internal val WyuGlassSpecular: Highlight = Highlight(
-    width = 1.dp,
-    alpha = 1f,
-    style = BloomStroke(
-        color = Color.White.copy(alpha = 0.12f),
-        innerBlurRadius = 2.0.dp,
-        primaryLight = LightSource(
-            position = LightPosition(0.5f, -0.3f, -0.05f),
-            color = Color.White,
-            intensity = 1f,
-        ),
-        secondaryLight = LightSource(
-            position = LightPosition(0.5f, 0.8f, -0.5f),
-            color = Color.White,
-            intensity = 0.4f,
-        ),
-        dualPeak = true,
-    ),
+@Immutable
+internal data class WyuSpecular(
+    val color: Color,
+    val width: Dp = 1.dp,
 )
+
+internal val WyuGlassSpecular: WyuSpecular = WyuSpecular(
+    color = Color.White.copy(alpha = 0.12f),
+)
+
+internal fun DrawScope.drawWyuSpecular(
+    spec: WyuSpecular,
+    alpha: Float = 1f,
+) {
+    if (alpha <= 0f) return
+    drawRoundRect(
+        color = spec.color.copy(alpha = spec.color.alpha * alpha),
+        cornerRadius = CornerRadius(size.height / 2f),
+        style = Stroke(width = spec.width.toPx()),
+    )
+}
 
 private const val ROUNDED_RECT_SDF = """
 float radiusAt(float2 coord, float4 radii) {

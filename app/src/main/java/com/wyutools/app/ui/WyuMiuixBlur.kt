@@ -3,11 +3,9 @@ package com.wyutools.app.ui
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 
 /**
- * Miuix 0.9.4 derives the backdrop downscale exponent from the blur radius and offers no
- * public override. This helper drives the same internal level selection the library uses
- * for its own LOD passes, so the per-level variance compensation stays intact.
+ * Miuix 0.9.5 exposes the backdrop downscale factor directly. [exp] is the
+ * base-2 exponent the call sites were written against (1 -> 2x).
  */
-@Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
 internal fun BackdropEffectScope.forceDownscaleExp(exp: Int) {
-    (this as top.yukonga.miuix.kmp.blur.BackdropEffectScopeImpl).forcedDownscaleExp = exp
+    downscaleFactor = (1 shl exp.coerceIn(0, 4)).toFloat()
 }
