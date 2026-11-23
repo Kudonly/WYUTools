@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Bolt
@@ -77,6 +80,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wyutools.app.elec.ELEC_PRICE_PER_KWH
 import com.wyutools.app.elec.ElecInfo
 import com.wyutools.app.elec.ElecPayChannel
@@ -97,6 +101,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.DropdownImpl
+import top.yukonga.miuix.kmp.basic.ListPopupColumn
+import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
@@ -170,6 +178,10 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
     // only the data refresh waits for the morph, since its recomposition
     // mid-flight is what made the animation stutter.
     val morphSettled = WyuMorphPageState.morphSettled
+    // 有缓存就不再占一块「输入宿舍信息」：楼栋与房间已经落盘，日常只需要看余额，
+    // 想改的时候从顶栏的编辑按钮进弹窗。
+    val hasDorm = ui.building.isNotBlank() && ui.room.isNotBlank()
+    var dormEditorOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(morphSettled) {
         if (morphSettled) vm.onEntered()
@@ -190,6 +202,13 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                     )
                 },
                 actions = {
+                    if (hasDorm) {
+                        WyuTopBarAction(
+                            icon = Icons.Filled.Edit,
+                            label = "修改宿舍",
+                            onClick = { dormEditorOpen = true },
+                        )
+                    }
                     if (ui.result != null) {
                         WyuTopBarAction(
                             icon = Icons.Filled.Refresh,
@@ -224,8 +243,10 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(16.dp))
-            QueryCard(ui = ui, vm = vm)
-            Spacer(Modifier.height(16.dp))
+            if (!hasDorm) {
+                QueryCard(ui = ui, vm = vm)
+                Spacer(Modifier.height(16.dp))
+            }
             // The cards are laid out before any data exists, so the page is
             // whole from the first frame; the query result simply fills in.
             ResultCard(
@@ -268,6 +289,19 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
         }
     }
+
+    DormEditorDialog(
+        show = dormEditorOpen,
+        building = ui.building,
+        room = ui.room,
+        onDismiss = { dormEditorOpen = false },
+        onConfirm = { building, room ->
+            dormEditorOpen = false
+            vm.setBuilding(building)
+            vm.setRoom(room)
+            vm.query()
+        },
+    )
 
     if (ui.rechargeOpen) {
         RechargeDialog(
@@ -443,52 +477,61 @@ private fun ResultCard(
     refreshing: Boolean = false,
 ) {
     val low = info != null && info.remainingKwh < 20.0
-    val container = if (low) {
-        MiuixTheme.colorScheme.errorContainer
-    } else {
-        MiuixTheme.colorScheme.primaryContainer
-    }
-    val onContainer = if (low) {
-        MiuixTheme.colorScheme.onErrorContainer
-    } else {
-        MiuixTheme.colorScheme.onPrimaryContainer
-    }
+    val secondary = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    // 低电量不再把整张卡染成错误色：换成一个胶囊标签就够了，
+    // 余额本身仍要读得清楚。
+    val statusColor = if (low) MiuixTheme.colorScheme.error else ElecGoodGreen
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(20.dp),
-        colors = CardDefaults.defaultColors(
-            color = container,
-            contentColor = onContainer,
-        ),
+        insideMargin = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(46.dp)
                     .clip(CircleShape)
-                    .background(onContainer.copy(alpha = 0.12f)),
+                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Bolt,
                     contentDescription = null,
+                    tint = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.size(26.dp),
                 )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "剩余电量",
                     style = MiuixTheme.textStyles.footnote1,
+                    color = secondary,
                 )
                 if (dorm.isNotBlank()) {
                     BlurredValue(value = dorm) { text ->
                         Text(
                             text = text,
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = onContainer.copy(alpha = 0.75f),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = secondary,
                         )
                     }
+                }
+            }
+            if (info != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(statusColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = if (low) "电量偏低" else "电量正常",
+                        style = MiuixTheme.textStyles.footnote2,
+                        fontWeight = FontWeight.Medium,
+                        color = statusColor,
+                    )
                 }
             }
         }
@@ -497,7 +540,7 @@ private fun ResultCard(
             Row {
                 Text(
                     text = kwh,
-                    style = MiuixTheme.textStyles.headline2,
+                    style = MiuixTheme.textStyles.headline1.copy(fontSize = 44.sp),
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.alignByBaseline(),
                 )
@@ -505,32 +548,19 @@ private fun ResultCard(
                 Text(
                     text = "度 (kWh)",
                     style = MiuixTheme.textStyles.body2,
+                    color = secondary,
                     modifier = Modifier.alignByBaseline(),
                 )
             }
         }
-        if (low) {
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Filled.Warning,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "电量偏低，请及时充值",
-                    style = MiuixTheme.textStyles.footnote1,
-                )
-            }
-        }
         if (stale && staleAt > 0L) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Filled.History,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
+                    tint = secondary,
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
@@ -540,13 +570,13 @@ private fun ResultCard(
                         append(if (refreshing) "，正在刷新" else "，本次未刷新")
                     },
                     style = MiuixTheme.textStyles.footnote1,
-                    color = onContainer.copy(alpha = 0.75f),
+                    color = secondary,
                 )
             }
         }
         Spacer(Modifier.height(16.dp))
-        HorizontalDivider(color = onContainer.copy(alpha = 0.15f))
-        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(10.dp))
         val daily = stats.dailyUsageKwh
         val daysLeft = stats.daysLeft
         InfoRow("抄表时间", info?.updatedAt ?: "—", animateValue = true)
@@ -557,12 +587,150 @@ private fun ResultCard(
         )
         InfoRow("近期日均", daily?.let { "${formatKwh(it)} 度" } ?: "—", animateValue = true)
         InfoRow("预计可用", daysLeft?.let { formatDays(it) } ?: "—", animateValue = true)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             text = "折合电费按 0.63 元/度估算；日均与可用天数来自本机查询记录",
             style = MiuixTheme.textStyles.footnote2,
-            color = onContainer.copy(alpha = 0.7f),
+            color = secondary.copy(alpha = 0.8f),
         )
+    }
+}
+
+/** 「电量正常」用的绿：浅底深字，深色主题下也够对比。 */
+private val ElecGoodGreen = Color(0xFF2FA84F)
+
+/** 宿舍信息弹窗：只在这里改楼栋与房间，保存后立即查询。 */
+@Composable
+private fun DormEditorDialog(
+    show: Boolean,
+    building: String,
+    room: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit,
+) {
+    var draftBuilding by remember(show) { mutableStateOf(building) }
+    var draftRoom by remember(show) { mutableStateOf(room) }
+    val canSave = draftBuilding.isNotBlank() && draftRoom.isNotBlank()
+    WyuOverlayDialog(
+        show = show,
+        title = "宿舍信息",
+        onDismissRequest = onDismiss,
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                text = "电费按「楼栋 + 房间号」查询，填数字即可。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassTextField(
+                    value = draftBuilding,
+                    onValueChange = { draftBuilding = it.filter { c -> c.isDigit() } },
+                    label = "楼栋",
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                GlassTextField(
+                    value = draftRoom,
+                    onValueChange = { draftRoom = it.filter { c -> c.isDigit() } },
+                    label = "房间号",
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (canSave) onConfirm(draftBuilding, draftRoom)
+                        },
+                    ),
+                    modifier = Modifier.weight(1.4f),
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    minHeight = 48.dp,
+                    colors = ButtonDefaults.buttonColors(),
+                ) {
+                    Text("取消")
+                }
+                Button(
+                    onClick = { onConfirm(draftBuilding, draftRoom) },
+                    enabled = canSave,
+                    modifier = Modifier.weight(1f),
+                    minHeight = 48.dp,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) {
+                    Text("保存并查询")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 范围切换。HyperOS 的做法是把候选收进一个贴着按钮弹出的列表里，
+ * 一屏只有一个「当前范围」，而不是横排铺开四个胶囊。
+ */
+@Composable
+private fun RechargePeriodMenu(
+    current: ElecPeriod,
+    enabled: Boolean,
+    onSelect: (ElecPeriod) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val periods = ElecPeriod.entries
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                .clickable(enabled = enabled) { expanded = true }
+                .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = current.label,
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (enabled) {
+                    MiuixTheme.colorScheme.onSurface
+                } else {
+                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                },
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        OverlayListPopup(
+            show = expanded,
+            alignment = PopupPositionProvider.Align.End,
+            onDismissRequest = { expanded = false },
+        ) {
+            ListPopupColumn {
+                periods.forEachIndexed { index, period ->
+                    DropdownImpl(
+                        text = period.label,
+                        optionSize = periods.size,
+                        isSelected = current == period,
+                        index = index,
+                        onSelectedIndexChange = {
+                            expanded = false
+                            onSelect(period)
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -589,10 +757,10 @@ private fun RechargeCard(
                 style = MiuixTheme.textStyles.title3,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "学校系统",
-                style = MiuixTheme.textStyles.footnote2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            RechargePeriodMenu(
+                current = ui.period,
+                enabled = ui.result != null && !ui.rechargeLoading,
+                onSelect = onSelectPeriod,
             )
         }
         Spacer(Modifier.height(4.dp))
@@ -602,18 +770,6 @@ private fun RechargeCard(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ElecPeriod.values().forEach { period ->
-                ActionChip(
-                    text = period.label,
-                    onClick = { onSelectPeriod(period) },
-                    enabled = ui.result != null &&
-                        (!ui.rechargeLoading || ui.period == period),
-                    primary = ui.period == period,
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
         val error = ui.rechargeError
         when {
             ui.rechargeLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1680,14 +1836,14 @@ private fun InfoRow(
                 Text(
                     text = text,
                     style = MiuixTheme.textStyles.body2,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         } else {
             Text(
                 text = value,
                 style = MiuixTheme.textStyles.body2,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.Bold,
             )
         }
     }

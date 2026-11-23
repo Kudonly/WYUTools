@@ -13,8 +13,8 @@ android {
         applicationId = "com.wyutools.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "3.1.1"
+        versionCode = 16
+        versionName = "3.2.0"
     }
 
     buildTypes {

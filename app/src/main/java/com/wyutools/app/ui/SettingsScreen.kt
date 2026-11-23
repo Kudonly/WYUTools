@@ -92,6 +92,7 @@ fun SettingsScreen(
     val primary = MiuixTheme.colorScheme.primary
     val selected = LocalWyuWallpaper.current
     val themeMode by WyuAppearance.themeMode.collectAsState()
+    val textSize by WyuAppearance.textSize.collectAsState()
     val hasCustom by WyuAppearance.hasCustomWallpaper.collectAsState()
     val customWallpaper by WyuAppearance.customWallpaper.collectAsState()
     val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
@@ -262,6 +263,49 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "字号",
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = "默认跟随系统设置；单独选择后只影响本应用",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .selectableGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        WyuTextSize.entries.forEach { size ->
+                            TextSizeChip(
+                                label = size.label,
+                                selected = textSize == size,
+                                onClick = { WyuAppearance.setTextSize(context, size) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    // 预览行直接用正文样式，选档位时能立刻看出差别。
+                    Text(
+                        text = "预览：今天有 3 节课，热水余额 16.04 元",
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -971,6 +1015,55 @@ private fun ThemeModeChip(
                 role = Role.RadioButton,
                 onClick = hapticClick(enabled = !selected, action = onClick),
             ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MiuixTheme.textStyles.footnote1,
+            color = contentColor,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 字号档位的胶囊：宽度由文字决定，横排滚动，不挤成等分。 */
+@Composable
+private fun TextSizeChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val background by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.primary
+        } else {
+            MiuixTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(180),
+        label = "textSizeChipBackground",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.onPrimary
+        } else {
+            MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+        animationSpec = tween(180),
+        label = "textSizeChipContent",
+    )
+    Box(
+        modifier = Modifier
+            // 用 heightIn 而不是 height：字号调到特大时胶囊要跟着长高，不能把字裁掉。
+            .heightIn(min = 38.dp)
+            .clip(CircleShape)
+            .background(background)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = hapticClick(enabled = !selected, action = onClick),
+            )
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

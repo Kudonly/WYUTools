@@ -97,6 +97,20 @@ enum class WyuThemeMode(val label: String) {
     System("跟随系统"),
 }
 
+/**
+ * 应用内字号。
+ *
+ * 默认跟随系统；其余档位给的是**绝对**倍数而不是相对系统的增量——用户既然
+ * 主动选了「标准」，就应当回到 1.0，而不是在系统已经放大过的字号上再乘一次。
+ */
+enum class WyuTextSize(val label: String, val scale: Float) {
+    FollowSystem("跟随系统", 0f),
+    Small("小", 0.9f),
+    Standard("标准", 1f),
+    Large("大", 1.15f),
+    ExtraLarge("特大", 1.3f),
+}
+
 fun wyuHomeBackgroundStops(
     dark: Boolean,
     surface: Color,
@@ -145,6 +159,7 @@ object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
     private const val KeyThemeMode = "theme_mode"
+    private const val KeyTextSize = "text_size"
     // Retired single-value key; still read as the fallback for the light value.
     private const val KeyCustomBrightness = "custom_brightness"
     private const val KeyCustomBrightnessLight = "custom_brightness_light"
@@ -180,6 +195,9 @@ object WyuAppearance {
 
     private val _themeMode = MutableStateFlow(WyuThemeMode.System)
     val themeMode: StateFlow<WyuThemeMode> = _themeMode.asStateFlow()
+
+    private val _textSize = MutableStateFlow(WyuTextSize.FollowSystem)
+    val textSize: StateFlow<WyuTextSize> = _textSize.asStateFlow()
 
     private val _customWallpaper = MutableStateFlow<ImageBitmap?>(null)
     val customWallpaper: StateFlow<ImageBitmap?> = _customWallpaper.asStateFlow()
@@ -337,6 +355,16 @@ object WyuAppearance {
         _themeMode.value = WyuThemeMode.entries
             .firstOrNull { it.name == loaded.getString(KeyThemeMode, null) }
             ?: WyuThemeMode.System
+        _textSize.value = WyuTextSize.entries
+            .firstOrNull { it.name == loaded.getString(KeyTextSize, null) }
+            ?: WyuTextSize.FollowSystem
+    }
+
+    fun setTextSize(context: Context, size: WyuTextSize) {
+        ensureLoaded(context)
+        if (_textSize.value == size) return
+        _textSize.value = size
+        prefs?.edit()?.putString(KeyTextSize, size.name)?.apply()
     }
 
     fun setThemeMode(context: Context, mode: WyuThemeMode) {

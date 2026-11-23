@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.wyutools.app.ui.LocalWyuCustomWallpaper
 import com.wyutools.app.ui.LocalWyuDarkTheme
 import com.wyutools.app.ui.LocalWyuMd3Style
@@ -20,6 +22,7 @@ import com.wyutools.app.ui.LocalWyuWallpaper
 import com.wyutools.app.ui.WyuAppearance
 import com.wyutools.app.ui.WyuCardTheme
 import com.wyutools.app.ui.WyuThemeMode
+import com.wyutools.app.ui.WyuTextSize
 import com.wyutools.app.ui.WyuWallpaper
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -34,6 +37,7 @@ fun WyuTheme(
     val context = LocalContext.current
     val appContext = context.applicationContext
     remember(context) { WyuAppearance.ensureLoaded(appContext) }
+    val textSize by WyuAppearance.textSize.collectAsState()
     val themeMode by WyuAppearance.themeMode.collectAsState()
     val darkTheme = when (themeMode) {
         WyuThemeMode.System -> isSystemInDarkTheme()
@@ -47,6 +51,14 @@ fun WyuTheme(
     val cardTheme by WyuAppearance.cardTheme.collectAsState()
     val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
     val md3 = cardTheme == WyuCardTheme.Monet
+    // 字号只改字体缩放，不动 dp：布局尺寸保持不变，只有文字跟着放大／缩小。
+    // 编译期的系统值仍然是基准，跟随系统时原样透传。
+    val systemDensity = LocalDensity.current
+    val density = if (textSize.scale <= 0f) {
+        systemDensity
+    } else {
+        Density(density = systemDensity.density, fontScale = textSize.scale)
+    }
     LaunchedEffect(hasCustomWallpaper) {
         if (hasCustomWallpaper) WyuAppearance.loadCustomWallpaper(appContext)
     }
@@ -81,6 +93,7 @@ fun WyuTheme(
         }
     }
     CompositionLocalProvider(
+        LocalDensity provides density,
         LocalWyuDarkTheme provides darkTheme,
         LocalWyuWallpaper provides wallpaper,
         LocalWyuCustomWallpaper provides customWallpaper,

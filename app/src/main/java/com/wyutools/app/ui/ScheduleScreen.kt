@@ -169,6 +169,23 @@ private val DarkCourseColors = listOf(
     Color(0xFF4B2333) to Color(0xFFFFD6E2),
 )
 
+/**
+ * 课程色条。底色（LightCourseColors/DarkCourseColors）是给整块课程卡用的淡色，
+ * 单独抽一条 4dp 的竖线时太不明显，所以另配一组饱和色：索引与 courseColors
+ * 用同一套哈希，同一门课在课表和今日页里颜色保持一致。
+ */
+private val CourseStripeColors = listOf(
+    Color(0xFF4F78E6),
+    Color(0xFF34A853),
+    Color(0xFFF5A623),
+    Color(0xFF9B59D0),
+    Color(0xFF17A2A2),
+    Color(0xFFE2566F),
+)
+
+internal fun courseStripe(course: ScheduleCourse): Color =
+    CourseStripeColors[abs(course.name.hashCode()) % CourseStripeColors.size]
+
 internal data class SelectedCourse(
     val course: ScheduleCourse,
     val date: LocalDate,

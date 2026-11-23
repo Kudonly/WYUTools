@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -40,13 +41,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -187,21 +191,20 @@ private fun TodayContent(
                 Spacer(Modifier.height(padding.calculateTopPadding() + 4.dp))
             }
             item(key = "today-date") {
-                TodayDateHeader(today = today, week = currentWeek)
-            }
-            item(key = "today-todos-header") {
-                TodaySectionHeader(
-                    title = "待办",
-                    trailing = if (todos.isEmpty()) {
-                        null
-                    } else {
-                        "完成 ${todos.count { it.done }}/${todos.size}"
-                    },
+                TodayDateHeader(
+                    today = today,
+                    week = currentWeek,
+                    courseCount = if (data != null) courses.size else null,
                 )
             }
             item(key = "today-todos") {
                 TodayTodoCard(
                     todos = todos,
+                    summary = if (todos.isEmpty()) {
+                        null
+                    } else {
+                        "完成 ${todos.count { it.done }}/${todos.size}"
+                    },
                     draft = draft,
                     onDraftChange = { draft = it },
                     onAdd = {
@@ -218,6 +221,7 @@ private fun TodayContent(
                 TodaySectionHeader(
                     title = "今天的课",
                     trailing = if (courses.isEmpty()) null else "${courses.size} 节",
+                    compact = true,
                 )
             }
             when {
@@ -285,36 +289,81 @@ private fun TodayContent(
 }
 
 @Composable
-private fun TodayDateHeader(today: java.time.LocalDate, week: Int?) {
+private fun TodayDateHeader(
+    today: java.time.LocalDate,
+    week: Int?,
+    courseCount: Int?,
+) {
     Column(Modifier.fillMaxWidth()) {
+        // 日期和星期同号同粗：这是页面的第一落点，比导航栏标题还重要。
         Text(
-            text = "${today.monthValue}月${today.dayOfMonth}日",
-            style = MiuixTheme.textStyles.headline1,
-            fontWeight = FontWeight.SemiBold,
+            text = "${today.monthValue} 月 ${today.dayOfMonth} 日 ${weekdayName(today)}",
+            style = MiuixTheme.textStyles.headline1.copy(
+                fontSize = 30.sp,
+                lineHeight = 36.sp,
+            ),
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
-            // 未登录时没有课表，也就说不出第几周：只留年月日与星期。
-            text = "${today.year}年 · ${weekdayName(today)}" +
-                (week?.let { " · 第 $it 周" } ?: ""),
+            text = buildString {
+                append("周${weekdayShort(today)}")
+                // 未登录时没有课表，说不出「几节课」；有课表时直接给数量。
+                courseCount?.let { append(" · $it 节课") }
+                week?.let { append(" · 第 $it 周") }
+            },
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
     }
 }
 
+private fun weekdayShort(date: java.time.LocalDate): String = when (date.dayOfWeek.value) {
+    1 -> "一"
+    2 -> "二"
+    3 -> "三"
+    4 -> "四"
+    5 -> "五"
+    6 -> "六"
+    else -> "日"
+}
+
+/**
+ * 分段小标题。[compact] 是课程那一段用的：缩成一行灰色小字贴在卡片外面，
+ * 与待办卡的标题（卡内、字号更大）区分开，视觉上不会抢同一层。
+ */
 @Composable
-private fun TodaySectionHeader(title: String, trailing: String?) {
+private fun TodaySectionHeader(
+    title: String,
+    trailing: String?,
+    compact: Boolean = false,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 6.dp, bottom = 2.dp),
+            .padding(
+                start = if (compact) 4.dp else 0.dp,
+                end = if (compact) 4.dp else 0.dp,
+                top = if (compact) 10.dp else 6.dp,
+                bottom = if (compact) 0.dp else 2.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = title,
-            style = MiuixTheme.textStyles.headline2,
+            style = if (compact) {
+                MiuixTheme.textStyles.footnote1
+            } else {
+                MiuixTheme.textStyles.headline2
+            },
             fontWeight = FontWeight.SemiBold,
+            color = if (compact) {
+                MiuixTheme.colorScheme.onSurfaceVariantSummary
+            } else {
+                MiuixTheme.colorScheme.onSurface
+            },
         )
         Spacer(Modifier.weight(1f))
         if (trailing != null) {
@@ -409,6 +458,7 @@ private fun TodayCourseStateCard(
 @Composable
 private fun TodayTodoCard(
     todos: List<TodayTodo>,
+    summary: String?,
     draft: String,
     onDraftChange: (String) -> Unit,
     onAdd: () -> Unit,
@@ -421,8 +471,24 @@ private fun TodayTodoCard(
     val canAdd = draft.isNotBlank()
     Card(
         modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        insideMargin = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "待办",
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            if (summary != null) {
+                Text(
+                    text = summary,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             GlassTextField(
                 value = draft,
@@ -548,73 +614,85 @@ private fun TodayCourseCard(
     val ongoing = course.isOngoingAt(nowMinutes)
     val finished = course.hasEndedAt(nowMinutes)
     val room = course.roomForWeek(week)
-    val primary = MiuixTheme.colorScheme.primary
-    val onPrimary = MiuixTheme.colorScheme.onPrimary
-    val content = if (ongoing) onPrimary else MiuixTheme.colorScheme.onSurface
-    val secondary = if (ongoing) {
-        onPrimary.copy(alpha = 0.82f)
-    } else {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary
-    }
-    val statusLabel = when {
-        ongoing -> "正在上课"
-        finished -> "已结束"
-        else -> "接下来"
-    }
-    val startTimeText = course.startTime.ifBlank {
-        ScheduleSections.defaultStart(course.startSection).orEmpty()
-    }
+    val scheme = MiuixTheme.colorScheme
+    val accent = scheme.primary
+    // 上完的课不该和接下来的课一样显眼，整行压淡即可，不额外加标签。
+    val rowAlpha = if (finished) 0.5f else 1f
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(20.dp),
-        colors = if (ongoing) {
-            CardDefaults.defaultColors(color = primary, contentColor = onPrimary)
-        } else {
-            CardDefaults.defaultColors()
-        },
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = statusLabel,
-                    style = MiuixTheme.textStyles.footnote1,
-                    fontWeight = FontWeight.Medium,
-                    color = secondary,
-                )
-                if (!finished && startTimeText.isNotBlank()) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = startTimeText,
-                        style = MiuixTheme.textStyles.footnote1,
-                        fontWeight = FontWeight.Medium,
-                        color = secondary,
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = course.name,
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.SemiBold,
-                color = content,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(courseStripe(course).copy(alpha = rowAlpha)),
             )
-            if (room.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = course.name,
+                        // 课程名是这一行里唯一要看的内容，加粗到 Bold 才立得住。
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .alpha(rowAlpha),
+                    )
+                    if (ongoing) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(accent.copy(alpha = 0.14f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = "上课中",
+                                style = MiuixTheme.textStyles.footnote2,
+                                fontWeight = FontWeight.Medium,
+                                color = accent,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
                 Text(
-                    text = room,
-                    style = MiuixTheme.textStyles.body2,
-                    color = secondary,
-                )
-            }
-            if (course.teacher.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = course.teacher,
+                    text = buildString {
+                        append(courseTimeLabel(course))
+                        if (room.isNotBlank()) {
+                            append("  ")
+                            append(room)
+                        }
+                    },
                     style = MiuixTheme.textStyles.footnote1,
-                    color = secondary,
+                    color = scheme.onSurfaceVariantSummary.copy(alpha = rowAlpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+    }
+}
+
+/** 时间不加空格：14:30–16:05 这种写法在这一行里更紧凑，也不会被地点挤到换行。 */
+private fun courseTimeLabel(course: ScheduleCourse): String {
+    val start = course.startTime.ifBlank {
+        ScheduleSections.defaultStart(course.startSection).orEmpty()
+    }
+    val end = course.endTime.ifBlank {
+        ScheduleSections.defaultEnd(course.endSection).orEmpty()
+    }
+    return when {
+        start.isNotBlank() && end.isNotBlank() -> "$start\u2013$end"
+        start.isNotBlank() -> "$start 开始"
+        course.startSection == course.endSection -> "第 ${course.startSection} 节"
+        else -> "第 ${course.startSection}-${course.endSection} 节"
     }
 }
