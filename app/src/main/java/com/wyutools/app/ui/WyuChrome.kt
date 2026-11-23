@@ -80,10 +80,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
@@ -95,6 +97,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -114,6 +117,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -130,6 +134,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.blur
@@ -176,10 +181,34 @@ internal val WyuLargeTitleLineHeight = 44.sp
 /** 关键数值（余额、电量、接下来要上的课）统一用最重字重压住版面。 */
 internal val WyuEmphasisWeight = FontWeight.Black
 
-internal val LocalWyuPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+internal val LocalWyuPageBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 /** Wallpaper-only backdrop, so cards and buttons frost the photo without sampling themselves. */
-internal val LocalWyuGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+internal val LocalWyuGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/** True once the recording layers have real layout coordinates. */
+internal val LocalWyuGlassReady = staticCompositionLocalOf { false }
+
+/**
+ * Delegating backdrop whose instance identity changes once the recording layer
+ * is positioned. drawBackdrop nodes compare backdrop identity on update and
+ * invalidate their cache, so the cold-start frame with no layer coordinates is
+ * followed by a redraw that actually samples the wallpaper.
+ */
+internal class WyuDelegatingBackdrop(private val delegate: Backdrop) : Backdrop {
+    override val isCoordinatesDependent: Boolean get() = delegate.isCoordinatesDependent
+    override val offsetResidualX: Float get() = delegate.offsetResidualX
+    override val offsetResidualY: Float get() = delegate.offsetResidualY
+
+    override fun DrawScope.drawBackdrop(
+        density: Density,
+        coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?,
+        downscaleFactor: Float,
+    ) {
+        with(delegate) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
+    }
+}
 
 /**
  * Backdrop for inputs that live in a dialog. 弹窗在独立窗口里，拿不到页面那层
@@ -418,6 +447,8 @@ fun WyuPageScaffold(
     }
     // Cards draw the soft glass straight from this pre-blurred wallpaper copy;
     // only the bars, tiny buttons and the week header keep live backdrops.
+    var glassLayerReady by remember { mutableStateOf(false) }
+    var pageLayerReady by remember { mutableStateOf(false) }
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     val bounds = pageBounds.value
     val glassUnderlay = if (
@@ -544,6 +575,12 @@ fun WyuPageScaffold(
         if (backdrop != null) WyuPageBackdrops.attach(backdrop)
         onDispose { if (backdrop != null) WyuPageBackdrops.detach(backdrop) }
     }
+    val publishedGlassBackdrop = remember(glassBackdrop, glassLayerReady) {
+        glassBackdrop?.let(::WyuDelegatingBackdrop)
+    }
+    val publishedPageBackdrop = remember(backdrop, pageLayerReady) {
+        backdrop?.let(::WyuDelegatingBackdrop)
+    }
     val currentProgress = rememberUpdatedState(progress)
     val scope = rememberCoroutineScope()
     val stretchRangePx = with(density) { configuration.screenHeightDp.dp.toPx() }
@@ -583,12 +620,18 @@ fun WyuPageScaffold(
             },
     ) {
         if (glassBackdrop != null) {
-            Box(Modifier.fillMaxSize().layerBackdrop(glassBackdrop))
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .layerBackdrop(glassBackdrop)
+                    .onGloballyPositioned { glassLayerReady = true },
+            )
         }
         CompositionLocalProvider(
             LocalOverscrollFactory provides WyuNoOpOverscrollFactory,
-            LocalWyuPageBackdrop provides backdrop,
-            LocalWyuGlassBackdrop provides glassBackdrop,
+            LocalWyuPageBackdrop provides publishedPageBackdrop,
+            LocalWyuGlassBackdrop provides publishedGlassBackdrop,
+            LocalWyuGlassReady provides (glassLayerReady && pageLayerReady),
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
@@ -606,7 +649,9 @@ fun WyuPageScaffold(
                             .fillMaxSize()
                             .then(
                                 if (backdrop != null) {
-                                    Modifier.layerBackdrop(backdrop)
+                                    Modifier
+                                        .layerBackdrop(backdrop)
+                                        .onGloballyPositioned { pageLayerReady = true }
                                 } else {
                                     Modifier
                                 },
@@ -977,6 +1022,7 @@ internal fun WyuChromeGlassSurface(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
+    val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
     // 莫奈: opaque tonal block, no shadow, no sampling and no rim light.
     val md3 = LocalWyuMd3Style.current
     val useSoftGlass = !md3 && softGlass && wyuSoftGlassSupported
@@ -1011,12 +1057,12 @@ internal fun WyuChromeGlassSurface(
                                 },
                                 refractionThicknessPx = TopBarGlassRefractionPx,
                                 reflectionThicknessPx = TopBarGlassReflectionPx,
-                                shapeEdgePx = softGlassTuning.shapeEdgePx,
-                                shapeEdgePow = softGlassTuning.shapeEdgePow,
-                                reflectionLighten = softGlassTuning.reflectLighten,
-                                bgSaturation = softGlassTuning.saturation(dark),
-                                reflectionStrength = softGlassTuning.reflectionStrength,
-                                refractionIor = softGlassTuning.refractionIor,
+                                shapeEdgePx = glassTuningForTheme.shapeEdgePx,
+                                shapeEdgePow = glassTuningForTheme.shapeEdgePow,
+                                reflectionLighten = glassTuningForTheme.reflectLighten,
+                                bgSaturation = glassTuningForTheme.saturation(dark),
+                                reflectionStrength = glassTuningForTheme.reflectionStrength,
+                                refractionIor = glassTuningForTheme.refractionIor,
                             )
 
                             else -> Modifier.textureBlur(
@@ -1307,6 +1353,7 @@ fun WyuFloatingTabs(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
+    val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
     // 莫奈 turns the pill into an MD3 segmented control: opaque container,
     // primary thumb, onPrimary label. Nothing is blurred or shadowed.
     val md3 = LocalWyuMd3Style.current
@@ -1366,10 +1413,10 @@ fun WyuFloatingTabs(
                         shapeEdgePx = TabsGlassEdgePx,
                         shapeEdgePow = TabsGlassEdgePow,
                         refractionThicknessPx = TabsGlassRefractionPx,
-                        reflectionLighten = softGlassTuning.reflectLighten,
-                        bgSaturation = softGlassTuning.saturation(dark),
-                        reflectionStrength = softGlassTuning.reflectionStrength,
-                        refractionIor = softGlassTuning.refractionIor,
+                        reflectionLighten = glassTuningForTheme.reflectLighten,
+                        bgSaturation = glassTuningForTheme.saturation(dark),
+                        reflectionStrength = glassTuningForTheme.reflectionStrength,
+                        refractionIor = glassTuningForTheme.refractionIor,
                     )
 
                     else -> Modifier.textureBlur(

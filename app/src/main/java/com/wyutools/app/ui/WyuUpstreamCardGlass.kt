@@ -21,6 +21,7 @@ internal fun wyuUpstreamGlassStyle(
 ): GlassStyle {
     val density = LocalDensity.current.density.coerceAtLeast(0.1f)
     val scale = GlassDefaults.SourceDensity / density
+    val t = tuning.resolvedFor(dark)
     val base = if (dark) {
         GlassStyles.CommonMediumRegularDark
     } else {
@@ -28,37 +29,40 @@ internal fun wyuUpstreamGlassStyle(
     }
     return GlassStyle(
         blend = base.blend.copy(
-            amount = tuning.blendAmount,
-            saturation = tuning.blendSaturation,
-            brightness = tuning.blendBrightness,
+            amount = t.blendAmount,
+            saturation = t.blendSaturation,
+            brightness = t.blendBrightness,
         ),
         inner = base.inner.copy(
-            bottom = tuning.innerBottom,
-            colorWhite = tuning.innerColorWhite,
-            colorMix = tuning.innerColorMix,
-            colorPow = tuning.innerColorPow,
+            bottom = t.innerBottom,
+            colorWhite = t.innerColorWhite,
+            colorMix = t.innerColorMix,
+            colorPow = t.innerColorPow,
         ),
         edge = base.edge.copy(
-            width = tuning.shapeEdgePx * scale,
-            pow = tuning.shapeEdgePow,
-            thickness = tuning.edgeThickness * scale,
-            reflectOffset = tuning.reflectOffset * scale,
+            width = t.shapeEdgePx * scale,
+            pow = t.shapeEdgePow,
+            thickness = t.edgeThickness * scale,
+            reflectOffset = t.reflectOffset * scale,
         ),
         reflect = base.reflect.copy(
-            lighten = tuning.reflectLighten,
-            strength = tuning.reflectionStrength,
+            lighten = t.reflectLighten,
+            strength = t.reflectionStrength,
         ),
         light = base.light.copy(
-            intensity = tuning.lightIntensity,
-            oppositeIntensity = tuning.lightOppositeIntensity,
+            intensity = t.lightIntensity,
+            oppositeIntensity = t.lightOppositeIntensity,
         ),
-        refract = base.refract.copy(ior = tuning.refractionIor),
+        refract = base.refract.copy(ior = t.refractionIor),
         background = base.background.copy(
-            saturation = tuning.saturation(dark),
-            brightness = tuning.backgroundBrightness,
+            saturation = t.saturationLight,
+            brightness = t.backgroundBrightness,
         ),
         blur = base.blur.copy(
-            small = (wyuSoftGlassScreenBlurPx(blurPercent) * 4f * scale).coerceIn(4f, 160f),
+            // 半径低于 ~22px 时上游退回 1x 全分辨率采样，滑动会明显掉帧；
+            // 给模糊度设一个下限，外观仍有差别但始终走降采样快路径。
+            small = (maxOf(wyuSoftGlassScreenBlurPx(blurPercent) * 4f, 22f) * scale)
+                .coerceIn(4f, 160f),
         ),
     )
 }

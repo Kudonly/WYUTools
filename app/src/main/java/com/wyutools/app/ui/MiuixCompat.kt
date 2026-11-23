@@ -142,6 +142,7 @@ fun WyuOverlayDialog(
     val dark = LocalWyuDarkTheme.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     // 莫奈 renders the sheet as an opaque MD3 dialog: no frost, no page sampling.
     val md3 = LocalWyuMd3Style.current
     val useSoftGlass = !md3 && backdrop != null && softGlass && wyuSoftGlassSupported
@@ -171,14 +172,14 @@ fun WyuOverlayDialog(
                 } else {
                     Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
                 },
-                shapeEdgePx = tuning.shapeEdgePx,
-                shapeEdgePow = tuning.shapeEdgePow,
-                refractionThicknessPx = tuning.edgeThickness,
-                reflectionThicknessPx = tuning.reflectOffset,
-                reflectionLighten = tuning.reflectLighten,
-                bgSaturation = tuning.saturation(dark),
-                reflectionStrength = tuning.reflectionStrength,
-                refractionIor = tuning.refractionIor,
+                shapeEdgePx = tuningForTheme.shapeEdgePx,
+                shapeEdgePow = tuningForTheme.shapeEdgePow,
+                refractionThicknessPx = tuningForTheme.edgeThickness,
+                reflectionThicknessPx = tuningForTheme.reflectOffset,
+                reflectionLighten = tuningForTheme.reflectLighten,
+                bgSaturation = tuningForTheme.saturation(dark),
+                reflectionStrength = tuningForTheme.reflectionStrength,
+                refractionIor = tuningForTheme.refractionIor,
             )
         } else {
             Modifier.textureBlur(

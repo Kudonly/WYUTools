@@ -163,6 +163,21 @@ fun wyuCustomWallpaperDim(brightness: Float): Float =
 
 internal const val WyuSoftGlassBlurMin = 0
 
+private fun encodeGlassDarkValues(values: WyuGlassDarkValues): String = listOf(
+    values.refractionIor, values.edgeThickness, values.shapeEdgePx, values.reflectOffset,
+    values.reflectionStrength, values.blendAmount, values.innerColorMix, values.lightIntensity,
+).joinToString(",") { it?.toString() ?: "" }
+
+private fun decodeGlassDarkValues(raw: String?): WyuGlassDarkValues {
+    if (raw == null) return WyuGlassDarkValues()
+    val parts = raw.split(",")
+    fun f(i: Int): Float? = parts.getOrNull(i)?.takeIf { it.isNotEmpty() }?.toFloatOrNull()
+    return WyuGlassDarkValues(
+        refractionIor = f(0), edgeThickness = f(1), shapeEdgePx = f(2), reflectOffset = f(3),
+        reflectionStrength = f(4), blendAmount = f(5), innerColorMix = f(6), lightIntensity = f(7),
+    )
+}
+
 object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
@@ -193,7 +208,7 @@ object WyuAppearance {
     private const val KeySoftGlassTuningCardTintLight = "soft_glass_tuning_card_tint_light"
     private const val KeySoftGlassTuningCardTintDark = "soft_glass_tuning_card_tint_dark"
     private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
-    private const val SoftGlassDefaultsVersion = 6
+    private const val SoftGlassDefaultsVersion = 7
     private const val SoftGlassBlurDefault = 20
     private const val KeyBlendAmount = "glass_blend_amount"
     private const val KeyBlendSaturation = "glass_blend_saturation"
@@ -206,6 +221,8 @@ object WyuAppearance {
     private const val KeyLightOpposite = "glass_light_opposite"
     private const val KeyBackgroundBrightness = "glass_background_brightness"
     private const val KeyNoise = "glass_noise_coefficient"
+    private const val KeyGlassDarkValues = "glass_dark_values"
+    private const val KeyTuneScope = "glass_tune_scope"
     private const val KeyMonetSeed = "monet_seed"
     private const val KeyPaletteScheme = "monet_palette_scheme"
     private const val CustomFileName = "custom_wallpaper.jpg"
@@ -248,6 +265,9 @@ object WyuAppearance {
 
     private val _softGlassTuning = MutableStateFlow(WyuSoftGlassTuning())
     val softGlassTuning: StateFlow<WyuSoftGlassTuning> = _softGlassTuning.asStateFlow()
+
+    private val _softGlassTuneScope = MutableStateFlow(WyuTuneScope.Sync)
+    val softGlassTuneScope: StateFlow<WyuTuneScope> = _softGlassTuneScope.asStateFlow()
 
     private val _monetSeed = MutableStateFlow<Int?>(null)
     val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
@@ -306,6 +326,7 @@ object WyuAppearance {
                 .remove(KeyLightOpposite)
                 .remove(KeyBackgroundBrightness)
                 .remove(KeyNoise)
+                .remove(KeyGlassDarkValues)
                 .putInt(KeySoftGlassDefaultsVersion, SoftGlassDefaultsVersion)
                 .apply()
         }
@@ -383,7 +404,11 @@ object WyuAppearance {
             lightOppositeIntensity = loaded.getFloat(KeyLightOpposite, tuningDefaults.lightOppositeIntensity).coerceIn(0f, 4f),
             backgroundBrightness = loaded.getFloat(KeyBackgroundBrightness, tuningDefaults.backgroundBrightness).coerceIn(-1f, 1f),
             noiseCoefficient = loaded.getFloat(KeyNoise, tuningDefaults.noiseCoefficient).coerceIn(0f, 0.03f),
+            darkValues = decodeGlassDarkValues(loaded.getString(KeyGlassDarkValues, null)),
         )
+        _softGlassTuneScope.value = WyuTuneScope.entries
+            .firstOrNull { it.name == loaded.getString(KeyTuneScope, null) }
+            ?: WyuTuneScope.Sync
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         _paletteScheme.value = WyuPaletteScheme.fromStored(loaded.getString(KeyPaletteScheme, null))
         val saved = WyuWallpaper.entries
@@ -539,8 +564,17 @@ object WyuAppearance {
             ?.putFloat(KeyLightOpposite, clamped.lightOppositeIntensity)
             ?.putFloat(KeyBackgroundBrightness, clamped.backgroundBrightness)
             ?.putFloat(KeyNoise, clamped.noiseCoefficient)
+            ?.putString(KeyGlassDarkValues, encodeGlassDarkValues(clamped.darkValues))
             ?.remove(KeySoftGlassTuningCardTint)
             ?.apply()
+    }
+
+    /** 切换高级模式当前编辑的深浅色范围。 */
+    fun setSoftGlassTuneScope(context: Context, scope: WyuTuneScope) {
+        ensureLoaded(context)
+        if (_softGlassTuneScope.value == scope) return
+        _softGlassTuneScope.value = scope
+        prefs?.edit()?.putString(KeyTuneScope, scope.name)?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {

@@ -1,9 +1,12 @@
 package com.wyutools.app.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,7 +23,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -34,6 +41,7 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
     val scroll = rememberScrollState()
     val fraction = rememberWyuCollapseFraction(scroll)
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val scope by WyuAppearance.softGlassTuneScope.collectAsState()
     var showResetConfirm by remember { mutableStateOf(false) }
 
     WyuPageScaffold(
@@ -67,12 +75,16 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 .padding(top = padding.calculateTopPadding()),
         ) {
             Text(
-                text = "参数默认值对齐 miuix-glass 的推荐材质，卡片与弹出菜单共用同一套参数。修改会实时保存并立即生效；点按右上角的恢复按钮可还原默认值。",
+                text = "参数默认值对齐 miuix-glass 的推荐材质，卡片与弹出菜单共用同一套参数。修改会实时保存并立即生效。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
             )
             Spacer(Modifier.height(4.dp))
+            ScopeCard(
+                scope = scope,
+                onSelect = { WyuAppearance.setSoftGlassTuneScope(context, it) },
+            )
             TuningSection(title = "折射与边缘") {
                 Text(
                     text = "控制玻璃边缘的弯曲与过渡，数值越大，边缘形变与折射越明显。",
@@ -80,56 +92,29 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "折射率",
-                    valueText = "%.1f".format(tuning.refractionIor),
-                    value = tuning.refractionIor,
+                    param = WyuGlassParam.RefractionIor,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0.1f..10f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(refractionIor = it),
-                        )
-                    },
+                    format = { "%.1f".format(it) },
                 )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "边缘厚度",
-                    valueText = tuning.edgeThickness.roundToInt().toString(),
-                    value = tuning.edgeThickness,
+                    param = WyuGlassParam.EdgeThickness,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..800f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(edgeThickness = it),
-                        )
-                    },
+                    format = { it.roundToInt().toString() },
                 )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "边缘宽度",
-                    valueText = tuning.shapeEdgePx.roundToInt().toString(),
-                    value = tuning.shapeEdgePx,
+                    param = WyuGlassParam.ShapeEdgePx,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0.5f..432f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(shapeEdgePx = it),
-                        )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "边缘过渡幂",
-                    valueText = "%.2f".format(tuning.shapeEdgePow),
-                    value = tuning.shapeEdgePow,
-                    valueRange = 0.05f..22.8f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(shapeEdgePow = it),
-                        )
-                    },
+                    format = { it.roundToInt().toString() },
                 )
             }
             TuningSection(title = "反射") {
@@ -139,193 +124,77 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "反射偏移",
-                    valueText = tuning.reflectOffset.roundToInt().toString(),
-                    value = tuning.reflectOffset,
+                    param = WyuGlassParam.ReflectOffset,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = -3200f..4800f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(reflectOffset = it),
-                        )
-                    },
+                    format = { it.roundToInt().toString() },
                 )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "反射强度",
-                    valueText = "${(tuning.reflectionStrength * 100).roundToInt()}%",
-                    value = tuning.reflectionStrength,
+                    param = WyuGlassParam.ReflectionStrength,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..2f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(reflectionStrength = it),
-                        )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "反射亮化",
-                    valueText = "%.2f".format(tuning.reflectLighten),
-                    value = tuning.reflectLighten,
-                    valueRange = -4.8f..7.2f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(reflectLighten = it),
-                        )
-                    },
+                    format = { "${(it * 100).roundToInt()}%" },
                 )
             }
             TuningSection(title = "背景与色调") {
                 Text(
-                    text = "控制玻璃透出的壁纸色彩与卡片底色，深色与浅色模式分别调整。",
+                    text = "控制玻璃透出的壁纸色彩与卡片底色；选择「仅浅色」或「仅深色」时，这两项只影响对应主题。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "背景饱和度（浅色）",
-                    valueText = "${(tuning.saturationLight * 100).roundToInt()}%",
-                    value = tuning.saturationLight,
+                TuneSlider(
+                    label = "背景饱和度",
+                    param = WyuGlassParam.Saturation,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..2f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(saturationLight = it),
-                        )
-                    },
+                    format = { "${(it * 100).roundToInt()}%" },
                 )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "背景饱和度（深色）",
-                    valueText = "${(tuning.saturationDark * 100).roundToInt()}%",
-                    value = tuning.saturationDark,
-                    valueRange = 0f..2f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(saturationDark = it),
-                        )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "卡片底色不透明度（浅色）",
-                    valueText = "${(tuning.cardTintAlphaLight * 100).roundToInt()}%",
-                    value = tuning.cardTintAlphaLight,
+                TuneSlider(
+                    label = "卡片底色不透明度",
+                    param = WyuGlassParam.CardTintAlpha,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..1f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(cardTintAlphaLight = it),
-                        )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                SoftGlassSliderRow(
-                    label = "卡片底色不透明度（深色）",
-                    valueText = "${(tuning.cardTintAlphaDark * 100).roundToInt()}%",
-                    value = tuning.cardTintAlphaDark,
-                    valueRange = 0f..1f,
-                    onChange = {
-                        WyuAppearance.setSoftGlassTuning(
-                            context,
-                            tuning.copy(cardTintAlphaDark = it),
-                        )
-                    },
+                    format = { "${(it * 100).roundToInt()}%" },
                 )
             }
-            TuningSection(title = "混合与内层") {
+            TuningSection(title = "混合与光照") {
                 Text(
-                    text = "对应 miuix-glass 的 blend 与 inner 层，决定背景色彩混合与玻璃内部的白度。",
+                    text = "对应 miuix-glass 的 blend、inner 与 light 层，控制底色混合和内部白度。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
-                SoftGlassSliderRow(
+                Spacer(Modifier.height(8.dp))
+                TuneSlider(
                     label = "混合量",
-                    valueText = "${(tuning.blendAmount * 100).roundToInt()}%",
-                    value = tuning.blendAmount,
+                    param = WyuGlassParam.BlendAmount,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..1f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(blendAmount = it)) },
+                    format = { "${(it * 100).roundToInt()}%" },
                 )
-                SoftGlassSliderRow(
-                    label = "混合饱和度",
-                    valueText = "%.2f".format(tuning.blendSaturation),
-                    value = tuning.blendSaturation,
-                    valueRange = 0f..4f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(blendSaturation = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "混合亮度",
-                    valueText = "${(tuning.blendBrightness * 100).roundToInt()}%",
-                    value = tuning.blendBrightness,
-                    valueRange = 0f..1f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(blendBrightness = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "内层底部渐变",
-                    valueText = "${(tuning.innerBottom * 100).roundToInt()}%",
-                    value = tuning.innerBottom,
-                    valueRange = 0f..1f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(innerBottom = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "内层白色占比",
-                    valueText = "${(tuning.innerColorWhite * 100).roundToInt()}%",
-                    value = tuning.innerColorWhite,
-                    valueRange = 0f..1f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(innerColorWhite = it)) },
-                )
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "内层混色",
-                    valueText = "%.2f".format(tuning.innerColorMix),
-                    value = tuning.innerColorMix,
+                    param = WyuGlassParam.InnerColorMix,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..2f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(innerColorMix = it)) },
+                    format = { "%.2f".format(it) },
                 )
-                SoftGlassSliderRow(
-                    label = "内层混色幂",
-                    valueText = "%.2f".format(tuning.innerColorPow),
-                    value = tuning.innerColorPow,
-                    valueRange = 0.1f..4f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(innerColorPow = it)) },
-                )
-            }
-            TuningSection(title = "光照与背景") {
-                Text(
-                    text = "对应 miuix-glass 的 light / background 与噪声抖动，影响高光方向和去色带。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                SoftGlassSliderRow(
+                TuneSlider(
                     label = "主光强度",
-                    valueText = "%.2f".format(tuning.lightIntensity),
-                    value = tuning.lightIntensity,
+                    param = WyuGlassParam.LightIntensity,
+                    tuning = tuning,
+                    scope = scope,
                     valueRange = 0f..4f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(lightIntensity = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "背光强度",
-                    valueText = "%.2f".format(tuning.lightOppositeIntensity),
-                    value = tuning.lightOppositeIntensity,
-                    valueRange = 0f..4f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(lightOppositeIntensity = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "背景亮度",
-                    valueText = "%.2f".format(tuning.backgroundBrightness),
-                    value = tuning.backgroundBrightness,
-                    valueRange = -1f..1f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(backgroundBrightness = it)) },
-                )
-                SoftGlassSliderRow(
-                    label = "噪声抖动",
-                    valueText = "%.4f".format(tuning.noiseCoefficient),
-                    value = tuning.noiseCoefficient,
-                    valueRange = 0f..0.03f,
-                    onChange = { WyuAppearance.setSoftGlassTuning(context, tuning.copy(noiseCoefficient = it)) },
+                    format = { "%.2f".format(it) },
                 )
             }
             Text(
@@ -341,7 +210,7 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
     WyuOverlayDialog(
         show = showResetConfirm,
         title = "恢复默认参数",
-        summary = "将柔光玻璃的高级参数恢复为默认值，恢复后立即生效。",
+        summary = "将柔光玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。",
         onDismissRequest = { showResetConfirm = false },
     ) {
         Spacer(Modifier.height(16.dp))
@@ -349,6 +218,7 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
             text = "恢复默认",
             onClick = {
                 WyuAppearance.setSoftGlassTuning(context, WyuSoftGlassTuning())
+                WyuAppearance.setSoftGlassTuneScope(context, WyuTuneScope.Sync)
                 showResetConfirm = false
                 Toast.makeText(context, "已恢复默认参数", Toast.LENGTH_SHORT).show()
             },
@@ -356,6 +226,83 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         WyuDialogCancelButton(onClick = { showResetConfirm = false })
     }
+}
+
+@Composable
+private fun ScopeCard(
+    scope: WyuTuneScope,
+    onSelect: (WyuTuneScope) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var anchor by remember { mutableStateOf(Rect.Zero) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "调节范围", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "选择滑条作用于浅色、深色，还是两者同步。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Box(modifier = Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }) {
+                WyuDropdownTrigger(label = scope.label, onClick = { expanded = true })
+                WyuDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    anchor = anchor,
+                ) {
+                    WyuTuneScope.entries.forEach { option ->
+                        WyuDropdownItem(
+                            text = option.label,
+                            selected = scope == option,
+                            onClick = {
+                                expanded = false
+                                onSelect(option)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+}
+
+@Composable
+private fun TuneSlider(
+    label: String,
+    param: WyuGlassParam,
+    tuning: WyuSoftGlassTuning,
+    scope: WyuTuneScope,
+    valueRange: ClosedFloatingPointRange<Float>,
+    format: (Float) -> String,
+) {
+    val context = LocalContext.current
+    val value = tuning.valueFor(param, scope == WyuTuneScope.Dark)
+    SoftGlassSliderRow(
+        label = label,
+        valueText = format(value),
+        value = value,
+        valueRange = valueRange,
+        onChange = {
+            WyuAppearance.setSoftGlassTuning(
+                context,
+                tuning.edited(param, it, scope),
+            )
+        },
+    )
+    Spacer(Modifier.height(8.dp))
 }
 
 @Composable

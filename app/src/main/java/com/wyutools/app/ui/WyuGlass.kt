@@ -212,6 +212,7 @@ fun Card(
         )
         return
     }
+    val glassReady = LocalWyuGlassReady.current
     val glass = if (samplePageContent) {
         LocalWyuPageBackdrop.current
     } else {
@@ -222,6 +223,7 @@ fun Card(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val dark = LocalWyuDarkTheme.current
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
@@ -230,29 +232,34 @@ fun Card(
     // dark mode.
     val softGlassCardTint = when {
         colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = tuning.cardTintAlphaLight)
-        dark -> Color.Black.copy(alpha = tuning.cardTintAlphaDark)
-        else -> Color.White.copy(alpha = tuning.cardTintAlphaLight)
+            colors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
+        dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
-    val edgePx = if (compactGlass) CompactGlassEdgePx else tuning.shapeEdgePx
-    val edgePow = if (compactGlass) CompactGlassEdgePow else tuning.shapeEdgePow
-    val refractionPx = if (compactGlass) CompactGlassRefractionPx else tuning.edgeThickness
-    val reflectionPx = if (compactGlass) CompactGlassReflectionPx else tuning.reflectOffset
+    val edgePx = if (compactGlass) CompactGlassEdgePx else tuningForTheme.shapeEdgePx
+    val edgePow = if (compactGlass) CompactGlassEdgePow else tuningForTheme.shapeEdgePow
+    val refractionPx = if (compactGlass) CompactGlassRefractionPx else tuningForTheme.edgeThickness
+    val reflectionPx = if (compactGlass) CompactGlassReflectionPx else tuningForTheme.reflectOffset
     val blurRadius = if (compactGlass) CompactGlassBlurRadius else CardBlurRadius
     // 投影挂在最外层：里面几层都会把内容裁到圆角里，放里面就看不见了。
     val shadowed = modifier.wyuCardShadow(shape, dark)
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
-                backdrop = glass,
-                cornerRadius = cornerRadius,
-                tuning = tuning,
-                dark = dark,
-                blurPercent = softGlassBlur,
-                tint = softGlassCardTint,
-            )
+            softGlass && wyuSoftGlassSupported && glassReady ->
+                shadowed.wyuUpstreamCardGlass(
+                    backdrop = glass,
+                    cornerRadius = cornerRadius,
+                    tuning = tuningForTheme,
+                    dark = dark,
+                    blurPercent = softGlassBlur,
+                    tint = softGlassCardTint,
+                )
+            softGlass && wyuSoftGlassSupported && underlay != null ->
+                shadowed.wyuWallpaperBlur(underlay = underlay, shape = shape)
+            softGlass && wyuSoftGlassSupported ->
+                shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
             !samplePageContent && gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
             else -> shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
@@ -294,11 +301,13 @@ fun Card(
         return
     }
     val glass = LocalWyuGlassBackdrop.current
+    val glassReady = LocalWyuGlassReady.current
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val dark = LocalWyuDarkTheme.current
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
@@ -307,9 +316,9 @@ fun Card(
     // dark mode.
     val softGlassCardTint = when {
         colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = tuning.cardTintAlphaLight)
-        dark -> Color.Black.copy(alpha = tuning.cardTintAlphaDark)
-        else -> Color.White.copy(alpha = tuning.cardTintAlphaLight)
+            colors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
+        dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     val shadowed = modifier.wyuCardShadow(shape, dark)
@@ -319,14 +328,17 @@ fun Card(
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
-                backdrop = glass,
-                cornerRadius = cornerRadius,
-                tuning = tuning,
-                dark = dark,
-                blurPercent = softGlassBlur,
-                tint = softGlassCardTint,
-            )
+            softGlass && wyuSoftGlassSupported && glassReady ->
+                shadowed.wyuUpstreamCardGlass(
+                    backdrop = glass,
+                    cornerRadius = cornerRadius,
+                    tuning = tuningForTheme,
+                    dark = dark,
+                    blurPercent = softGlassBlur,
+                    tint = softGlassCardTint,
+                )
+            softGlass && wyuSoftGlassSupported && underlay != null ->
+                shadowed.wyuWallpaperBlur(underlay = underlay, shape = shape)
             gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
             else -> shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
@@ -390,6 +402,7 @@ fun LiveGlassCard(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val dark = LocalWyuDarkTheme.current
     val useSoftGlass = softGlass && wyuSoftGlassSupported
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }

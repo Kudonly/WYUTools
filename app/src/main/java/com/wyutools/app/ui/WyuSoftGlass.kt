@@ -392,6 +392,31 @@ private const val UpstreamLightOpposite = 0.8f
 private const val UpstreamBackgroundBrightness = 0.0f
 private const val UpstreamNoise = 0.0045f
 
+/** 高级模式当前编辑的深浅色范围。 */
+enum class WyuTuneScope(val label: String) {
+    Light("仅浅色"),
+    Dark("仅深色"),
+    Sync("同步调节"),
+}
+
+/** 高级模式暴露的参数；深色可单独覆盖，浅色存主字段。 */
+enum class WyuGlassParam {
+    RefractionIor, EdgeThickness, ShapeEdgePx, ReflectOffset, ReflectionStrength,
+    Saturation, CardTintAlpha, BlendAmount, InnerColorMix, LightIntensity,
+}
+
+/** 深色模式下对共享参数的覆盖；null 表示沿用浅色值。 */
+data class WyuGlassDarkValues(
+    val refractionIor: Float? = null,
+    val edgeThickness: Float? = null,
+    val shapeEdgePx: Float? = null,
+    val reflectOffset: Float? = null,
+    val reflectionStrength: Float? = null,
+    val blendAmount: Float? = null,
+    val innerColorMix: Float? = null,
+    val lightIntensity: Float? = null,
+)
+
 data class WyuSoftGlassTuning(
     val refractionIor: Float = UpstreamIor,
     val saturationLight: Float = UpstreamSaturationLight,
@@ -415,9 +440,90 @@ data class WyuSoftGlassTuning(
     val lightOppositeIntensity: Float = UpstreamLightOpposite,
     val backgroundBrightness: Float = UpstreamBackgroundBrightness,
     val noiseCoefficient: Float = UpstreamNoise,
+    val darkValues: WyuGlassDarkValues = WyuGlassDarkValues(),
 ) {
     fun saturation(dark: Boolean): Float = if (dark) saturationDark else saturationLight
     fun cardTintAlpha(dark: Boolean): Float = if (dark) cardTintAlphaDark else cardTintAlphaLight
+}
+
+/** 把深色覆盖摊平到主字段，渲染侧按当前主题读这一份即可。 */
+fun WyuSoftGlassTuning.resolvedFor(dark: Boolean): WyuSoftGlassTuning {
+    if (!dark) return this
+    val d = darkValues
+    return copy(
+        refractionIor = d.refractionIor ?: refractionIor,
+        edgeThickness = d.edgeThickness ?: edgeThickness,
+        shapeEdgePx = d.shapeEdgePx ?: shapeEdgePx,
+        reflectOffset = d.reflectOffset ?: reflectOffset,
+        reflectionStrength = d.reflectionStrength ?: reflectionStrength,
+        blendAmount = d.blendAmount ?: blendAmount,
+        innerColorMix = d.innerColorMix ?: innerColorMix,
+        lightIntensity = d.lightIntensity ?: lightIntensity,
+        saturationLight = saturationDark,
+        cardTintAlphaLight = cardTintAlphaDark,
+        darkValues = WyuGlassDarkValues(),
+    )
+}
+
+private fun WyuGlassDarkValues.withParam(param: WyuGlassParam, value: Float) = when (param) {
+    WyuGlassParam.RefractionIor -> copy(refractionIor = value)
+    WyuGlassParam.EdgeThickness -> copy(edgeThickness = value)
+    WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = value)
+    WyuGlassParam.ReflectOffset -> copy(reflectOffset = value)
+    WyuGlassParam.ReflectionStrength -> copy(reflectionStrength = value)
+    WyuGlassParam.BlendAmount -> copy(blendAmount = value)
+    WyuGlassParam.InnerColorMix -> copy(innerColorMix = value)
+    WyuGlassParam.LightIntensity -> copy(lightIntensity = value)
+    else -> this
+}
+
+/** 当前范围下滑条应显示的值。 */
+fun WyuSoftGlassTuning.valueFor(param: WyuGlassParam, dark: Boolean): Float {
+    val t = if (dark) resolvedFor(true) else this
+    return when (param) {
+        WyuGlassParam.RefractionIor -> t.refractionIor
+        WyuGlassParam.EdgeThickness -> t.edgeThickness
+        WyuGlassParam.ShapeEdgePx -> t.shapeEdgePx
+        WyuGlassParam.ReflectOffset -> t.reflectOffset
+        WyuGlassParam.ReflectionStrength -> t.reflectionStrength
+        WyuGlassParam.Saturation -> t.saturationLight
+        WyuGlassParam.CardTintAlpha -> t.cardTintAlphaLight
+        WyuGlassParam.BlendAmount -> t.blendAmount
+        WyuGlassParam.InnerColorMix -> t.innerColorMix
+        WyuGlassParam.LightIntensity -> t.lightIntensity
+    }
+}
+
+/** 按「仅浅色 / 仅深色 / 同步」写入一个参数。 */
+fun WyuSoftGlassTuning.edited(
+    param: WyuGlassParam,
+    value: Float,
+    scope: WyuTuneScope,
+): WyuSoftGlassTuning {
+    fun WyuSoftGlassTuning.setLight(v: Float) = when (param) {
+        WyuGlassParam.RefractionIor -> copy(refractionIor = v)
+        WyuGlassParam.EdgeThickness -> copy(edgeThickness = v)
+        WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = v)
+        WyuGlassParam.ReflectOffset -> copy(reflectOffset = v)
+        WyuGlassParam.ReflectionStrength -> copy(reflectionStrength = v)
+        WyuGlassParam.Saturation -> copy(saturationLight = v)
+        WyuGlassParam.CardTintAlpha -> copy(cardTintAlphaLight = v)
+        WyuGlassParam.BlendAmount -> copy(blendAmount = v)
+        WyuGlassParam.InnerColorMix -> copy(innerColorMix = v)
+        WyuGlassParam.LightIntensity -> copy(lightIntensity = v)
+    }
+
+    fun WyuSoftGlassTuning.setDark(v: Float) = when (param) {
+        WyuGlassParam.Saturation -> copy(saturationDark = v)
+        WyuGlassParam.CardTintAlpha -> copy(cardTintAlphaDark = v)
+        else -> copy(darkValues = darkValues.withParam(param, v))
+    }
+
+    return when (scope) {
+        WyuTuneScope.Light -> setLight(value)
+        WyuTuneScope.Dark -> setDark(value)
+        WyuTuneScope.Sync -> setLight(value).setDark(value)
+    }
 }
 
 private class WyuSoftGlassEffects(
