@@ -271,53 +271,6 @@ fun SettingsScreen(
                     )
                 }
             }
-            // 取色方案对默认与柔光玻璃主题同样生效：壁纸种子重映射强调色。
-            
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                pressFeedbackType = PressFeedbackType.Sink,
-                onClick = { palettePickerOpen = true },
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "取色方案",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = paletteScheme.summary,
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = paletteScheme.label,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.primary,
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    PaletteStripe(
-                        colors = remember(paletteSeed, paletteScheme, dark) {
-                            paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
-                        },
-                        height = 10.dp,
-                    )
-                }
-            }
-            // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
             Spacer(Modifier.height(12.dp))
             // 主题也统一成「当前值 + 弹出菜单」，和深浅色、电费范围一个形态。
             Card(
@@ -408,15 +361,6 @@ fun SettingsScreen(
                             valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text(
-                            text = if (cardTheme == WyuCardTheme.Liquid) {
-                                "液态玻璃会实时采样屏幕内容，模糊度越高越可能影响流畅度，请酌情使用"
-                            } else {
-                                "柔光玻璃使用烘焙底图，模糊度越高越可能影响功耗与发热，请酌情使用"
-                            },
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -457,6 +401,7 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+            }
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -561,7 +506,53 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
+            // 取色方案对默认与柔光玻璃主题同样生效：壁纸种子重映射强调色。
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                pressFeedbackType = PressFeedbackType.Sink,
+                onClick = { palettePickerOpen = true },
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "取色方案",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = paletteScheme.summary,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = paletteScheme.label,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    PaletteStripe(
+                        colors = remember(paletteSeed, paletteScheme, dark) {
+                            paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
+                        },
+                        height = 10.dp,
+                    )
+                }
             }
+            Spacer(Modifier.height(12.dp))
             SmallTitle(
                 text = "关于",
                 insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
