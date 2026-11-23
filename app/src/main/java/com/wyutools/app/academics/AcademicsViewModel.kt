@@ -71,6 +71,19 @@ class AcademicsViewModel(
     private val _evalDetail = MutableStateFlow(EvalDetailState())
     val evalDetail: StateFlow<EvalDetailState> = _evalDetail.asStateFlow()
 
+    /**
+     * 体测二级页面正在看哪一学年。
+     *
+     * 只存学期名而不是整份数据：二级页面按学期名从最新的 [physical] 里取，
+     * 后台刷新完数字会跟着变，不会停在旧值上。
+     */
+    private val _physicalDetailTerm = MutableStateFlow<String?>(null)
+    val physicalDetailTerm: StateFlow<String?> = _physicalDetailTerm.asStateFlow()
+
+    fun openPhysicalDetail(termName: String) {
+        _physicalDetailTerm.value = termName
+    }
+
     private var gradesJob: Job? = null
     private var gpaJob: Job? = null
     private var physicalJob: Job? = null

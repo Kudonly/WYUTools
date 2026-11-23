@@ -6,6 +6,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -34,18 +36,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,15 +63,21 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -101,10 +107,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.DropdownImpl
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
-import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
@@ -152,18 +154,22 @@ private fun formatAmountInput(raw: String): String {
 private fun formatCountdown(seconds: Long): String =
     String.format(Locale.CHINA, "%02d:%02d", seconds / 60, seconds % 60)
 
+/**
+ * 卡片上的宿舍标签，只用用户自己填的楼栋 + 房间号。
+ *
+ * 接口返回的 `apartName` 本身就叫「43栋」，再和我们补的「栋」拼在一起就成了
+ * 「43栋 栋 305 室」；老版本存下来的楼栋也可能带后缀，所以先削掉再加，
+ * 保证「栋 / 室」各出现一次。
+ */
 private fun dormLabel(ui: ElecUiState): String {
-    val info = ui.result
-    val named = listOfNotNull(info?.buildingName, info?.roomName).joinToString(" · ")
-    return named.ifBlank {
-        val building = ui.building.trim()
-        val room = ui.room.trim()
-        when {
-            building.isNotEmpty() && room.isNotEmpty() -> "$building 栋 $room 室"
-            building.isNotEmpty() -> "$building 栋"
-            room.isNotEmpty() -> "$room 室"
-            else -> "宿舍电费"
-        }
+    // 只削后缀字符，不动中间的数字部分：43栋 → 43，305室 → 305。
+    val building = ui.building.trim().trimEnd('栋', '幢', '号')
+    val room = ui.room.trim().trimEnd('室', '号')
+    return when {
+        building.isNotEmpty() && room.isNotEmpty() -> "$building 栋 $room 室"
+        building.isNotEmpty() -> "$building 栋"
+        room.isNotEmpty() -> "$room 室"
+        else -> "宿舍电费"
     }
 }
 
@@ -182,6 +188,9 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
     // 想改的时候从顶栏的编辑按钮进弹窗。
     val hasDorm = ui.building.isNotBlank() && ui.room.isNotBlank()
     var dormEditorOpen by remember { mutableStateOf(false) }
+    // 充值记录的范围菜单是页面内容之上的弹出层，展开状态留在这里，
+    // 方便页面在需要时对菜单做出反应。
+    var periodMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(morphSettled) {
         if (morphSettled) vm.onEntered()
@@ -228,20 +237,13 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(padding.calculateTopPadding() + 8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Outlined.Info,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "仅支持校园网 / 学校内网访问",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
+            Text(
+                text = "仅支持校园网访问",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                // 和顶栏大标题同一条左边线：卡片仍在 16dp 页边距上，纯文字补 12dp。
+                modifier = Modifier.padding(start = WyuTextInset - 16.dp),
+            )
             Spacer(Modifier.height(16.dp))
             if (!hasDorm) {
                 QueryCard(ui = ui, vm = vm)
@@ -270,13 +272,16 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                 enabled = ui.result != null,
             )
             Spacer(Modifier.height(16.dp))
+            HistoryCard(history = ui.history, stats = ui.stats)
+            Spacer(Modifier.height(16.dp))
+            // 充值记录是可翻页的明细，页尾收口，不挡在前面的余额与趋势之间。
             RechargeCard(
                 ui = ui,
+                menuOpen = periodMenuOpen,
+                onMenuOpenChange = { periodMenuOpen = it },
                 onSelectPeriod = vm::setPeriod,
                 onRetry = vm::retryRecharge,
             )
-            Spacer(Modifier.height(16.dp))
-            HistoryCard(history = ui.history, stats = ui.stats)
             Spacer(Modifier.height(24.dp))
             Text(
                 text = "数据来自五邑大学电费充值系统",
@@ -453,46 +458,23 @@ private fun RechargeEntryCard(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
     ) {
+        // 标题与按钮同一行：这张卡只做「进入充值」一件事，说明文字已经收进
+        // 弹窗里，不再占一行。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.QrCode2,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MiuixTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(8.dp))
             Text(
                 text = "电费充值",
                 style = MiuixTheme.textStyles.title3,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "微信 / 支付宝",
-                style = MiuixTheme.textStyles.footnote2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "输入充值金额，生成学校电费系统支付二维码，扫码完成支付。",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = onRecharge,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
-            minHeight = 48.dp,
-            colors = ButtonDefaults.buttonColorsPrimary(),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.QrCode2,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("充值电费")
+            Button(
+                onClick = onRecharge,
+                enabled = enabled,
+                minWidth = 88.dp,
+                minHeight = 40.dp,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) {
+                Text("充值")
+            }
         }
     }
 }
@@ -571,7 +553,7 @@ private fun ResultCard(
                 Text(
                     text = kwh,
                     style = MiuixTheme.textStyles.headline1.copy(fontSize = 44.sp),
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = WyuEmphasisWeight,
                     modifier = Modifier.alignByBaseline(),
                 )
                 Spacer(Modifier.width(6.dp))
@@ -619,7 +601,7 @@ private fun ResultCard(
         InfoRow("预计可用", daysLeft?.let { formatDays(it) } ?: "—", animateValue = true)
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "折合电费按 0.63 元/度估算；日均与可用天数来自本机查询记录",
+            text = "折合电费按 0.63 元/度估算",
             style = MiuixTheme.textStyles.footnote2,
             color = secondary.copy(alpha = 0.8f),
         )
@@ -705,60 +687,40 @@ private fun DormEditorDialog(
 }
 
 /**
- * 范围切换。HyperOS 的做法是把候选收进一个贴着按钮弹出的列表里，
- * 一屏只有一个「当前范围」，而不是横排铺开四个胶囊。
+ * 范围切换。只显示当前范围，候选收进贴着胶囊弹出的菜单里（外观见 [WyuDropdownMenu]），
+ * 不再把几个范围横排铺开。
  */
 @Composable
 private fun RechargePeriodMenu(
     current: ElecPeriod,
     enabled: Boolean,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onSelect: (ElecPeriod) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var anchorRect by remember { mutableStateOf(Rect.Zero) }
     val periods = ElecPeriod.entries
-    Box {
-        Row(
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                .clickable(enabled = enabled) { expanded = true }
-                .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box(modifier = Modifier.onGloballyPositioned { anchorRect = it.boundsInWindow() }) {
+        // 触发器在设置页也复用同一套外观（文字 + 上下双箭头、胶囊高光）。
+        WyuDropdownTrigger(
+            label = current.label,
+            enabled = enabled,
+            onClick = { onExpandedChange(true) },
+        )
+        WyuDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+            anchor = anchorRect,
         ) {
-            Text(
-                text = current.label,
-                style = MiuixTheme.textStyles.footnote1,
-                color = if (enabled) {
-                    MiuixTheme.colorScheme.onSurface
-                } else {
-                    MiuixTheme.colorScheme.onSurfaceVariantSummary
-                },
-            )
-            Icon(
-                imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = null,
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-        OverlayListPopup(
-            show = expanded,
-            alignment = PopupPositionProvider.Align.End,
-            onDismissRequest = { expanded = false },
-        ) {
-            ListPopupColumn {
-                periods.forEachIndexed { index, period ->
-                    DropdownImpl(
-                        text = period.label,
-                        optionSize = periods.size,
-                        isSelected = current == period,
-                        index = index,
-                        onSelectedIndexChange = {
-                            expanded = false
-                            onSelect(period)
-                        },
-                    )
-                }
+            periods.forEach { period ->
+                WyuDropdownItem(
+                    text = period.label,
+                    selected = current == period,
+                    onClick = {
+                        onExpandedChange(false)
+                        onSelect(period)
+                    },
+                )
             }
         }
     }
@@ -767,6 +729,8 @@ private fun RechargePeriodMenu(
 @Composable
 private fun RechargeCard(
     ui: ElecUiState,
+    menuOpen: Boolean,
+    onMenuOpenChange: (Boolean) -> Unit,
     onSelectPeriod: (ElecPeriod) -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -775,13 +739,6 @@ private fun RechargeCard(
         insideMargin = PaddingValues(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Filled.History,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MiuixTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(8.dp))
             Text(
                 text = "充值记录",
                 style = MiuixTheme.textStyles.title3,
@@ -790,6 +747,8 @@ private fun RechargeCard(
             RechargePeriodMenu(
                 current = ui.period,
                 enabled = ui.result != null && !ui.rechargeLoading,
+                expanded = menuOpen,
+                onExpandedChange = onMenuOpenChange,
                 onSelect = onSelectPeriod,
             )
         }
@@ -1007,7 +966,7 @@ private fun RechargeAmountContent(
                 Text(
                     text = ui.result?.let { "${formatKwh(it.remainingKwh)} 度" } ?: "—",
                     style = MiuixTheme.textStyles.title3,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = WyuEmphasisWeight,
                 )
             }
             Text(
@@ -1018,23 +977,6 @@ private fun RechargeAmountContent(
         }
     }
     Spacer(Modifier.height(20.dp))
-    Text("选择金额", style = MiuixTheme.textStyles.title4)
-    Spacer(Modifier.height(8.dp))
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        listOf(10, 20, 30, 50).forEach { amount ->
-            val label = amount.toString()
-            ActionChip(
-                text = "¥$amount",
-                onClick = { vm.setRechargeAmount(label) },
-                primary = ui.rechargeAmount == label,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-    Spacer(Modifier.height(12.dp))
     GlassTextField(
         value = amountField,
         onValueChange = { field ->
@@ -1115,7 +1057,7 @@ private fun RechargeAmountContent(
     }
     Spacer(Modifier.height(10.dp))
     Text(
-        text = "生成二维码后支付宝会自动尝试打开；微信支付码需保存后在扫一扫的相册中选择。未支付不会扣款，也可用其他设备扫码。",
+        text = "输入金额后生成学校电费系统二维码，扫码完成支付，未支付不会扣款。",
         style = MiuixTheme.textStyles.footnote1,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     )
@@ -1618,13 +1560,6 @@ private fun HistoryCard(history: List<ElecSnapshot>, stats: ElecStats) {
         insideMargin = PaddingValues(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ShowChart,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MiuixTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(8.dp))
             Text(
                 text = "用电趋势",
                 style = MiuixTheme.textStyles.title3,
@@ -1878,3 +1813,4 @@ private fun InfoRow(
         }
     }
 }
+

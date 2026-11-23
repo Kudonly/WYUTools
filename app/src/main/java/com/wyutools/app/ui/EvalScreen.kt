@@ -390,6 +390,7 @@ private fun EvalPage(
                     "因此这里只能查看已提交的评价明细。",
                 style = MiuixTheme.textStyles.footnote2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(start = 12.dp),
             )
         }
     }
@@ -398,7 +399,8 @@ private fun EvalPage(
 @Composable
 private fun EvalTermHeader(title: String, tasks: List<EvalTask>) {
     val done = tasks.count { it.pjdm != null }
-    Column(modifier = Modifier.padding(start = 6.dp, bottom = 10.dp)) {
+    // 列表 16dp 页边距 + 12dp，和顶栏大标题对齐。
+    Column(modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)) {
         Text(
             text = title,
             style = MiuixTheme.textStyles.footnote1,

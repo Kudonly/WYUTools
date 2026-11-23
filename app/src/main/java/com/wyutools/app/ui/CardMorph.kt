@@ -269,7 +269,7 @@ private const val MorphTileFootPower = 1.3f
 
 /** RenderEffect is API 31+. Older devices draw the same layers sharp — the
  *  morph still runs, it just has no defocus. */
-private val MorphBlurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+internal val MorphBlurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
 /**
  * iOS home-screen feel: a critically damped spring, so the window travels fast,
@@ -619,7 +619,7 @@ fun capturePageBitmap(activity: Activity, onCaptured: (Bitmap?) -> Unit) {
  */
 private val morphBackdropEffects = HashMap<Int, BlurEffect>()
 
-private fun backdropBlurEffect(radiusPx: Float): BlurEffect {
+internal fun backdropBlurEffect(radiusPx: Float): BlurEffect {
     val key = (radiusPx * 2f).roundToInt().coerceAtLeast(1)
     return morphBackdropEffects.getOrPut(key) {
         BlurEffect(key / 2f, key / 2f, TileMode.Clamp)
@@ -1768,8 +1768,11 @@ private fun FlightTitle(
     val collapsedTarget = WyuMorphPageState.collapsedTitleBounds
     val targetBounds = remember(density, surfaceTop, collapsedTarget) {
         collapsedTarget ?: run {
-            val left = with(density) { 28.dp.toPx() }
-            Rect(left, surfaceTop + with(density) { 56.dp.toPx() }, left, surfaceTop)
+            // 没有折叠态标题的页面，落点就是展开态大标题那一行：
+            // 左边距、栏高、字号都从 WyuActionBar 的同一套常量取，改一处就行。
+            val left = with(density) { WyuLargeTitlePadding.toPx() }
+            val top = surfaceTop + with(density) { WyuCollapsedBarHeight.toPx() }
+            Rect(left, top, left, top)
         }
     }
     val startFontPx = snapshot.titleFontSizePx.takeIf { it > 0f }
@@ -1780,13 +1783,13 @@ private fun FlightTitle(
         WyuMorphPageState.collapsedTitleFontPx.takeIf { it > 0f }
             ?: with(density) { 18.sp.toPx() }
     } else {
-        with(density) { 32.sp.toPx() }
+        with(density) { WyuLargeTitleFontSize.toPx() }
     }
     val targetLinePx = if (collapsedTarget != null) {
         WyuMorphPageState.collapsedTitleLinePx.takeIf { it > 0f }
             ?: with(density) { 22.sp.toPx() }
     } else {
-        with(density) { 40.sp.toPx() }
+        with(density) { WyuLargeTitleLineHeight.toPx() }
     }
 
     val progressValue = progress()

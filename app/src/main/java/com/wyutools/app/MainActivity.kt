@@ -70,6 +70,8 @@ import com.wyutools.app.ui.ROUTE_EXAM
 import com.wyutools.app.ui.ROUTE_GPA
 import com.wyutools.app.ui.ROUTE_GRADES
 import com.wyutools.app.ui.ROUTE_PHYSICAL
+import com.wyutools.app.ui.ROUTE_PHYSICAL_DETAIL
+import com.wyutools.app.ui.PhysicalDetailScreen
 import com.wyutools.app.ui.ROUTE_TODAY
 import com.wyutools.app.ui.LxtBindScreen
 import com.wyutools.app.ui.LxtScreen
@@ -835,7 +837,6 @@ fun WyuApp(
                         vm = app.academicsViewModel,
                         authVm = authVm,
                         onLogin = { nav.navigate("me/login") },
-                        onOpenGpa = { nav.navigate(ROUTE_GPA) },
                         onBack = { closeTool(ROUTE_GRADES) },
                     )
                 }
@@ -884,7 +885,24 @@ fun WyuApp(
                         vm = app.academicsViewModel,
                         authVm = authVm,
                         onLogin = { nav.navigate("me/login") },
+                        onOpenDetail = { term ->
+                            app.academicsViewModel.openPhysicalDetail(term)
+                            nav.navigate(ROUTE_PHYSICAL_DETAIL)
+                        },
                         onBack = { closeTool(ROUTE_PHYSICAL) },
+                    )
+                }
+            }
+            composable(ROUTE_PHYSICAL_DETAIL) {
+                WyuRoutePage(
+                    route = ROUTE_PHYSICAL_DETAIL,
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
+                    PhysicalDetailScreen(
+                        vm = app.academicsViewModel,
+                        onBack = goBack,
                     )
                 }
             }

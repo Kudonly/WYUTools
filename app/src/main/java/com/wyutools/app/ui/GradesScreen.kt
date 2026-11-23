@@ -17,13 +17,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -31,19 +36,23 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wyutools.app.academics.AcademicsViewModel
@@ -59,9 +68,11 @@ import com.wyutools.app.academics.GpaRow
 import com.wyutools.app.academics.GpaUiState
 import com.wyutools.app.auth.AuthViewModel
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
@@ -74,19 +85,27 @@ fun GradesScreen(
     vm: AcademicsViewModel,
     authVm: AuthViewModel,
     onLogin: () -> Unit,
-    onOpenGpa: () -> Unit,
     onBack: () -> Unit,
 ) {
     val ui by vm.grades.collectAsState()
+    val gpaUi by vm.gpa.collectAsState()
     val authUi by authVm.ui.collectAsState()
     val detail by vm.gradeDetail.collectAsState()
     val context = LocalContext.current
     // 分析单弹窗从底部滑入/滑出，关闭时先收起再清数据。
     var detailShow by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { vm.onGradesEnter() }
+    // 成绩和绩点一起取：概览里的平均绩点用教务「历年」口径，不自己算一遍，
+    // 免得跟绩点页签的数字对不上。
+    LaunchedEffect(Unit) {
+        vm.onGradesEnter()
+        vm.onGpaEnter()
+    }
     LaunchedEffect(authUi.loggedIn, authUi.restoring) {
-        if (!authUi.restoring && authUi.loggedIn) vm.onGradesEnter()
+        if (!authUi.restoring && authUi.loggedIn) {
+            vm.onGradesEnter()
+            vm.onGpaEnter()
+        }
     }
     LaunchedEffect(ui.notice) {
         val notice = ui.notice ?: return@LaunchedEffect
@@ -108,8 +127,9 @@ fun GradesScreen(
         data != null -> GradesContent(
             ui = ui,
             data = data,
-            onRefresh = { vm.refreshGrades() },
-            onOpenGpa = onOpenGpa,
+            gpaUi = gpaUi,
+            onRefreshGrades = { vm.refreshGrades() },
+            onRefreshGpa = { vm.refreshGpa() },
             onBack = onBack,
             onOpenEntry = { entry ->
                 detailShow = true
@@ -154,21 +174,41 @@ fun GradesScreen(
 private fun GradesContent(
     ui: GradesUiState,
     data: GradesData,
-    onRefresh: () -> Unit,
-    onOpenGpa: () -> Unit,
+    gpaUi: GpaUiState,
+    onRefreshGrades: () -> Unit,
+    onRefreshGpa: () -> Unit,
     onBack: () -> Unit,
     onOpenEntry: (GradeEntry) -> Unit,
 ) {
-    val listState = rememberLazyListState()
-    val fraction = rememberWyuCollapseFraction(listState)
-    // 默认停在最新学期；用户切换后记住选择，但数据刷新时若该学期消失就回退。
-    var selectedCode by rememberSaveable { mutableStateOf("") }
-    val terms = remember(data) { data.terms.reversed() }
-    val selected = terms.firstOrNull { it.code == selectedCode } ?: terms.firstOrNull()
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
+    val gradesListState = rememberLazyListState()
+    val gpaListState = rememberLazyListState()
+    val gradesFraction = rememberWyuCollapseFraction(gradesListState)
+    val gpaFraction = rememberWyuCollapseFraction(gpaListState)
+    val fraction = rememberWyuPagerCollapseFraction(
+        pagerState = pagerState,
+        firstFraction = gradesFraction,
+        secondFraction = gpaFraction,
+    )
+    val page = pagerState.currentPage
 
     WyuPageScaffold(
         progress = { fraction.value },
         maskCollapseHeight = WyuLargeTitleHeight,
+        // 与体育馆预约 / 教评一致：切换条悬浮在顶栏下方、内容层之外的 overlay
+        // 槽里。放进列表里会变成「内容层采样内容层」，渲染线程栈溢出闪退。
+        overlay = {
+            GradesTabsOverlay(
+                pagerState = pagerState,
+                collapsedFraction = fraction,
+                onSelect = { index ->
+                    if (index != pagerState.currentPage) {
+                        scope.launch { pagerState.animateScrollToPage(index) }
+                    }
+                },
+            )
+        },
         topBar = {
             WyuActionBar(
                 title = "成绩",
@@ -181,57 +221,152 @@ private fun GradesContent(
                     )
                 },
                 actions = {
-                    GpaGlassButton(onClick = onOpenGpa)
-                    Spacer(Modifier.width(6.dp))
                     WyuTopBarAction(
                         icon = Icons.Filled.Refresh,
                         label = "刷新",
-                        onClick = onRefresh,
-                        enabled = !ui.refreshing,
+                        onClick = if (page == 0) onRefreshGrades else onRefreshGpa,
+                        enabled = if (page == 0) !ui.refreshing else !gpaUi.refreshing,
                     )
                 },
             )
         },
     ) { padding ->
-        LazyColumn(
-            state = listState,
+        // 悬浮条占的是顶栏之外的高度，列表从折叠后的顶栏算起，再由首项的
+        // 占位块把切换条让出来。
+        val listTopInset = padding.calculateTopPadding() - WyuLargeTitleHeight
+        val listBottomInset = padding.calculateBottomPadding() + 28.dp
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 28.dp,
-            ),
-        ) {
-            item(key = "overview") {
-                GradesOverview(data)
-                Spacer(Modifier.height(14.dp))
-            }
-            item(key = "terms") {
-                TermChips(
-                    terms = terms.map { it.code to it.name },
-                    selected = selected?.code.orEmpty(),
-                    onSelect = { selectedCode = it },
+        ) { index ->
+            if (index == 0) {
+                GradesTab(
+                    data = data,
+                    gpa = gpaUi.data?.overall?.gpa ?: data.overallGpa,
+                    listState = gradesListState,
+                    topInset = listTopInset,
+                    bottomInset = listBottomInset,
+                    onOpenEntry = onOpenEntry,
                 )
-                Spacer(Modifier.height(12.dp))
+            } else {
+                GpaTab(
+                    ui = gpaUi,
+                    data = gpaUi.data,
+                    listState = gpaListState,
+                    topInset = listTopInset,
+                    bottomInset = listBottomInset,
+                )
             }
-            if (selected != null) {
-                item(key = "term-head-${selected.code}") {
-                    TermSummary(selected)
-                    Spacer(Modifier.height(10.dp))
-                }
-                items(selected.entries, key = { it.key }) { entry ->
-                    GradeCard(entry = entry, onClick = { onOpenEntry(entry) })
-                    Spacer(Modifier.height(10.dp))
-                }
+        }
+    }
+}
+
+/**
+ * 成绩页签：概览三栏 + 学期胶囊 + 该学期的课程单卡。
+ *
+ * [gpa] 用的是教务「历年」口径，和绩点页签里的那个数字同源，两处不会再打架。
+ */
+@Composable
+private fun GradesTab(
+    data: GradesData,
+    gpa: Double?,
+    listState: LazyListState,
+    topInset: Dp,
+    bottomInset: Dp,
+    onOpenEntry: (GradeEntry) -> Unit,
+) {
+    // 默认停在最新学期；用户切换后记住选择，但数据刷新时若该学期消失就回退。
+    var selectedCode by rememberSaveable { mutableStateOf("") }
+    val terms = remember(data) { data.terms.reversed() }
+    val selected = terms.firstOrNull { it.code == selectedCode } ?: terms.firstOrNull()
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = topInset,
+            bottom = bottomInset,
+        ),
+    ) {
+        item(key = "tabs-spacer") {
+            Spacer(Modifier.height(GradesContentTopSpacer))
+        }
+        item(key = "overview") {
+            GradesOverview(data = data, gpa = gpa)
+            Spacer(Modifier.height(12.dp))
+        }
+        item(key = "terms") {
+            TermChips(
+                terms = terms.map { it.code to it.name },
+                selected = selected?.code.orEmpty(),
+                onSelect = { selectedCode = it },
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+        if (selected != null) {
+            item(key = "term-head-${selected.code}") {
+                TermSummary(selected)
+                Spacer(Modifier.height(8.dp))
             }
-            item(key = "footer") {
-                Spacer(Modifier.height(4.dp))
+            item(key = "term-list-${selected.code}") {
+                GradeList(entries = selected.entries, onOpenEntry = onOpenEntry)
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+        item(key = "footer") {
+            Text(
+                text = buildString {
+                    if (data.fetchedAt > 0) append(updatedAt(data.fetchedAt))
+                    append("共 ${data.terms.size} 个学期 · ${data.all.size} 门课程")
+                },
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+    }
+}
+
+/** 绩点页签：历年总绩点大卡 + 各学期绩点单卡。 */
+@Composable
+private fun GpaTab(
+    ui: GpaUiState,
+    data: GpaData?,
+    listState: LazyListState,
+    topInset: Dp,
+    bottomInset: Dp,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = topInset,
+            bottom = bottomInset,
+        ),
+    ) {
+        item(key = "tabs-spacer") {
+            Spacer(Modifier.height(GradesContentTopSpacer))
+        }
+        item(key = "gpa-hero") {
+            if (data != null) {
+                GpaHero(data.overall)
+            } else {
+                GpaLoadingCard(ui.error)
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        if (data != null) {
+            item(key = "gpa-terms") {
+                GpaTermList(rows = data.terms, best = data.best?.label)
+                Spacer(Modifier.height(10.dp))
+            }
+            item(key = "gpa-note") {
                 Text(
-                    text = buildString {
-                        if (data.fetchedAt > 0) append(updatedAt(data.fetchedAt))
-                        append("成绩与绩点均来自教务系统，以教务为准。")
-                    },
+                    text = "注：教务只统计修读方式为必修的课程；「历年」是教务处默认的统计口径，成绩页的概览也用它。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -240,232 +375,339 @@ private fun GradesContent(
     }
 }
 
-/** 顶栏的玻璃胶囊：一眼能看出是查平均绩点的入口。 */
+private val GradesTabTitles = listOf("成绩", "绩点")
+
+/** 悬浮切换条占掉的区域：与教评 / 体育馆用同一组数字。 */
+private val GradesTabsAreaHeight = 50.dp
+
+// 悬浮条不占列表流，内容要为它让位：折叠后的顶栏高度由 contentPadding 给，
+// 这里补上大标题高度、切换条高度，再留一点呼吸空间。
+private val GradesContentTopSpacer = WyuLargeTitleHeight + GradesTabsAreaHeight + 12.dp
+
+/**
+ * 悬浮在顶栏下方的切换条，做法照搬体育馆预约 / 教评：放在 `WyuPageScaffold` 的
+ * overlay 槽里，而不是塞进列表。overlay 是内容层的兄弟节点，采样页面内容层不会
+ * 让 RenderNode 引用自己；塞进 `LazyColumn` 会直接把渲染线程递归到栈溢出。
+ */
 @Composable
-private fun GpaGlassButton(onClick: () -> Unit) {
+private fun GradesTabsOverlay(
+    pagerState: PagerState,
+    collapsedFraction: State<Float>,
+    onSelect: (Int) -> Unit,
+) {
+    // 滑块跟分页器的连续位置走，左右滑动时与页面同步，而不是等翻页才跳过去。
+    val selectionFraction = remember(pagerState) {
+        { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    }
+    val boost = LocalWyuCollapseBoost.current
     Box(
         modifier = Modifier
-            .height(34.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .fillMaxSize()
+            .graphicsLayer {
+                val morph = WyuMorphPageState.contentProgress
+                val scale = 1f - WyuMorphPageState.ContentShrink * (1f - morph)
+                scaleX = scale
+                scaleY = scale
+                translationY = (1f - morph) * WyuMorphPageState.ContentLift.toPx()
+            }
+            .padding(top = rememberWyuStatusBarTopInset())
+            .padding(top = 62.dp, start = 16.dp, end = 16.dp),
     ) {
-        // 与旁边「刷新」按钮同款材质：实时采样顶栏下方的页面内容层，
-        // 不用缓存烘焙的壁纸底图，列表滚动、卡片形变都能透上来。
-        LiveGlassCard(
-            modifier = Modifier.fillMaxHeight(),
-            cornerRadius = 17.dp,
-            insideMargin = PaddingValues(horizontal = 13.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.ShowChart,
-                    contentDescription = null,
-                    modifier = Modifier.size(15.dp),
-                    tint = MiuixTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(5.dp))
+        WyuFloatingTabs(
+            options = GradesTabTitles,
+            selectedIndex = pagerState.currentPage,
+            onSelect = onSelect,
+            selectionFraction = selectionFraction,
+            lightThumb = true,
+            modifier = Modifier.graphicsLayer {
+                val collapsed = (collapsedFraction.value + boost()).coerceIn(0f, 1f)
+                translationY = WyuLargeTitleHeight.toPx() * (1f - collapsed)
+            },
+        )
+    }
+}
+
+/** 与 iOS 同款的三栏概览：平均绩点 / 已修学分 / 课程。 */
+@Composable
+private fun GradesOverview(data: GradesData, gpa: Double?) {
+    val primary = MiuixTheme.colorScheme.primary
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = WyuCardCornerRadius,
+        samplePageContent = false,
+        insideMargin = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            StatTile(
+                title = "平均绩点",
+                value = gpa?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
+                tint = primary,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                title = "已修学分",
+                value = trimNumber(data.totalCredit),
+                unit = "分",
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                title = "课程",
+                value = data.all.size.toString(),
+                unit = "门",
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatTile(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    unit: String? = null,
+    tint: androidx.compose.ui.graphics.Color = MiuixTheme.colorScheme.onSurface,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = title,
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = value,
+                style = MiuixTheme.textStyles.title2.copy(fontSize = 22.sp),
+                fontWeight = WyuEmphasisWeight,
+                color = tint,
+                maxLines = 1,
+            )
+            unit?.let {
+                Spacer(Modifier.width(2.dp))
                 Text(
-                    text = "平均绩点",
-                    style = MiuixTheme.textStyles.footnote1,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MiuixTheme.colorScheme.primary,
-                    maxLines = 1,
+                    text = it,
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(bottom = 2.dp),
                 )
             }
         }
     }
 }
 
+/** 分组小标题：左侧灰字，右侧可带统计说明。 */
 @Composable
-private fun GradesOverview(data: GradesData) {
-    val primary = MiuixTheme.colorScheme.primary
-    val gpa = data.overallGpa
+private fun SectionTitle(text: String, trailing: String? = null) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 左边补到顶栏大标题那条线（列表本身有 16dp 页边距）。
+            .padding(start = 12.dp, end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MiuixTheme.textStyles.footnote1,
+            fontWeight = FontWeight.SemiBold,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+        )
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = trailing,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TermSummary(term: GradeTerm) {
+    SectionTitle(
+        text = term.name,
+        trailing = "${trimNumber(term.totalCredit)} 学分 · " +
+            (term.gpa?.let { String.format(Locale.US, "%.2f", it) } ?: "—"),
+    )
+}
+
+/** 一个学期一张卡，课程行之间用与 iOS 一致的内缩分隔线。 */
+@Composable
+private fun GradeList(entries: List<GradeEntry>, onOpenEntry: (GradeEntry) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = WyuCardCornerRadius,
+        samplePageContent = false,
+        insideMargin = PaddingValues(0.dp),
+    ) {
+        entries.forEachIndexed { index, entry ->
+            GradeRow(entry = entry, onClick = { onOpenEntry(entry) })
+            if (index != entries.lastIndex) {
+                HorizontalDivider(modifier = Modifier.padding(start = 18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun GradeRow(entry: GradeEntry, onClick: () -> Unit) {
+    val failed = entry.passed == false
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.courseName,
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = buildString {
+                    entry.credit?.let { append("${trimNumber(it)} 学分") }
+                    entry.examNature?.let {
+                        if (isNotEmpty()) append("  ")
+                        append(it)
+                    }
+                    entry.studyMode?.let {
+                        if (isNotEmpty()) append("  ")
+                        append(it)
+                    }
+                    if (isEmpty()) append(entry.courseCode.orEmpty())
+                },
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = entry.scoreText ?: "—",
+                style = MiuixTheme.textStyles.title2.copy(fontSize = 20.sp),
+                fontWeight = WyuEmphasisWeight,
+                color = if (failed) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurface,
+            )
+            entry.point?.let { point ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = String.format(Locale.US, "绩点 %.2f", point),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+        if (entry.cjdm != null) {
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GpaLoadingCard(error: String?) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = WyuCardCornerRadius,
         samplePageContent = false,
         insideMargin = PaddingValues(20.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (error == null) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(rememberWyuIconShape(44.dp))
-                    .background(primary.copy(alpha = 0.14f)),
+                    .fillMaxWidth()
+                    .height(96.dp),
                 contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.School,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = primary,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "全部成绩",
-                    style = MiuixTheme.textStyles.headline2,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "${data.terms.size} 个学期 · ${data.all.size} 门课程",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = gpa?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                    style = MiuixTheme.textStyles.title2,
-                    fontWeight = FontWeight.SemiBold,
-                    color = primary,
-                )
-                Text(
-                    text = "平均绩点",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = "总学分 ${trimNumber(data.totalCredit)} · 只统计已出成绩的课程",
-            style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-    }
-}
-
-@Composable
-private fun TermSummary(term: GradeTerm) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "${term.entries.size} 门课程",
-            style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = "学分 ${trimNumber(term.totalCredit)}",
-            style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        Spacer(Modifier.weight(1f))
-        term.gpa?.let { gpa ->
+            ) { CircularProgressIndicator() }
+        } else {
             Text(
-                text = "学期绩点 ${String.format(Locale.US, "%.2f", gpa)}",
-                style = MiuixTheme.textStyles.footnote2,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.primary,
+                text = error,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.error,
             )
         }
     }
 }
 
+/** 各学期绩点列表：与课程列表同一套行式卡片。 */
 @Composable
-private fun GradeCard(entry: GradeEntry, onClick: () -> Unit) {
-    val primary = MiuixTheme.colorScheme.primary
-    val failed = entry.passed == false
+private fun GpaTermList(rows: List<GpaRow>, best: String?) {
+    if (rows.isEmpty()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = WyuCardCornerRadius,
+            samplePageContent = false,
+            insideMargin = PaddingValues(20.dp),
+        ) {
+            Text(
+                text = "教务没有返回按学期的绩点，只有总平均。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        return
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = WyuCardCornerRadius,
-        insideMargin = PaddingValues(horizontal = 18.dp, vertical = 15.dp),
-        onClick = onClick,
+        samplePageContent = false,
+        insideMargin = PaddingValues(0.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.courseName,
-                    style = MiuixTheme.textStyles.headline2,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    entry.studyMode?.let { mode ->
-                        TinyTag(mode)
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(
-                        text = buildString {
-                            entry.credit?.let { append("${trimNumber(it)} 学分") }
-                            entry.scoreMode?.let {
-                                if (isNotEmpty()) append(" · ")
-                                append(it)
-                            }
-                            if (isEmpty()) append(entry.courseCode.orEmpty())
-                        },
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = entry.scoreText ?: "—",
-                    style = MiuixTheme.textStyles.title2.copy(fontSize = 26.sp),
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (failed) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = entry.point?.let { String.format(Locale.US, "绩点 %.1f", it) } ?: "—",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = if (failed) {
-                        MiuixTheme.colorScheme.error
-                    } else {
-                        MiuixTheme.colorScheme.onSurfaceVariantSummary
-                    },
-                )
-            }
-        }
-        entry.examNature?.takeIf { it != "正常考试" }?.let { nature ->
-            Spacer(Modifier.height(8.dp))
-            Box(
+        rows.forEachIndexed { index, row ->
+            Row(
                 modifier = Modifier
-                    .clip(rememberWyuSquircle(9.dp))
-                    .background(primary.copy(alpha = 0.12f))
-                    .padding(horizontal = 7.dp, vertical = 2.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = nature,
-                    style = MiuixTheme.textStyles.footnote2.copy(fontSize = 11.sp),
+                    text = row.label,
+                    style = MiuixTheme.textStyles.footnote1,
+                )
+                if (best == row.label) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(rememberWyuSquircle(9.dp))
+                            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "最高",
+                            style = MiuixTheme.textStyles.footnote2,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = String.format(Locale.US, "%.2f", row.gpa),
+                    style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp),
                     fontWeight = FontWeight.SemiBold,
-                    color = primary,
                 )
             }
+            if (index != rows.lastIndex) {
+                HorizontalDivider(modifier = Modifier.padding(start = 18.dp))
+            }
         }
-    }
-}
-
-@Composable
-private fun TinyTag(text: String) {
-    Box(
-        modifier = Modifier
-            .clip(rememberWyuSquircle(8.dp))
-            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.10f))
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) {
-        Text(
-            text = text,
-            style = MiuixTheme.textStyles.footnote2.copy(fontSize = 10.sp),
-            color = MiuixTheme.colorScheme.primary,
-            maxLines = 1,
-        )
     }
 }
 
@@ -793,7 +1035,7 @@ private fun GpaTermCard(row: GpaRow, best: Boolean) {
                 ) {
                     Text(
                         text = "最高",
-                        style = MiuixTheme.textStyles.footnote2.copy(fontSize = 11.sp),
+                        style = MiuixTheme.textStyles.footnote2,
                         fontWeight = FontWeight.SemiBold,
                         color = MiuixTheme.colorScheme.primary,
                     )

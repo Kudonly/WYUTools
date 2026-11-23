@@ -32,6 +32,9 @@ const val ROUTE_GPA = "grades/gpa"
 const val ROUTE_EVAL = "eval"
 const val ROUTE_PHYSICAL = "physical"
 
+/** 体测二级页面（某一学年的各项成绩），不是工具，不参与卡片形变。 */
+const val ROUTE_PHYSICAL_DETAIL = "physical/detail"
+
 /** 常用卡片 picker. Not a tool, but it opens with the same morph as a tool. */
 const val ROUTE_COMMON = "settings/common"
 

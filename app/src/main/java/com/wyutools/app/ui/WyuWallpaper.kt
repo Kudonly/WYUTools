@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
@@ -100,16 +101,23 @@ enum class WyuThemeMode(val label: String) {
 /**
  * 应用内字号。
  *
- * 默认跟随系统；其余档位给的是**绝对**倍数而不是相对系统的增量——用户既然
- * 主动选了「标准」，就应当回到 1.0，而不是在系统已经放大过的字号上再乘一次。
+ * [TextScaleFollowSystem]（0）表示跟随系统，其余是**绝对**的字体缩放（1.0 = 标准）。
+ * 不做「系统值 × 倍数」——用户既然把滑条调回 100%，就应当回到 1.0，
+ * 而不是在系统已经放大过的字号上再乘一次。
  */
-enum class WyuTextSize(val label: String, val scale: Float) {
-    FollowSystem("跟随系统", 0f),
-    Small("小", 0.9f),
-    Standard("标准", 1f),
-    Large("大", 1.15f),
-    ExtraLarge("特大", 1.3f),
-}
+const val TextScaleFollowSystem = 0f
+
+/** 滑条的下限与上限，按 1.0 = 标准换算成 85% ~ 140%。 */
+const val TextScaleMin = 0.85f
+const val TextScaleMax = 1.40f
+
+/** 把任意浮点缩放收敛到 1% 的整数网格上（滑条拖动时用）。 */
+fun quantizeTextScale(scale: Float): Float =
+    if (scale <= TextScaleFollowSystem) {
+        TextScaleFollowSystem
+    } else {
+        ((scale * 100f).roundToInt() / 100f).coerceIn(TextScaleMin, TextScaleMax)
+    }
 
 fun wyuHomeBackgroundStops(
     dark: Boolean,
@@ -159,7 +167,9 @@ object WyuAppearance {
     private const val PrefsName = "appearance"
     private const val KeyWallpaper = "wallpaper"
     private const val KeyThemeMode = "theme_mode"
+    // 旧版按档位存字符串，保留用于一次性迁移。
     private const val KeyTextSize = "text_size"
+    private const val KeyTextScale = "text_scale"
     // Retired single-value key; still read as the fallback for the light value.
     private const val KeyCustomBrightness = "custom_brightness"
     private const val KeyCustomBrightnessLight = "custom_brightness_light"
@@ -196,8 +206,8 @@ object WyuAppearance {
     private val _themeMode = MutableStateFlow(WyuThemeMode.System)
     val themeMode: StateFlow<WyuThemeMode> = _themeMode.asStateFlow()
 
-    private val _textSize = MutableStateFlow(WyuTextSize.FollowSystem)
-    val textSize: StateFlow<WyuTextSize> = _textSize.asStateFlow()
+    private val _textScale = MutableStateFlow(TextScaleFollowSystem)
+    val textScale: StateFlow<Float> = _textScale.asStateFlow()
 
     private val _customWallpaper = MutableStateFlow<ImageBitmap?>(null)
     val customWallpaper: StateFlow<ImageBitmap?> = _customWallpaper.asStateFlow()
@@ -355,16 +365,27 @@ object WyuAppearance {
         _themeMode.value = WyuThemeMode.entries
             .firstOrNull { it.name == loaded.getString(KeyThemeMode, null) }
             ?: WyuThemeMode.System
-        _textSize.value = WyuTextSize.entries
-            .firstOrNull { it.name == loaded.getString(KeyTextSize, null) }
-            ?: WyuTextSize.FollowSystem
+        _textScale.value = if (loaded.contains(KeyTextScale)) {
+            quantizeTextScale(loaded.getFloat(KeyTextScale, TextScaleFollowSystem))
+        } else {
+            // 旧版本存的是档位名，换算成等价的绝对缩放。
+            when (loaded.getString(KeyTextSize, null)) {
+                "Small" -> 0.9f
+                "Standard" -> 1f
+                "Large" -> 1.15f
+                "ExtraLarge" -> 1.30f
+                else -> TextScaleFollowSystem
+            }
+        }
     }
 
-    fun setTextSize(context: Context, size: WyuTextSize) {
+    /** [scale] 传 [TextScaleFollowSystem] 表示跟随系统，其余按 1% 收敛后保存。 */
+    fun setTextScale(context: Context, scale: Float) {
         ensureLoaded(context)
-        if (_textSize.value == size) return
-        _textSize.value = size
-        prefs?.edit()?.putString(KeyTextSize, size.name)?.apply()
+        val target = quantizeTextScale(scale)
+        if (_textScale.value == target) return
+        _textScale.value = target
+        prefs?.edit()?.putFloat(KeyTextScale, target)?.apply()
     }
 
     fun setThemeMode(context: Context, mode: WyuThemeMode) {

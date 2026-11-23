@@ -21,13 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Place
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -231,6 +226,7 @@ private fun ExamContent(
                     },
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 12.dp),
                 )
             }
         }
@@ -246,41 +242,24 @@ private fun ExamOverview(data: ExamData, next: ExamEntry?, today: LocalDate) {
         samplePageContent = false,
         insideMargin = PaddingValues(20.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(rememberWyuIconShape(44.dp))
-                    .background(primary.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.CalendarMonth,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = primary,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = data.termName,
-                    style = MiuixTheme.textStyles.headline2,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = if (data.entries.isEmpty()) {
-                        "本学期暂无考试安排"
-                    } else {
-                        "共 ${data.entries.size} 场考试"
-                    },
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
+        Column {
+            Text(
+                text = data.termName,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = if (data.entries.isEmpty()) {
+                    "本学期暂无考试安排"
+                } else {
+                    "共 ${data.entries.size} 场考试"
+                },
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
         if (next != null) {
             Spacer(Modifier.height(16.dp))
@@ -343,7 +322,8 @@ private fun DayHeader(date: LocalDate?, today: LocalDate, count: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 8.dp),
+            // 列表 16dp 页边距 + 12dp，与顶栏大标题同一条左边线。
+            .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -429,7 +409,6 @@ private fun ExamCard(entry: ExamEntry, today: LocalDate) {
         if (time != null || section != null) {
             Spacer(Modifier.height(10.dp))
             ExamInfoRow(
-                icon = Icons.Outlined.Schedule,
                 text = listOfNotNull(time, section).joinToString(" · "),
                 highlight = soon,
             )
@@ -439,7 +418,6 @@ private fun ExamCard(entry: ExamEntry, today: LocalDate) {
         if (room != null || seat != null) {
             Spacer(Modifier.height(6.dp))
             ExamInfoRow(
-                icon = Icons.Outlined.Place,
                 text = listOfNotNull(
                     room ?: "考场待定",
                     seat?.let { "座位 $it" },
@@ -448,33 +426,22 @@ private fun ExamCard(entry: ExamEntry, today: LocalDate) {
         }
         entry.methodLabel?.let { method ->
             Spacer(Modifier.height(6.dp))
-            ExamInfoRow(icon = Icons.AutoMirrored.Outlined.Assignment, text = method)
+            ExamInfoRow(text = method)
         }
         entry.invigilators?.let { invigilators ->
             Spacer(Modifier.height(6.dp))
-            ExamInfoRow(icon = Icons.Outlined.Person, text = "监考 $invigilators")
+            ExamInfoRow(text = "监考 $invigilators")
         }
         entry.remark?.let { remark ->
             Spacer(Modifier.height(6.dp))
-            ExamInfoRow(icon = Icons.Outlined.Info, text = remark)
+            ExamInfoRow(text = remark)
         }
     }
 }
 
 @Composable
-private fun ExamInfoRow(icon: ImageVector, text: String, highlight: Boolean = false) {
+private fun ExamInfoRow(text: String, highlight: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = if (highlight) {
-                MiuixTheme.colorScheme.primary
-            } else {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary
-            },
-        )
-        Spacer(Modifier.width(8.dp))
         Text(
             text = text,
             style = MiuixTheme.textStyles.footnote1,

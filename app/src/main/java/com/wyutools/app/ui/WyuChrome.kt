@@ -154,13 +154,39 @@ val WyuNavigatorBarHeight: Dp = 58.dp
  */
 private const val ThumbPressWidenTrim = 0.82f
 
-private val WyuCollapsedBarHeight = 56.dp
+internal val WyuCollapsedBarHeight = 56.dp
 internal val WyuLargeTitleHeight = 46.dp
+// 首页三个页签的大标题沿用原来的 28dp 页边距（比下方内容多一级缩进），
+// 字号仍比折叠态大一号。这三项也供切换动画（CardMorph 的 FlightTitle）取用，
+// 两处必须同源。
+internal val WyuLargeTitlePadding = 28.dp
+// 带返回键的子页面从 16dp 起，给返回箭头留出的位置和内容对齐。
+internal val WyuNestedTitlePadding = 16.dp
+/**
+ * 非卡片文字的左对齐线：跟展开态大标题同一个起点。
+ *
+ * 卡片仍停在 16dp 页边距上，所以页面里那些直接铺在背景上的说明文字、分区标题
+ * 要自己补上两者的差（16dp 的页面补 12dp，20dp 的补 8dp）。
+ */
+internal val WyuTextInset = WyuLargeTitlePadding
+
+internal val WyuLargeTitleFontSize = 36.sp
+internal val WyuLargeTitleLineHeight = 44.sp
+
+/** 关键数值（余额、电量、接下来要上的课）统一用最重字重压住版面。 */
+internal val WyuEmphasisWeight = FontWeight.Black
 
 internal val LocalWyuPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
 /** Wallpaper-only backdrop, so cards and buttons frost the photo without sampling themselves. */
 internal val LocalWyuGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+
+/**
+ * Backdrop for inputs that live in a dialog. 弹窗在独立窗口里，拿不到页面那层
+ * 墙纸，[LocalWyuGlassBackdrop] 因此被置空；对话框再把页面层登记到这里，让
+ * 输入框仍能模糊身后的内容。弹窗内容不在页面层里，所以采样它不会自引用。
+ */
+internal val LocalWyuDialogInputBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
 /** Extra 0..1 collapse driven by overscroll drag on pages that cannot scroll. */
 internal val LocalWyuCollapseBoost = staticCompositionLocalOf<() -> Float> { { 0f } }
@@ -691,8 +717,8 @@ fun WyuActionBar(
     val statusTop = rememberWyuStatusBarTopInset()
     val largeStyle = remember(onSurface) {
         TextStyle(
-            fontSize = 32.sp,
-            lineHeight = 40.sp,
+            fontSize = WyuLargeTitleFontSize,
+            lineHeight = WyuLargeTitleLineHeight,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = (-0.2).sp,
             color = onSurface,
@@ -764,8 +790,13 @@ fun WyuActionBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(WyuCollapsedBarHeight)
+                    // 和展开态取同一个左边距，两个标题交叉淡入淡出时才不会横向错位。
                     .padding(
-                        start = if (navigationIcon != null) 16.dp else 28.dp,
+                        start = if (navigationIcon != null) {
+                            WyuNestedTitlePadding
+                        } else {
+                            WyuLargeTitlePadding
+                        },
                         end = 10.dp,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
@@ -816,7 +847,7 @@ fun WyuActionBar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(WyuLargeTitleHeight)
-                        .padding(start = 28.dp, end = 24.dp),
+                        .padding(start = WyuLargeTitlePadding, end = 24.dp),
                 ) {
                     WyuSwitchingTitle(
                         primary = title,
@@ -1000,13 +1031,9 @@ internal fun WyuChromeGlassSurface(
                         if (useSoftGlass && backdrop != null) {
                             Modifier
                         } else {
-                            Modifier.background(
-                                if (dark) {
-                                    Color.White.copy(alpha = 0.16f)
-                                } else {
-                                    Color.White.copy(alpha = 0.55f)
-                                },
-                            )
+                            // 卡片同色，而不是写死的白：深色模式下白色会让
+                            // 这些玻璃钮比卡片亮出一截，看着就是"白块"。
+                            Modifier.background(wyuGlassControlWash())
                         },
                     )
                     .border(
@@ -1228,6 +1255,8 @@ fun WyuFloatingTabs(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     selectionFraction: (() -> Float)? = null,
+    /** 选中块用不透明白色（iOS 分段控件观感），而不是默认的深色块。 */
+    lightThumb: Boolean = false,
 ) {
     if (options.isEmpty()) return
     val dark = LocalWyuDarkTheme.current
@@ -1285,11 +1314,15 @@ fun WyuFloatingTabs(
     val scheme = MiuixTheme.colorScheme
     val containerColor = when {
         md3 -> scheme.surfaceContainerHigh
-        dark -> Color(0xFF2C2C2C).copy(alpha = if (glass) 0.55f else 1f)
-        else -> Color.White.copy(alpha = if (glass) 0.58f else 1f)
+        // 与卡片同源取色：深色下原来的 #2C2C2C 比卡片亮，看着发白。
+        glass -> wyuGlassControlWash()
+        dark -> Color(0xFF2C2C2C)
+        else -> Color.White
     }
     val indicatorColor = when {
         md3 -> scheme.primary
+        lightThumb && dark -> Color.White.copy(alpha = 0.22f)
+        lightThumb -> Color.White
         dark -> Color.White.copy(alpha = 0.16f)
         else -> Color.Black.copy(alpha = 0.10f)
     }
@@ -1491,8 +1524,37 @@ fun WyuFloatingTabs(
                     scaleY = damped.scaleY *
                         (1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f))
                 }
+                .then(
+                    if (lightThumb) {
+                        Modifier
+                            .shadow(
+                                elevation = 2.dp,
+                                shape = shape,
+                                clip = false,
+                                ambientColor = Color.Black.copy(alpha = 0.06f),
+                                spotColor = Color.Black.copy(alpha = 0.10f),
+                            )
+                    } else {
+                        Modifier
+                    },
+                )
                 .clip(shape)
-                .background(indicatorColor),
+                .background(indicatorColor)
+                .then(
+                    if (lightThumb) {
+                        Modifier.border(
+                            width = 0.5.dp,
+                            color = if (dark) {
+                                Color.White.copy(alpha = 0.18f)
+                            } else {
+                                Color.Black.copy(alpha = 0.05f)
+                            },
+                            shape = shape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
         )
         Row(
             modifier = Modifier

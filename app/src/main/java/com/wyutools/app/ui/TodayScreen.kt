@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -294,7 +295,8 @@ private fun TodayDateHeader(
     week: Int?,
     courseCount: Int?,
 ) {
-    Column(Modifier.fillMaxWidth()) {
+    // 列表有 20dp 页边距，这里补 8dp 才能和顶栏大标题同一条左边线。
+    Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         // 日期和星期同号同粗：这是页面的第一落点，比导航栏标题还重要。
         Text(
             text = "${today.monthValue} 月 ${today.dayOfMonth} 日 ${weekdayName(today)}",
@@ -346,7 +348,8 @@ private fun TodaySectionHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                start = if (compact) 4.dp else 0.dp,
+                // 和顶栏大标题对齐：20dp 页边距 + 8dp。
+                start = 8.dp,
                 end = if (compact) 4.dp else 0.dp,
                 top = if (compact) 10.dp else 6.dp,
                 bottom = if (compact) 0.dp else 2.dp,
@@ -450,6 +453,10 @@ private fun TodayCourseStateCard(
     }
 }
 
+// 待办输入框的内边距：左右保持 16dp，竖向收窄到 11dp（默认 16dp），
+// 同一行的添加按钮相应放大到 46dp。
+private val TodoFieldInsideMargin = DpSize(16.dp, 11.dp)
+
 /**
  * Today's checklist: one input on top, then the lines themselves.
  *
@@ -497,13 +504,15 @@ private fun TodayTodoCard(
                 onValueChange = onDraftChange,
                 label = "写点今天要做的事",
                 modifier = Modifier.weight(1f),
+                // 竖向内边距比默认小一档：输入框的底色薄一点，不抢待办列表的版面。
+                insideMargin = TodoFieldInsideMargin,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onAdd() }),
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(14.dp))
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(46.dp)
                     .clip(CircleShape)
                     .background(primary.copy(alpha = if (canAdd) 1f else 0.35f))
                     .clickable(enabled = canAdd) {
@@ -516,7 +525,7 @@ private fun TodayTodoCard(
                     imageVector = Icons.Rounded.Add,
                     contentDescription = "添加待办",
                     tint = onPrimary,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(24.dp),
                 )
             }
         }
@@ -638,9 +647,13 @@ private fun TodayCourseCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = course.name,
-                        // 课程名是这一行里唯一要看的内容，加粗到 Bold 才立得住。
-                        style = MiuixTheme.textStyles.body1,
-                        fontWeight = FontWeight.Bold,
+                        // 课程名是这一行里唯一要看的内容：字号比正文大一号、字重拉满，
+                        // 一眼就能从时间和地点里跳出来。
+                        style = MiuixTheme.textStyles.body1.copy(
+                            fontSize = 18.sp,
+                            lineHeight = 23.sp,
+                        ),
+                        fontWeight = WyuEmphasisWeight,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier

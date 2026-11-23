@@ -27,7 +27,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Visibility
@@ -127,6 +126,12 @@ fun LxtScreen(
                             onClick = vm::refreshBalances,
                             enabled = !ui.balanceBusy,
                         )
+                        // 退出账号从卡片挪到顶栏，跟刷新并排两颗玻璃按钮。
+                        WyuTopBarAction(
+                            icon = Icons.AutoMirrored.Filled.ExitToApp,
+                            label = "退出登录",
+                            onClick = { showLogoutDialog = true },
+                        )
                     }
                 },
             )
@@ -145,9 +150,7 @@ fun LxtScreen(
             } else {
                 HotBalanceCard(ui = ui)
                 Spacer(Modifier.height(12.dp))
-                ColdBalanceCard(ui = ui, onBind = onBind)
-                Spacer(Modifier.height(12.dp))
-                LxtDeviceCard(ui = ui, onBind = onBindValve)
+                ColdBalanceCard(ui = ui)
                 Spacer(Modifier.height(12.dp))
                 ValveCard(
                     ui = ui,
@@ -155,13 +158,15 @@ fun LxtScreen(
                     onRefreshValve = vm::refreshValve,
                 )
                 Spacer(Modifier.height(12.dp))
-                LxtLogoutCard(onLogout = { showLogoutDialog = true })
+                // 宿舍修改不是每天要看的数字，只是偶尔进出的设置，压到页尾。
+                DormCard(ui = ui, onEditHot = onBindValve, onEditCold = onBind)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "热水是校外的第三方系统，账号密码与教务不同；" +
-                        "余额与开阀都来自学校热水平台，充值请使用支付宝内的校园热水服务。",
+                    text = "账号使用乐校园通，充值请到支付宝",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    // 与顶栏大标题对齐：页面 16dp 页边距 + 12dp。
+                    modifier = Modifier.padding(start = WyuTextInset - 16.dp),
                 )
             }
             Spacer(Modifier.height(24.dp))
@@ -388,184 +393,245 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
     }
 }
 
+/** 宿舍号小标签：标题旁边一枚浅底胶囊，没绑定时显示「未绑定宿舍」。 */
+@Composable
+private fun DormTag(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = text,
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 余额卡的标题行：小标题 + 该路热水/冷水对应的宿舍号。 */
+@Composable
+private fun BalanceTitle(title: String, room: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = title,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        Spacer(Modifier.width(8.dp))
+        DormTag(text = room ?: "未绑定宿舍")
+    }
+}
+
+/**
+ * 余额数字：40sp + 最重字重，「元」退成 footnote 并跟数字基线对齐。
+ * 热水、冷水共用这一套排版，两张卡除了标题与来源说明之外完全一致。
+ */
+@Composable
+private fun BalanceAmount(cents: Long?) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(
+            text = cents?.let { formatCents(it) } ?: "—",
+            style = MiuixTheme.textStyles.headline1.copy(fontSize = 40.sp),
+            fontWeight = WyuEmphasisWeight,
+            color = MiuixTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = "元",
+            style = MiuixTheme.textStyles.footnote1,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+}
+
 /**
  * 热水余额：整页的第一落点。
  *
- * 数字用 40sp Bold，单位退成 footnote 并跟数字基线对齐——余额是这一页唯一
- * 要「一眼看到」的东西，标题和说明都只是它的注脚。
+ * 余额是这一页唯一要「一眼看到」的东西，标题、宿舍号和说明都只是它的注脚。
  */
 @Composable
 private fun HotBalanceCard(ui: LxtUiState) {
+    val room = ui.valveDevice
+        ?.let { (it.buildingName + it.roomName).trim().ifBlank { null } }
     Card(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
     ) {
-        Text(
-            text = "热水余额",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
+        BalanceTitle(title = "热水余额", room = room)
         Spacer(Modifier.height(6.dp))
         val hotError = ui.hotError
-        val hotCent = ui.hotCent
-        when {
-            hotError != null -> Text(
+        if (hotError != null) {
+            Text(
                 text = hotError,
                 color = MiuixTheme.colorScheme.error,
                 style = MiuixTheme.textStyles.body2,
             )
-
-            else -> Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = hotCent?.let { formatCents(it) } ?: "—",
-                    style = MiuixTheme.textStyles.headline1.copy(fontSize = 40.sp),
-                    fontWeight = FontWeight.Bold,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "元",
-                    style = MiuixTheme.textStyles.footnote1,
-                    fontWeight = FontWeight.Medium,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
+        } else {
+            BalanceAmount(ui.hotCent)
         }
     }
 }
 
 /**
- * 冷水余额：与热水分开一张卡，因为数据源不同（宿舍冷水表钱包），
- * 没绑定时要能就地绑定，绑好了也要能换宿舍。
+ * 冷水余额：数据源是宿舍冷水表钱包，排版与热水卡完全对齐。
+ *
+ * 绑定入口统一在下面的宿舍卡片里，这里只负责显示。
  */
 @Composable
-private fun ColdBalanceCard(ui: LxtUiState, onBind: () -> Unit) {
+private fun ColdBalanceCard(ui: LxtUiState) {
+    val bind = ui.bind
+    val room = bind?.let { "${it.buildingName}${it.roomName}".trim().ifBlank { null } }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(20.dp),
+        insideMargin = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "冷水余额",
-                style = MiuixTheme.textStyles.title3,
-                modifier = Modifier.weight(1f),
-            )
-            ActionChip(
-                text = if (ui.bind == null) "绑定宿舍" else "更换宿舍",
-                onClick = onBind,
-                icon = Icons.Filled.Edit,
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        val bind = ui.bind
+        BalanceTitle(title = "冷水余额", room = room)
+        Spacer(Modifier.height(6.dp))
         val coldError = ui.coldError
-        val coldCent = ui.coldCent
-        if (bind == null) {
-            Text(
-                text = "尚未绑定宿舍",
-                style = MiuixTheme.textStyles.body1,
-                fontWeight = FontWeight.Bold,
+        when {
+            bind == null -> BalanceAmount(null)
+            coldError != null -> Text(
+                text = coldError,
+                color = MiuixTheme.colorScheme.error,
+                style = MiuixTheme.textStyles.body2,
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "绑定后可按房间冷水表查询余额",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            Text(
-                text = "${bind.buildingName} ${bind.roomName}".trim(),
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-            Spacer(Modifier.height(6.dp))
-            when {
-                coldError != null -> Text(
-                    text = coldError,
-                    color = MiuixTheme.colorScheme.error,
-                    style = MiuixTheme.textStyles.body2,
-                )
 
-                else -> Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = coldCent?.let { formatCents(it) } ?: "—",
-                        style = MiuixTheme.textStyles.headline1.copy(fontSize = 32.sp),
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "元",
-                        style = MiuixTheme.textStyles.footnote1,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
-            }
+            else -> BalanceAmount(ui.coldCent)
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "冷水余额来自宿舍冷水表钱包。",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
     }
 }
 
-/** 浴室设备：一行卡片，点进去选校区→楼栋→楼层→房间。 */
+/**
+ * 宿舍：卡片本身只留一个「修改宿舍」入口。
+ *
+ * 热水（浴室设备）与冷水（冷水表）是两个账号，点进来才选改哪一个——卡片上
+ * 不铺两行，页面读起来才是一个整体的余额视图，而不是一堆设置项。
+ */
 @Composable
-private fun LxtDeviceCard(ui: LxtUiState, onBind: () -> Unit) {
-    val device = ui.valveDevice
-    val room = device?.let { (it.buildingName + it.roomName).ifBlank { it.machineId } }
+private fun DormCard(
+    ui: LxtUiState,
+    onEditHot: () -> Unit,
+    onEditCold: () -> Unit,
+) {
+    val hotRoom = ui.valveDevice
+        ?.let { (it.buildingName + it.roomName).trim().ifBlank { null } }
+    val coldRoom = ui.bind
+        ?.let { "${it.buildingName}${it.roomName}".trim().ifBlank { null } }
+    var pickerOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-        onClick = onBind,
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.WaterDrop,
-                    contentDescription = null,
-                    tint = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = room ?: "未绑定浴室设备",
-                    style = MiuixTheme.textStyles.title2,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = if (room == null) {
-                        "绑定后才能远程开阀"
-                    } else {
-                        "选一次校区 → 楼栋 → 楼层 → 房间"
-                    },
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
+        val click = hapticClick { pickerOpen = true }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable(onClick = click)
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "修改宿舍",
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
+    }
+    WyuOverlayDialog(
+        show = pickerOpen,
+        title = "修改宿舍",
+        onDismissRequest = { pickerOpen = false },
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                text = "热水与冷水是两个账号，点一项修改。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Spacer(Modifier.height(6.dp))
+            DormRow(
+                label = "热水",
+                hint = "浴室设备",
+                room = hotRoom,
+                onClick = {
+                    pickerOpen = false
+                    onEditHot()
+                },
+            )
+            DormRow(
+                label = "冷水",
+                hint = "冷水表",
+                room = coldRoom,
+                onClick = {
+                    pickerOpen = false
+                    onEditCold()
+                },
+            )
+            Spacer(Modifier.height(16.dp))
+            WyuDialogButton(text = "取消", onClick = { pickerOpen = false })
+        }
+    }
+}
+
+/** 宿舍卡里的一行：标签 + 当前房间 + 「绑定 / 修改」。 */
+@Composable
+private fun DormRow(
+    label: String,
+    hint: String,
+    room: String?,
+    onClick: () -> Unit,
+) {
+    val click = hapticClick(action = onClick)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = click)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "$label · $hint",
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = room ?: "未绑定",
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (room == null) {
+                    MiuixTheme.colorScheme.primary
+                } else {
+                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                },
+            )
+        }
+        Text(
+            text = if (room == null) "绑定" else "修改",
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.primary,
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -584,7 +650,7 @@ private fun ValveCard(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
     ) {
-        Text("远程开阀", style = MiuixTheme.textStyles.title3)
+        Text("开热水", style = MiuixTheme.textStyles.title3)
         Spacer(Modifier.height(6.dp))
         Text(
             text = when {
@@ -669,32 +735,6 @@ private fun ValveCard(
                 )
                 TextButton(text = "刷新状态", onClick = onRefreshValve)
             }
-        }
-    }
-}
-
-/** 退出热水账号：单独一张卡，红字居中偏左，跟截图一致。 */
-@Composable
-private fun LxtLogoutCard(onLogout: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-        onClick = onLogout,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                contentDescription = null,
-                tint = MiuixTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = "退出热水账号",
-                style = MiuixTheme.textStyles.body1,
-                fontWeight = FontWeight.Bold,
-                color = MiuixTheme.colorScheme.error,
-            )
         }
     }
 }

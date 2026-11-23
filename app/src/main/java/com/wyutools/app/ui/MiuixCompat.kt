@@ -299,7 +299,12 @@ fun WyuOverlayDialog(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
-                    CompositionLocalProvider(LocalWyuGlassBackdrop provides null) {
+                    CompositionLocalProvider(
+                        LocalWyuGlassBackdrop provides null,
+                        // 输入框仍要模糊页面，只是不能用墙纸层（弹窗拿不到），
+                        // 换成页面层的副本。
+                        LocalWyuDialogInputBackdrop provides WyuPageBackdrops.current,
+                    ) {
                         content()
                     }
                 }

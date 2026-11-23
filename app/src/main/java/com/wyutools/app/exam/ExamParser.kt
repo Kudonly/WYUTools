@@ -93,7 +93,7 @@ object ExamParser {
         text(fields, "xqmc", "campusName")?.let(parts::add)
         text(fields, "kscdmc", "kscd", "ksdd", "cdmc", "room")?.let(parts::add)
         if (parts.isEmpty()) return null
-        return parts.joinToString(" · ")
+        return cleanExamRoom(parts.joinToString(" · "))
     }
 
     /** 键统一小写，值统一 trim；教务会把空值写成 "null" / "undefined"。 */
@@ -159,8 +159,24 @@ object ExamParser {
     }
 }
 
-/** 考试安排缓存：几行 JSON，放在 auth 之外自己的 prefs 里。 */
-internal object ExamCache {
+/**
+ * 考场文本的清理：教务的 `xqmc` 常常整段就是学校名，拼出来是
+ * "五邑大学 · 综合楼 305"，考场卡片上不需要反复报校名。
+ *
+ * 逐段去掉学校名再拼回去；去掉后变空的段（整段只有学校名）直接丢，
+ * 相邻重复的段也只留一个。
+ */
+internal fun cleanExamRoom(raw: String?): String? {
+    val text = raw?.takeIf { it.isNotBlank() } ?: return null
+    val parts = text
+        .split('·', '•')
+        .map { it.replace("五邑大学", "").trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    return parts.joinToString(" · ").ifBlank { null }
+}
+
+/** 考试安排缓存：几行 JSON，放在 auth 之外自己的 prefs 里。 */internal object ExamCache {
     fun encode(data: ExamData): String {
         val rows = JSONArray()
         data.entries.forEach { entry ->
@@ -205,7 +221,7 @@ internal object ExamCache {
                 startTime = row.optString("start").takeIf { it.isNotBlank() },
                 endTime = row.optString("end").takeIf { it.isNotBlank() },
                 sectionLabel = row.optString("section").takeIf { it.isNotBlank() },
-                room = row.optString("room").takeIf { it.isNotBlank() },
+                room = cleanExamRoom(row.optString("room")),
                 seat = row.optString("seat").takeIf { it.isNotBlank() },
                 kind = row.optString("kind").takeIf { it.isNotBlank() },
                 invigilators = row.optString("invigilators").takeIf { it.isNotBlank() },

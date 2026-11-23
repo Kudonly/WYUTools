@@ -85,7 +85,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.time.LocalDate
@@ -639,6 +638,8 @@ private fun VenueFilterRow(
             text = title,
             style = MiuixTheme.textStyles.footnote2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            // 列表 16dp 页边距 + 12dp，与顶栏大标题对齐。
+            modifier = Modifier.padding(start = 12.dp),
         )
         Spacer(Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1282,7 +1283,9 @@ private fun BookingDialog(
             )
         }
         Spacer(Modifier.height(12.dp))
-        TextField(
+        // 用页面同款玻璃输入框：miuix 原生 TextField 是实心 secondaryContainer
+        // 色块，弹窗里显得跟别处的输入框不是一套东西。
+        GlassTextField(
             value = phone,
             onValueChange = { value ->
                 if (value.length <= 11 && value.all { it.isDigit() }) {
@@ -1291,7 +1294,6 @@ private fun BookingDialog(
                 }
             },
             label = "手机号",
-            singleLine = true,
             enabled = !booking,
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(

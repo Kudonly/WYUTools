@@ -274,7 +274,8 @@ private fun TuningSection(
 ) {
     SmallTitle(
         text = title,
-        insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+        // 与顶栏大标题对齐（卡片仍在 16dp 页边距上）。
+        insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
     )
     Card(
         modifier = Modifier

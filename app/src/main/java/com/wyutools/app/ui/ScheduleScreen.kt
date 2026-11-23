@@ -135,6 +135,9 @@ private val ScheduleWeekBarGap = 3.dp
 // floating control instead of another row of the timetable. The glass strip
 // spans exactly this width, so this is also what keeps it from reading as a bar.
 private val ScheduleWeekBarSideInset = 40.dp
+// 玻璃条左右铺满滑条，只在上下各收 4dp：竖着薄一点，读作「滑条的底」，
+// 又不会像之前那样两端比滑条短一截。圆角按收窄后的高度取半径。
+private val ScheduleWeekBarGlassInset = 4.dp
 // Fixed pill size: 本周 and 返回本周 are different lengths, and a control that
 // resizes under the finger reads as a layout jump.
 private val ScheduleWeekPillWidth = 86.dp
@@ -589,10 +592,14 @@ private fun ScheduleWeekSlider(
         .coerceIn(1f, maxWeek.toFloat())
     // The track sits on a live glass strip: the grid keeps scrolling underneath,
     // so the band has to sample the page content instead of the wallpaper.
-    WyuGlassCapsule(
-        modifier = modifier.height(ScheduleWeekBarHeight),
-        cornerRadius = ScheduleWeekBarHeight / 2,
-    ) {
+    // 玻璃条左右铺满、上下各收一点，滑条铺满并盖在上面。
+    Box(modifier = modifier.height(ScheduleWeekBarHeight)) {
+        WyuGlassCapsule(
+            modifier = Modifier
+                .matchParentSize()
+                .padding(vertical = ScheduleWeekBarGlassInset),
+            cornerRadius = (ScheduleWeekBarHeight - ScheduleWeekBarGlassInset * 2) / 2,
+        ) {}
         Slider(
             value = if (pagerState.isScrollInProgress) live else selectedWeek.toFloat(),
             onValueChange = { value ->
@@ -613,8 +620,6 @@ private fun ScheduleWeekSlider(
             // No unfilled track: on glass the grey run read as a second plate
             // behind the control. Only the filled part and the thumb show.
             colors = SliderDefaults.sliderColors(backgroundColor = Color.Transparent),
-            // The strip ends where the slider ends: an inset inside the capsule
-            // would leave the glass sticking out past the control at both ends.
             modifier = Modifier.fillMaxSize(),
         )
     }

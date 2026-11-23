@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -37,6 +38,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -59,6 +61,19 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 private const val CardGlassAlpha = 0.55f
 private const val CardSoftGlassAlpha = 0f
+
+/**
+ * 玻璃控件（顶栏圆钮、胶囊、分段控件）压在模糊层上的底色。
+ *
+ * 原来这里写死 `Color.White`，浅色下没问题，深色下就成了一块发白的灰片，
+ * 跟旁边同为玻璃材质的卡片完全不像一类东西。现在直接取卡片的容器色
+ * （浅色白、深色 #242424）再套卡片同一档不透明度：控件与卡片在任何模式下
+ * 都是同一块玻璃。
+ */
+@Composable
+internal fun wyuGlassControlWash(): Color =
+    MiuixTheme.colorScheme.surfaceContainer.copy(alpha = CardGlassAlpha)
+
 internal const val SoftGlassWhiteTintAlpha = 0.64f
 private const val CardSoftGlassBlurScale = 0.6f
 // All soft-glass surfaces sample the backdrop at 1/2 resolution. Cards used to
@@ -145,6 +160,20 @@ internal fun rememberDisplayCornerPx(): Float {
 /** One corner radius for every card in the app, one step below the dialogs' 32dp. */
 internal val WyuCardCornerRadius = 28.dp
 
+/**
+ * 卡片投影。只做一点点浮起：浅色下把卡片从壁纸上托起来，边缘落一圈很淡的暗部；
+ * 深色下压得更低，只在轮廓外留一点几乎看不见的阴影，不去抢玻璃本身的高光。
+ */
+private val WyuCardShadowElevation = 8.dp
+
+private fun Modifier.wyuCardShadow(shape: Shape, dark: Boolean): Modifier = shadow(
+    elevation = WyuCardShadowElevation,
+    shape = shape,
+    clip = false,
+    ambientColor = Color.Black.copy(alpha = if (dark) 0.26f else 0.07f),
+    spotColor = Color.Black.copy(alpha = if (dark) 0.40f else 0.15f),
+)
+
 // Rim values tuned for cards are larger than a short pill is tall: a 40dp band
 // would spend its whole height inside the rim, and the top edge then samples
 // outside the captured layer and stays unfilled. These are the numbers the 38dp
@@ -211,13 +240,15 @@ fun Card(
     val refractionPx = if (compactGlass) CompactGlassRefractionPx else tuning.edgeThickness
     val reflectionPx = if (compactGlass) CompactGlassReflectionPx else tuning.reflectOffset
     val blurRadius = if (compactGlass) CompactGlassBlurRadius else CardBlurRadius
+    // 投影挂在最外层：里面几层都会把内容裁到圆角里，放里面就看不见了。
+    val shadowed = modifier.wyuCardShadow(shape, dark)
     MiuixCard(
         modifier = when {
-            glass == null -> modifier
+            glass == null -> shadowed
             // Wallpaper cards sample the cached underlay instead of a live
             // backdrop; the week header keeps sampling the page content.
             !samplePageContent && underlay != null && softGlass && wyuSoftGlassSupported ->
-                modifier.wyuWallpaperGlass(
+                shadowed.wyuWallpaperGlass(
                     underlay = underlay,
                     shape = shape,
                     glassShape = WyuSoftGlassShape.RoundedRect,
@@ -232,7 +263,7 @@ fun Card(
                     reflectionStrength = tuning.reflectionStrength,
                     refractionIor = tuning.refractionIor,
                 )
-            softGlass && wyuSoftGlassSupported -> modifier.wyuSoftGlass(
+            softGlass && wyuSoftGlassSupported -> shadowed.wyuSoftGlass(
                 backdrop = glass,
                 shape = shape,
                 glassShape = WyuSoftGlassShape.RoundedRect,
@@ -253,8 +284,8 @@ fun Card(
             // Soft glass off: sample the pre-blurred wallpaper instead of
             // replaying a live Gaussian for every card, every frame.
             !samplePageContent && gaussianUnderlay != null ->
-                modifier.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
-            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
+                shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
+            else -> shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
         },
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
@@ -311,14 +342,15 @@ fun Card(
         else -> Color.White.copy(alpha = tuning.cardTintAlphaLight)
     }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    val shadowed = modifier.wyuCardShadow(shape, dark)
     // Cards stay silent on purpose: they are large surfaces (tool tiles,
     // semester headers, list rows) where a tick reads as noise. Only real
     // buttons answer with a haptic.
     MiuixCard(
         modifier = when {
-            glass == null -> modifier
+            glass == null -> shadowed
             underlay != null && softGlass && wyuSoftGlassSupported ->
-                modifier.wyuWallpaperGlass(
+                shadowed.wyuWallpaperGlass(
                     underlay = underlay,
                     shape = shape,
                     glassShape = WyuSoftGlassShape.RoundedRect,
@@ -333,7 +365,7 @@ fun Card(
                     reflectionStrength = tuning.reflectionStrength,
                     refractionIor = tuning.refractionIor,
                 )
-            softGlass && wyuSoftGlassSupported -> modifier.wyuSoftGlass(
+            softGlass && wyuSoftGlassSupported -> shadowed.wyuSoftGlass(
                 backdrop = glass,
                 shape = shape,
                 glassShape = WyuSoftGlassShape.RoundedRect,
@@ -352,7 +384,7 @@ fun Card(
                 refractionIor = tuning.refractionIor,
             )
             gaussianUnderlay != null ->
-                modifier.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
+                shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
             else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
         },
         cornerRadius = cornerRadius,
@@ -417,13 +449,14 @@ fun LiveGlassCard(
     val dark = LocalWyuDarkTheme.current
     val useSoftGlass = softGlass && wyuSoftGlassSupported
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
+    val shadowed = modifier.wyuCardShadow(shape, dark)
     MiuixCard(
         // Never take the baked-underlay branch. When soft glass is off the
         // pre-blurred wallpaper is skipped too, so the surface stays live in
         // every appearance mode.
         modifier = when {
-            backdrop == null -> modifier
-            useSoftGlass -> modifier.wyuSoftGlass(
+            backdrop == null -> shadowed
+            useSoftGlass -> shadowed.wyuSoftGlass(
                 backdrop = backdrop,
                 shape = shape,
                 glassShape = WyuSoftGlassShape.RoundedRect,
@@ -443,7 +476,7 @@ fun LiveGlassCard(
                 reflectionStrength = tuning.reflectionStrength,
                 refractionIor = tuning.refractionIor,
             )
-            else -> modifier.textureBlur(
+            else -> shadowed.textureBlur(
                 backdrop = backdrop,
                 shape = shape,
                 blurRadius = TopBarGlassBlurRadius,
@@ -572,6 +605,7 @@ private fun Md3CardSurface(
     // MD3 Expressive gives containers the extra-large corner (28dp); the
     // squircle look belongs to the glass themes, so plain rounded corners here.
     val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
+    val dark = LocalWyuDarkTheme.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val interactive = onClick != null || onLongPress != null
@@ -582,6 +616,7 @@ private fun Md3CardSurface(
     }
     Column(
         modifier = modifier
+            .wyuCardShadow(shape, dark)
             .clip(shape)
             .background(container)
             .background(stateLayer)
@@ -701,11 +736,17 @@ fun GlassTextField(
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    insideMargin: DpSize = TextFieldDefaults.InsideMargin,
     enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
-    val glass = LocalWyuGlassBackdrop.current
+    // 对话框里 LocalWyuGlassBackdrop 被置空（弹窗在另一个窗口，拿不到页面那层
+    // 墙纸），输入框会退化成一块纯色。弹窗自己把页面层登记进
+    // LocalWyuDialogInputBackdrop，这里跟着用，取色和模糊就与页面上的输入框一致。
+    // 注意不能直接用 WyuPageBackdrops.current：页面里的输入框本身就在页面层里，
+    // 采样自己会让 hwui 递归到栈溢出（成绩页页签那次闪退就是这个原因）。
+    val glass = LocalWyuGlassBackdrop.current ?: LocalWyuDialogInputBackdrop.current
     val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
     MiuixTextField(
         value = value,
@@ -715,6 +756,7 @@ fun GlassTextField(
         } else {
             modifier
         },
+        insideMargin = insideMargin,
         colors = glassTextFieldColors(glass != null),
         label = label,
         useLabelAsPlaceholder = true,
@@ -731,11 +773,17 @@ fun GlassTextField(
     onValueChange: (TextFieldValue) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    insideMargin: DpSize = TextFieldDefaults.InsideMargin,
     enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
-    val glass = LocalWyuGlassBackdrop.current
+    // 对话框里 LocalWyuGlassBackdrop 被置空（弹窗在另一个窗口，拿不到页面那层
+    // 墙纸），输入框会退化成一块纯色。弹窗自己把页面层登记进
+    // LocalWyuDialogInputBackdrop，这里跟着用，取色和模糊就与页面上的输入框一致。
+    // 注意不能直接用 WyuPageBackdrops.current：页面里的输入框本身就在页面层里，
+    // 采样自己会让 hwui 递归到栈溢出（成绩页页签那次闪退就是这个原因）。
+    val glass = LocalWyuGlassBackdrop.current ?: LocalWyuDialogInputBackdrop.current
     val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
     MiuixTextField(
         value = value,
@@ -745,6 +793,7 @@ fun GlassTextField(
         } else {
             modifier
         },
+        insideMargin = insideMargin,
         colors = glassTextFieldColors(glass != null),
         label = label,
         useLabelAsPlaceholder = true,

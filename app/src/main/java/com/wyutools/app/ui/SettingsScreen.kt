@@ -51,12 +51,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -92,7 +96,8 @@ fun SettingsScreen(
     val primary = MiuixTheme.colorScheme.primary
     val selected = LocalWyuWallpaper.current
     val themeMode by WyuAppearance.themeMode.collectAsState()
-    val textSize by WyuAppearance.textSize.collectAsState()
+    val textScale by WyuAppearance.textScale.collectAsState()
+    val systemFontScale = LocalDensity.current.fontScale
     val hasCustom by WyuAppearance.hasCustomWallpaper.collectAsState()
     val customWallpaper by WyuAppearance.customWallpaper.collectAsState()
     val brightnessLight by WyuAppearance.customBrightnessLight.collectAsState()
@@ -103,7 +108,6 @@ fun SettingsScreen(
     val monetSeed by WyuAppearance.monetSeed.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-    var themePickerOpen by remember { mutableStateOf(false) }
     var palettePickerOpen by remember { mutableStateOf(false) }
     // Exactly the seed the theme derives from, so the picker previews the
     // palettes that will actually be applied.
@@ -197,7 +201,8 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             SmallTitle(
                 text = "壁纸",
-                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                // 与顶栏大标题同一条左边线（卡片本身仍在 16dp 页边距上）。
+                insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
             )
             WallpaperPicker(
                 selected = selected,
@@ -228,41 +233,41 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
             SmallTitle(
                 text = "外观",
-                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
             )
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "深浅色模式",
-                        style = MiuixTheme.textStyles.headline2,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = "选择应用的显示模式",
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectableGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        WyuThemeMode.entries.forEach { mode ->
-                            ThemeModeChip(
-                                label = mode.label,
-                                selected = themeMode == mode,
-                                onClick = { WyuAppearance.setThemeMode(context, mode) },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
+                Row(
+                    modifier = Modifier.padding(
+                        start = 20.dp,
+                        end = 14.dp,
+                        top = 14.dp,
+                        bottom = 14.dp,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "深浅色模式",
+                            style = MiuixTheme.textStyles.headline2,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "选择应用的显示模式",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
                     }
+                    SettingDropdown(
+                        current = themeMode,
+                        options = WyuThemeMode.entries,
+                        optionLabel = { it.label },
+                        onSelect = { WyuAppearance.setThemeMode(context, it) },
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -272,35 +277,66 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp),
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "字号",
-                        style = MiuixTheme.textStyles.headline2,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = "默认跟随系统设置；单独选择后只影响本应用",
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .selectableGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        WyuTextSize.entries.forEach { size ->
-                            TextSizeChip(
-                                label = size.label,
-                                selected = textSize == size,
-                                onClick = { WyuAppearance.setTextSize(context, size) },
+                    // 拖动中只改这里，松手才写进 Appearance：字号一变整页都要重新
+                    // 排版，实时生效会让滑条自己跟着跳，手指像拖不动。
+                    var dragScale by remember { mutableStateOf<Float?>(null) }
+                    // 跟随系统时滑条停在系统当前比例上，一拖动就切到自定义。
+                    val committedFollowing = textScale <= TextScaleFollowSystem
+                    val following = committedFollowing && dragScale == null
+                    val shownScale = dragScale
+                        ?: if (committedFollowing) systemFontScale else textScale
+                    val sliderScale = shownScale.coerceIn(TextScaleMin, TextScaleMax)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "字号",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "单独调节后只影响本应用",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
+                        FollowSystemChip(
+                            selected = following,
+                            onClick = {
+                                WyuAppearance.setTextScale(context, TextScaleFollowSystem)
+                            },
+                        )
                     }
                     Spacer(Modifier.height(14.dp))
-                    // 预览行直接用正文样式，选档位时能立刻看出差别。
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "大小",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = if (following) {
+                                "跟随系统"
+                            } else {
+                                "${(shownScale * 100).roundToInt()}%"
+                            },
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    Slider(
+                        value = sliderScale,
+                        onValueChange = { dragScale = it },
+                        // 松手时才落盘，顺便按 1% 收敛。
+                        onValueChangeFinished = {
+                            dragScale?.let { WyuAppearance.setTextScale(context, it) }
+                            dragScale = null
+                        },
+                        valueRange = TextScaleMin..TextScaleMax,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // 预览行直接用正文样式，拖动滑条时能立刻看出差别。
                     Text(
                         text = "预览：今天有 3 节课，热水余额 16.04 元",
                         style = MiuixTheme.textStyles.body2,
@@ -339,16 +375,20 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // One surface language at a time: the card is the current pick and
-            // the tap target, the sheet holds the alternatives.
+            // 主题也统一成「当前值 + 弹出菜单」，和深浅色、电费范围一个形态。
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                pressFeedbackType = PressFeedbackType.Sink,
-                onClick = { themePickerOpen = true },
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = 20.dp,
+                        end = 14.dp,
+                        top = 14.dp,
+                        bottom = 14.dp,
+                    ),
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -363,20 +403,18 @@ fun SettingsScreen(
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = cardTheme.label,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.primary,
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.size(22.dp),
+                        SettingDropdown(
+                            current = cardTheme,
+                            options = WyuCardTheme.entries,
+                            optionLabel = { it.label },
+                            optionEnabled = {
+                                it != WyuCardTheme.SoftGlass || softGlassSupported
+                            },
+                            onSelect = { WyuAppearance.setCardTheme(context, it) },
                         )
                     }
                     if (cardTheme != WyuCardTheme.SoftGlass && !softGlassSupported) {
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             text = "柔光玻璃需要 Android 13 及以上系统",
                             style = MiuixTheme.textStyles.footnote2,
@@ -433,8 +471,9 @@ fun SettingsScreen(
                         )
                     }
                 }
+                // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
             // The blur is the one knob everyone touches, so it gets its own card
             // next to the tuning screen instead of hiding under 主题.
             if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
@@ -517,7 +556,7 @@ fun SettingsScreen(
             }
             SmallTitle(
                 text = "关于",
-                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
             )
             Card(
                 modifier = Modifier
@@ -565,20 +604,12 @@ fun SettingsScreen(
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.primary,
                 modifier = Modifier
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                    .padding(start = WyuTextInset, end = 20.dp, top = 10.dp, bottom = 10.dp)
                     .clickable { openLink(ShiyiUrl) },
             )
             Spacer(Modifier.height(32.dp))
         }
     }
-
-    ThemePickerDialog(
-        show = themePickerOpen,
-        selected = cardTheme,
-        softGlassSupported = softGlassSupported,
-        onSelect = { WyuAppearance.setCardTheme(context, it) },
-        onDismiss = { themePickerOpen = false },
-    )
 
     PaletteSchemePickerDialog(
         show = palettePickerOpen,
@@ -666,98 +697,7 @@ private fun UpdateResultDialog(
  * so the choice reads before it is applied. 柔光玻璃 needs the shader path, so
  * it is disabled (and explained) below API 33 instead of silently doing nothing.
  */
-@Composable
-private fun ThemePickerDialog(
-    show: Boolean,
-    selected: WyuCardTheme,
-    softGlassSupported: Boolean,
-    onSelect: (WyuCardTheme) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    WyuOverlayDialog(
-        show = show,
-        title = "主题",
-        summary = "选择卡片与按钮的视觉风格",
-        onDismissRequest = onDismiss,
-    ) {
-        WyuCardTheme.entries.forEach { theme ->
-            ThemeOptionRow(
-                theme = theme,
-                selected = theme == selected,
-                enabled = theme != WyuCardTheme.SoftGlass || softGlassSupported,
-                onClick = {
-                    onSelect(theme)
-                    onDismiss()
-                },
-            )
-            if (theme != WyuCardTheme.entries.last()) {
-                Spacer(Modifier.height(6.dp))
-            }
-        }
-        Spacer(Modifier.height(18.dp))
-        WyuDialogButton(text = "完成", onClick = onDismiss)
-    }
-}
 
-@Composable
-private fun ThemeOptionRow(
-    theme: WyuCardTheme,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    val shape = RoundedCornerShape(18.dp)
-    val background by animateColorAsState(
-        targetValue = if (selected) {
-            scheme.primary.copy(alpha = 0.10f)
-        } else {
-            Color.Transparent
-        },
-        animationSpec = tween(160),
-        label = "themeOptionBackground",
-    )
-    val tap = hapticClick(enabled = enabled && !selected, action = onClick)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(background)
-            .clickable(
-                enabled = enabled,
-                role = Role.RadioButton,
-                onClick = tap,
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .alpha(if (enabled) 1f else 0.4f),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ThemeSwatch(theme)
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = theme.label,
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = if (enabled) theme.summary else "需要 Android 13 及以上系统",
-                style = MiuixTheme.textStyles.footnote1,
-                color = scheme.onSurfaceVariantSummary,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        if (selected) {
-            Icon(
-                imageVector = Icons.Rounded.Check,
-                contentDescription = null,
-                tint = scheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-    }
-}
 
 /**
  * Palette styles for 莫奈. Every row previews the palette that scheme would
@@ -980,101 +920,7 @@ internal fun SoftGlassSliderRow(
     )
 }
 
-@Composable
-private fun ThemeModeChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val background by animateColorAsState(
-        targetValue = if (selected) {
-            MiuixTheme.colorScheme.primary
-        } else {
-            MiuixTheme.colorScheme.surfaceContainerHigh
-        },
-        animationSpec = tween(180),
-        label = "themeModeChipBackground",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
-            MiuixTheme.colorScheme.onPrimary
-        } else {
-            MiuixTheme.colorScheme.onSurfaceVariantSummary
-        },
-        animationSpec = tween(180),
-        label = "themeModeChipContent",
-    )
-    Box(
-        modifier = modifier
-            .height(38.dp)
-            .clip(CircleShape)
-            .background(background)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = hapticClick(enabled = !selected, action = onClick),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = MiuixTheme.textStyles.footnote1,
-            color = contentColor,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-        )
-    }
-}
 
-/** 字号档位的胶囊：宽度由文字决定，横排滚动，不挤成等分。 */
-@Composable
-private fun TextSizeChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val background by animateColorAsState(
-        targetValue = if (selected) {
-            MiuixTheme.colorScheme.primary
-        } else {
-            MiuixTheme.colorScheme.surfaceContainerHigh
-        },
-        animationSpec = tween(180),
-        label = "textSizeChipBackground",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
-            MiuixTheme.colorScheme.onPrimary
-        } else {
-            MiuixTheme.colorScheme.onSurfaceVariantSummary
-        },
-        animationSpec = tween(180),
-        label = "textSizeChipContent",
-    )
-    Box(
-        modifier = Modifier
-            // 用 heightIn 而不是 height：字号调到特大时胶囊要跟着长高，不能把字裁掉。
-            .heightIn(min = 38.dp)
-            .clip(CircleShape)
-            .background(background)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = hapticClick(enabled = !selected, action = onClick),
-            )
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = MiuixTheme.textStyles.footnote1,
-            color = contentColor,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-        )
-    }
-}
 
 @Composable
 private fun CustomBrightnessCard(
@@ -1107,6 +953,94 @@ private fun CustomBrightnessCard(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+/**
+ * 设置里的「当前值 + 弹出菜单」：触发器显示当前选项，点开是 [WyuDropdownMenu]。
+ *
+ * 深浅色、主题共用这一套，外观与电费页的范围切换完全一致。
+ */
+@Composable
+private fun <T> SettingDropdown(
+    current: T,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
+    optionEnabled: (T) -> Boolean = { true },
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var anchorRect by remember { mutableStateOf(Rect.Zero) }
+    Box(modifier = Modifier.onGloballyPositioned { anchorRect = it.boundsInWindow() }) {
+        WyuDropdownTrigger(
+            label = optionLabel(current),
+            onClick = { expanded = true },
+        )
+        WyuDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            anchor = anchorRect,
+        ) {
+            options.forEach { option ->
+                WyuDropdownItem(
+                    text = optionLabel(option),
+                    selected = current == option,
+                    enabled = optionEnabled(option),
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** 「跟随系统」的小胶囊：只在选中时染色，未选中时是浅底。 */
+@Composable
+private fun FollowSystemChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val background by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.primary
+        } else {
+            MiuixTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(180),
+        label = "followSystemChipBackground",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            MiuixTheme.colorScheme.onPrimary
+        } else {
+            MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+        animationSpec = tween(180),
+        label = "followSystemChipContent",
+    )
+    Box(
+        modifier = Modifier
+            // 用 heightIn：字号调到很大时胶囊要跟着长高，不能把字裁掉。
+            .heightIn(min = 38.dp)
+            .clip(CircleShape)
+            .background(background)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = hapticClick(enabled = !selected, action = onClick),
+            )
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "跟随系统",
+            style = MiuixTheme.textStyles.footnote1,
+            color = contentColor,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+        )
     }
 }
 

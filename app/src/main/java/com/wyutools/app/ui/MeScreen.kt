@@ -348,7 +348,8 @@ private fun LoggedInContent(
                         }
 
                         JxglStatus.Ready -> {
-                            ActionChip(text = "打开", onClick = onOpenJxgl)
+                            // 会话已经在，再点就是重建一次（旧的 JSESSIONID 可能已被踢掉）。
+                            ActionChip(text = "重新连接", onClick = onRetryJxgl)
                         }
 
                         else -> {

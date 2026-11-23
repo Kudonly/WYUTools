@@ -22,7 +22,6 @@ import com.wyutools.app.ui.LocalWyuWallpaper
 import com.wyutools.app.ui.WyuAppearance
 import com.wyutools.app.ui.WyuCardTheme
 import com.wyutools.app.ui.WyuThemeMode
-import com.wyutools.app.ui.WyuTextSize
 import com.wyutools.app.ui.WyuWallpaper
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -37,7 +36,7 @@ fun WyuTheme(
     val context = LocalContext.current
     val appContext = context.applicationContext
     remember(context) { WyuAppearance.ensureLoaded(appContext) }
-    val textSize by WyuAppearance.textSize.collectAsState()
+    val textScale by WyuAppearance.textScale.collectAsState()
     val themeMode by WyuAppearance.themeMode.collectAsState()
     val darkTheme = when (themeMode) {
         WyuThemeMode.System -> isSystemInDarkTheme()
@@ -52,12 +51,12 @@ fun WyuTheme(
     val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
     val md3 = cardTheme == WyuCardTheme.Monet
     // 字号只改字体缩放，不动 dp：布局尺寸保持不变，只有文字跟着放大／缩小。
-    // 编译期的系统值仍然是基准，跟随系统时原样透传。
+    // 编译期的系统值仍然是基准，跟随系统（0）时原样透传。
     val systemDensity = LocalDensity.current
-    val density = if (textSize.scale <= 0f) {
+    val density = if (textScale <= 0f) {
         systemDensity
     } else {
-        Density(density = systemDensity.density, fontScale = textSize.scale)
+        Density(density = systemDensity.density, fontScale = textScale)
     }
     LaunchedEffect(hasCustomWallpaper) {
         if (hasCustomWallpaper) WyuAppearance.loadCustomWallpaper(appContext)

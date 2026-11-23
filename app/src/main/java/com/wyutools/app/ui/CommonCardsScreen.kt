@@ -276,7 +276,8 @@ fun CommonCardsScreen(onBack: () -> Unit) {
             ) {
                 SmallTitle(
                     text = "显示的卡片",
-                    insideMargin = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    // 与顶栏大标题同一条左边线（卡片仍在 16dp 页边距上）。
+                    insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 8.dp),
                 )
                 if (commonTools.isEmpty()) {
                     SectionHint("常用还是空的，把下面的卡片拖上来吧。")
@@ -498,12 +499,12 @@ private fun MoreToolsHeader(
             text = "按住右侧把手，把卡片拖到下面就是收进「更多」，拖回上面就是放回常用。",
             style = MiuixTheme.textStyles.footnote2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 10.dp),
+            modifier = Modifier.padding(start = WyuTextInset, end = 24.dp, bottom = 10.dp),
         )
         Box(Modifier.onGloballyPositioned { onTitleOffset(it.positionInParent().y) }) {
             SmallTitle(
                 text = "更多工具",
-                insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                insideMargin = PaddingValues(horizontal = WyuTextInset, vertical = 12.dp),
             )
         }
         if (empty) SectionHint(emptyText)
@@ -516,7 +517,7 @@ private fun SectionHint(text: String) {
         text = text,
         style = MiuixTheme.textStyles.footnote1,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = WyuTextInset, end = 24.dp, top = 8.dp, bottom = 8.dp),
     )
 }
 
