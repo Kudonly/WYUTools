@@ -303,7 +303,9 @@ private fun TodayDateHeader(
                 lineHeight = 36.sp,
             ),
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
+            // 字号调到特大时「12 月 31 日 星期三」放不进一行，允许折成两行，
+            // 但不要截断——日期读不全比换行难受得多。
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))
