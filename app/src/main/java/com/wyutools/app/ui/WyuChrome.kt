@@ -421,6 +421,10 @@ fun WyuPageScaffold(
     val customDim = wyuCustomWallpaperDim(if (dark) brightnessDark else brightnessLight)
     val softGlassEnabled by WyuAppearance.softGlass.collectAsState()
     val softGlassPercent by WyuAppearance.softGlassBlur.collectAsState()
+    val liquidPercent by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquidTheme = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    // 烘焙底图的模糊量跟随当前主题自己的滑条（液态/柔光各自独立）。
+    val underlayBlurPercent = if (isLiquidTheme) liquidPercent else softGlassPercent
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val windowSize = LocalWindowInfo.current.containerSize
@@ -446,10 +450,15 @@ fun WyuPageScaffold(
     var glassLayerReady by remember { mutableStateOf(false) }
     var pageLayerReady by remember { mutableStateOf(false) }
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
+    // Sharp (unblurred) copy for the upstream glass baked path: the miuix
+    // pipeline applies the blur itself, so a pre-blurred source would double
+    // up. Baking blur into this one would also force the pipeline radius past
+    // its downsampling floor and peg the GPU.
+    val rawUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     // One stable backdrop per scaffold: cards sample the baked wallpaper
     // through it and never rebuild the glass node when the underlay is
-    // regenerated (wallpaper, dim or blur slider changes).
-    val bakedBackdrop = remember { WyuBitmapBackdrop(glassUnderlayState) }
+    // regenerated (wallpaper or dim changes).
+    val bakedBackdrop = remember { WyuBitmapBackdrop(rawUnderlayState) }
     val bounds = pageBounds.value
     val glassUnderlay = if (
         softGlassEnabled && customWallpaper != null && bounds != null
@@ -463,7 +472,7 @@ fun WyuPageScaffold(
             wyuGlassUnderlay(
                 image = customWallpaper,
                 dim = customDim,
-                blurSigmaPx = wyuSoftGlassScreenBlurPx(softGlassPercent),
+                blurSigmaPx = wyuSoftGlassScreenBlurPx(underlayBlurPercent),
                 widthPx = bounds.width.roundToInt(),
                 heightPx = bounds.height.roundToInt(),
                 origin = bounds.topLeft,
@@ -474,15 +483,30 @@ fun WyuPageScaffold(
     } else {
         null
     }
-    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, softGlassPercent, bounds) {
+    if (softGlassEnabled && customWallpaper != null && bounds != null) {
+        val current = rawUnderlayState.value
+        if (current == null || current.source !== customWallpaper) {
+            // First frame must already show the static material.
+            rawUnderlayState.value = wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = 0f,
+                widthPx = bounds.width.roundToInt(),
+                heightPx = bounds.height.roundToInt(),
+                origin = bounds.topLeft,
+            )
+        }
+    }
+    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, underlayBlurPercent, bounds) {
         if (!softGlassEnabled || customWallpaper == null) {
             glassUnderlayState.value = null
+            rawUnderlayState.value = null
             return@LaunchedEffect
         }
         val b = bounds ?: return@LaunchedEffect
         val w = b.width.roundToInt()
         val h = b.height.roundToInt()
-        val sigma = wyuSoftGlassScreenBlurPx(softGlassPercent)
+        val sigma = wyuSoftGlassScreenBlurPx(underlayBlurPercent)
         val current = glassUnderlayState.value
         if (current != null && current.matches(customWallpaper, customDim, sigma, w, h)) {
             return@LaunchedEffect
@@ -495,6 +519,31 @@ fun WyuPageScaffold(
                 image = customWallpaper,
                 dim = customDim,
                 blurSigmaPx = sigma,
+                widthPx = w,
+                heightPx = h,
+                origin = b.topLeft,
+            )
+        }
+    }
+    // Sharp copy only follows wallpaper/dim/bounds; the blur slider must not
+    // rebuild it (the pipeline owns the blur for this source).
+    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, bounds) {
+        if (!softGlassEnabled || customWallpaper == null) return@LaunchedEffect
+        val b = bounds ?: return@LaunchedEffect
+        val w = b.width.roundToInt()
+        val h = b.height.roundToInt()
+        val current = rawUnderlayState.value
+        if (current != null &&
+            current.matches(customWallpaper, customDim, 0f, w, h)
+        ) {
+            return@LaunchedEffect
+        }
+        delay(120)
+        rawUnderlayState.value = withContext(Dispatchers.Default) {
+            wyuGlassUnderlay(
+                image = customWallpaper,
+                dim = customDim,
+                blurSigmaPx = 0f,
                 widthPx = w,
                 heightPx = h,
                 origin = b.topLeft,
@@ -1049,11 +1098,7 @@ internal fun WyuChromeGlassSurface(
                             cornerRadius = cornerRadius,
                             tuning = liquidTuning,
                             dark = dark,
-                            baseTint = if (dark) {
-                                Color.Transparent
-                            } else {
-                                Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                            },
+                            baseTint = wyuLiquidControlTint(),
                             blurPercent = liquidBlur,
                             refractionThicknessPx = TopBarGlassRefractionPx,
                             reflectionThicknessPx = TopBarGlassReflectionPx,
@@ -1076,7 +1121,9 @@ internal fun WyuChromeGlassSurface(
                 )
                 .clip(shape)
                 .then(
-                    if (useUpstreamGlass) {
+                    if (useUpstreamGlass || (useSoftGlass && isLiquid)) {
+                        // shader 自带 tint，再叠实底色会双重取色，
+                        // 导致控件比卡片深一截。
                         Modifier
                     } else {
                         // 卡片同色，而不是写死的白：深色模式下白色会让
@@ -1407,7 +1454,7 @@ fun WyuFloatingTabs(
                         cornerRadius = 19.dp,
                         tuning = liquidTuning,
                         dark = dark,
-                        baseTint = wyuGlassControlWash(),
+                        baseTint = wyuLiquidControlTint(),
                         blurPercent = liquidBlur,
                         refractionThicknessPx = TopBarGlassRefractionPx,
                         reflectionThicknessPx = TopBarGlassReflectionPx,
@@ -1429,7 +1476,13 @@ fun WyuFloatingTabs(
                 },
             )
             .clip(shape)
-            .background(if (useUpstreamGlass) Color.Transparent else containerColor)
+            .background(
+                if (useUpstreamGlass || (useSoftGlass && isLiquid)) {
+                    Color.Transparent
+                } else {
+                    containerColor
+                },
+            )
             .border(0.5.dp, borderColor, shape)
             .padding(3.dp)
             .pointerInput(options.size, lastIndex) {
@@ -2274,7 +2327,7 @@ fun WyuNavigatorBar(
                                 cornerRadius = WyuNavigatorBarHeight / 2,
                                 tuning = liquidTuning,
                                 dark = dark,
-                                baseTint = glassContainerColor,
+                                baseTint = wyuLiquidControlTint(),
                                 blurPercent = liquidBlur,
                             )
                             .graphicsLayer {

@@ -140,6 +140,14 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                     format = { it.roundToInt().toString() },
                     onChange = { paramEdit(WyuGlassParam.ShapeEdgePx, it) },
                 )
+                TuneSlider(
+                    label = "边缘过渡幂",
+                    param = WyuGlassParam.ShapeEdgePow,
+                    value = paramValue(WyuGlassParam.ShapeEdgePow),
+                    valueRange = 0.05f..22.8f,
+                    format = { "%.2f".format(it) },
+                    onChange = { paramEdit(WyuGlassParam.ShapeEdgePow, it) },
+                )
             }
             TuningSection(title = "反射") {
                 Text(
@@ -163,6 +171,14 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                     valueRange = 0f..2f,
                     format = { "${(it * 100).roundToInt()}%" },
                     onChange = { paramEdit(WyuGlassParam.ReflectionStrength, it) },
+                )
+                TuneSlider(
+                    label = "反射亮化",
+                    param = WyuGlassParam.ReflectLighten,
+                    value = paramValue(WyuGlassParam.ReflectLighten),
+                    valueRange = -4.8f..7.2f,
+                    format = { "%.2f".format(it) },
+                    onChange = { paramEdit(WyuGlassParam.ReflectLighten, it) },
                 )
             }
             TuningSection(title = "背景与色调") {
@@ -190,9 +206,9 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 )
             }
             if (!isLiquid) {
-                TuningSection(title = "混合与光照") {
+                TuningSection(title = "混合与内层") {
                     Text(
-                        text = "对应 miuix-glass 的 blend、inner 与 light 层，控制底色混合和内部白度。",
+                        text = "对应 miuix-glass 的 blend 与 inner 层，控制底色混合和内部白度。",
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -206,6 +222,38 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                         onChange = { paramEdit(WyuGlassParam.BlendAmount, it) },
                     )
                     TuneSlider(
+                        label = "混合饱和度",
+                        param = WyuGlassParam.BlendSaturation,
+                        value = paramValue(WyuGlassParam.BlendSaturation),
+                        valueRange = 0f..4f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.BlendSaturation, it) },
+                    )
+                    TuneSlider(
+                        label = "混合亮度",
+                        param = WyuGlassParam.BlendBrightness,
+                        value = paramValue(WyuGlassParam.BlendBrightness),
+                        valueRange = 0f..1f,
+                        format = { "${(it * 100).roundToInt()}%" },
+                        onChange = { paramEdit(WyuGlassParam.BlendBrightness, it) },
+                    )
+                    TuneSlider(
+                        label = "内层底部渐变",
+                        param = WyuGlassParam.InnerBottom,
+                        value = paramValue(WyuGlassParam.InnerBottom),
+                        valueRange = 0f..1f,
+                        format = { "${(it * 100).roundToInt()}%" },
+                        onChange = { paramEdit(WyuGlassParam.InnerBottom, it) },
+                    )
+                    TuneSlider(
+                        label = "内层白色占比",
+                        param = WyuGlassParam.InnerColorWhite,
+                        value = paramValue(WyuGlassParam.InnerColorWhite),
+                        valueRange = 0f..1f,
+                        format = { "${(it * 100).roundToInt()}%" },
+                        onChange = { paramEdit(WyuGlassParam.InnerColorWhite, it) },
+                    )
+                    TuneSlider(
                         label = "内层混色",
                         param = WyuGlassParam.InnerColorMix,
                         value = paramValue(WyuGlassParam.InnerColorMix),
@@ -214,12 +262,52 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                         onChange = { paramEdit(WyuGlassParam.InnerColorMix, it) },
                     )
                     TuneSlider(
+                        label = "内层混色幂",
+                        param = WyuGlassParam.InnerColorPow,
+                        value = paramValue(WyuGlassParam.InnerColorPow),
+                        valueRange = 0.1f..4f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.InnerColorPow, it) },
+                    )
+                }
+                TuningSection(title = "光照与背景") {
+                    Text(
+                        text = "对应 miuix-glass 的 light 层与背景亮度、噪声抖动。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TuneSlider(
                         label = "主光强度",
                         param = WyuGlassParam.LightIntensity,
                         value = paramValue(WyuGlassParam.LightIntensity),
                         valueRange = 0f..4f,
                         format = { "%.2f".format(it) },
                         onChange = { paramEdit(WyuGlassParam.LightIntensity, it) },
+                    )
+                    TuneSlider(
+                        label = "背光强度",
+                        param = WyuGlassParam.LightOppositeIntensity,
+                        value = paramValue(WyuGlassParam.LightOppositeIntensity),
+                        valueRange = 0f..4f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.LightOppositeIntensity, it) },
+                    )
+                    TuneSlider(
+                        label = "背景亮度",
+                        param = WyuGlassParam.BackgroundBrightness,
+                        value = paramValue(WyuGlassParam.BackgroundBrightness),
+                        valueRange = -1f..1f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.BackgroundBrightness, it) },
+                    )
+                    TuneSlider(
+                        label = "噪声抖动",
+                        param = WyuGlassParam.NoiseCoefficient,
+                        value = paramValue(WyuGlassParam.NoiseCoefficient),
+                        valueRange = 0f..0.03f,
+                        format = { "%.4f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.NoiseCoefficient, it) },
                     )
                 }
             } else {

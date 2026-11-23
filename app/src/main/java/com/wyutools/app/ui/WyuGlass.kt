@@ -74,6 +74,22 @@ private const val CardSoftGlassAlpha = 0f
 internal fun wyuGlassControlWash(): Color =
     MiuixTheme.colorScheme.surfaceContainer.copy(alpha = CardGlassAlpha)
 
+/**
+ * 液态玻璃控件（顶栏面、胶囊、分段、输入框、底栏、菜单）的底色：
+ * 与液态卡片同一公式——浅色白、深色黑，alpha 取液态调参里的
+ * 卡片底色档——保证所有玻璃组件的取色跟卡片完全一致。
+ */
+@Composable
+internal fun wyuLiquidControlTint(): Color {
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    return if (dark) {
+        Color.Black.copy(alpha = liquidTuning.cardTintAlphaDark)
+    } else {
+        Color.White.copy(alpha = liquidTuning.cardTintAlphaLight)
+    }
+}
+
 internal const val SoftGlassWhiteTintAlpha = 0.64f
 private const val CardSoftGlassBlurScale = 0.6f
 // All soft-glass surfaces sample the backdrop at 1/2 resolution. Cards used to
@@ -287,8 +303,7 @@ fun Card(
                     tuning = tuningForTheme,
                     dark = dark,
                     blurPercent = softGlassBlur,
-                    tint = softGlassCardTint,
-                    baked = true,
+                    tint = softGlassCardTint
                 )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
@@ -397,8 +412,7 @@ fun Card(
                     tuning = tuningForTheme,
                     dark = dark,
                     blurPercent = softGlassBlur,
-                    tint = softGlassCardTint,
-                    baked = true,
+                    tint = softGlassCardTint
                 )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
@@ -485,11 +499,7 @@ fun LiveGlassCard(
                 cornerRadius = cornerRadius,
                 tuning = liquidTuning,
                 dark = dark,
-                baseTint = if (dark) {
-                    Color.Transparent
-                } else {
-                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                },
+                baseTint = wyuLiquidControlTint(),
                 blurPercent = liquidBlur,
                 refractionThicknessPx = TopBarGlassRefractionPx,
                 reflectionThicknessPx = TopBarGlassReflectionPx,
@@ -657,7 +667,7 @@ fun GlassTextField(
             cornerRadius = TextFieldDefaults.CornerRadius,
             tuning = liquidTuning,
             dark = dark,
-            baseTint = wyuGlassControlWash(),
+            baseTint = wyuLiquidControlTint(),
             blurPercent = liquidBlur,
         )
         useUpstreamGlass -> modifier.wyuUpstreamCardGlass(
@@ -723,7 +733,7 @@ fun GlassTextField(
             cornerRadius = TextFieldDefaults.CornerRadius,
             tuning = liquidTuning,
             dark = dark,
-            baseTint = wyuGlassControlWash(),
+            baseTint = wyuLiquidControlTint(),
             blurPercent = liquidBlur,
         )
         useUpstreamGlass -> modifier.wyuUpstreamCardGlass(

@@ -163,7 +163,7 @@ fun WyuOverlayDialog(
                 cornerRadius = DialogCardCorner,
                 tuning = liquidTuning,
                 dark = dark,
-                baseTint = surface.copy(alpha = DialogCardTint),
+                baseTint = wyuLiquidControlTint(),
                 blurPercent = if (dark) {
                     DialogSoftGlassBlurPercentDark
                 } else {

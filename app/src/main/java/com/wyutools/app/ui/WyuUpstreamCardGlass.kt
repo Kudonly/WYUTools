@@ -32,7 +32,6 @@ internal fun wyuUpstreamGlassStyle(
     tuning: WyuSoftGlassTuning,
     dark: Boolean,
     blurPercent: Int,
-    baked: Boolean = false,
 ): GlassStyle {
     val density = LocalDensity.current.density.coerceAtLeast(0.1f)
     val scale = GlassDefaults.SourceDensity / density
@@ -74,16 +73,12 @@ internal fun wyuUpstreamGlassStyle(
             brightness = t.backgroundBrightness,
         ),
         blur = base.blur.copy(
-            // 半径低于 ~22px 时上游退回 1x 全分辨率采样，滑动会明显掉帧；
+            // 半径低于 ~22px 时上游管线退回 1x 全分辨率采样（GPU 会被打满）；
             // 给模糊度设一个下限，外观仍有差别但始终走降采样快路径。
-            small = if (baked) {
-                // 烘焙路径：模糊已经烘进底图，管线只留最小模糊以保持在
-                // 降采样模糊的常规通路上，采样成本降到最低。
-                4f * scale
-            } else {
-                (maxOf(wyuSoftGlassScreenBlurPx(blurPercent) * 4f, 22f) * scale)
-                    .coerceIn(4f, 160f)
-            },
+            // 烘焙底图路径也用同一半径：底图不带模糊，模糊仍由管线完成，
+            // 观感与实时路径完全一致，省掉的只是每帧的实时层录制。
+            small = (maxOf(wyuSoftGlassScreenBlurPx(blurPercent) * 4f, 22f) * scale)
+                .coerceIn(4f, 160f),
         ),
     )
 }
@@ -96,25 +91,25 @@ internal fun Modifier.wyuUpstreamCardGlass(
     dark: Boolean,
     blurPercent: Int,
     tint: Color,
-    baked: Boolean = false,
 ): Modifier = glass(
     backdrop = backdrop,
     shape = GlassShape(cornerRadius),
-    style = wyuUpstreamGlassStyle(tuning, dark, blurPercent, baked),
+    style = wyuUpstreamGlassStyle(tuning, dark, blurPercent),
     tint = tint,
+    noiseCoefficient = tuning.noiseCoefficient,
     shading = true,
 )
 
 /**
- * A [Backdrop] sampling the pre-baked wallpaper underlay ([WyuGlassUnderlay])
- * instead of a live recorded layer — the static-material counterpart of what
- * the liquid-glass theme does with its baked layer. Each frame becomes one
- * scaled bitmap blit (no layer recording, no wallpaper redraw), and the
- * pipeline blur stays at its floor because the blur is already baked in.
+ * A [Backdrop] sampling a static wallpaper copy ([WyuGlassUnderlay], unblurred
+ * — the miuix pipeline applies the blur itself) instead of a live recorded
+ * layer. Each frame becomes one scaled bitmap blit: no backdrop recording and
+ * no wallpaper layer redraw per glass surface, and cold start renders without
+ * waiting for the live layer to be ready.
  *
  * The instance is stable across underlay regeneration; draw time reads the
- * current underlay from [underlayState] so wallpaper/dim/blur changes apply
- * without rebuilding the glass node.
+ * current underlay from [underlayState] so wallpaper/dim changes apply without
+ * rebuilding the glass node.
  */
 internal class WyuBitmapBackdrop(
     private val underlayState: State<WyuGlassUnderlay?>,

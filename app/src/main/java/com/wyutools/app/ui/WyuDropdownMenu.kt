@@ -301,7 +301,7 @@ internal fun WyuDropdownMenu(
                                         cornerRadius = with(density) { frame.cornerRadius.toDp() },
                                         tuning = liquidTuning,
                                         dark = dark,
-                                        baseTint = panelColor,
+                                        baseTint = wyuLiquidControlTint(),
                                         blurPercent = liquidBlur,
                                     )
                                 } else if (useUpstreamGlass && glassBackdrop != null) {
@@ -319,7 +319,8 @@ internal fun WyuDropdownMenu(
                                 },
                             )
                             .then(
-                                if (useUpstreamGlass) {
+                                if (useUpstreamGlass || useLiquidGlass) {
+                                    // 两种 shader 路径都自带 tint，实底色只留给回退。
                                     Modifier
                                 } else {
                                     Modifier

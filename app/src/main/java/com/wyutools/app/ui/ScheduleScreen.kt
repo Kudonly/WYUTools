@@ -559,7 +559,9 @@ private fun ScheduleWeekBar(
             selectedWeek = selectedWeek,
             maxWeek = maxWeek,
             onSelectWeek = onSelectWeek,
-            modifier = Modifier.weight(1f),
+            // 右端收进一点：玻璃条与「返回本周」胶囊之间留出明确空隙，
+            // 两种玻璃材质贴在一起会读成一条带子。
+            modifier = Modifier.weight(1f).padding(end = 10.dp),
         )
         Spacer(Modifier.width(8.dp))
         WyuGlassPillButton(
@@ -997,8 +999,7 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
                 tuning = tuning.resolvedFor(dark),
                 dark = dark,
                 blurPercent = softGlassBlur,
-                tint = Color.Transparent,
-                baked = true,
+                tint = Color.Transparent
             )
         softGlass && !isLiquid && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
             wyuUpstreamCardGlass(

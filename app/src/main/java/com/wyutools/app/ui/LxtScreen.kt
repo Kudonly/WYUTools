@@ -60,6 +60,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wyutools.app.lxt.LxtApi
 import com.wyutools.app.lxt.LxtUiState
 import com.wyutools.app.lxt.LxtViewModel
+import com.wyutools.app.lxt.ValveUsing
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -157,6 +158,10 @@ fun LxtScreen(
                     onOpenValve = { showValveDialog = true },
                     onRefreshValve = vm::refreshValve,
                 )
+                ui.valveUsing?.takeIf { ui.valveUsingActive }?.let { using ->
+                    Spacer(Modifier.height(12.dp))
+                    ValveUsingCard(using = using, onRefreshValve = vm::refreshValve)
+                }
                 Spacer(Modifier.height(12.dp))
                 // 宿舍修改不是每天要看的数字，只是偶尔进出的设置，压到页尾。
                 DormCard(ui = ui, onEditHot = onBindValve, onEditCold = onBind)
@@ -712,29 +717,34 @@ private fun ValveCard(
                 )
             }
         }
-        ui.valveUsing?.takeIf { ui.valveUsingActive }?.let { using ->
-            Spacer(Modifier.height(14.dp))
-            Card(
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.tertiaryContainer,
-                    contentColor = MiuixTheme.colorScheme.onTertiaryContainer,
-                ),
-                insideMargin = PaddingValues(16.dp),
-            ) {
-                Text(
-                    text = "热水阀使用中",
-                    style = MiuixTheme.textStyles.title4,
-                    color = MiuixTheme.colorScheme.onTertiaryContainer,
-                )
-                val minutes = ((System.currentTimeMillis() - using.openTime) / 60000L)
-                    .coerceAtLeast(0)
-                Text(
-                    text = "已使用约 $minutes 分钟 · 请在洗澡机上结束用水",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onTertiaryContainer,
-                )
-                TextButton(text = "刷新状态", onClick = onRefreshValve)
-            }
-        }
+    }
+}
+
+/** 「热水阀使用中」独立成页级卡片：与其它卡片同样的 16dp 页边距，不再被外层卡的内边距挤短。 */
+@Composable
+private fun ValveUsingCard(
+    using: ValveUsing,
+    onRefreshValve: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.defaultColors(
+            color = MiuixTheme.colorScheme.tertiaryContainer,
+            contentColor = MiuixTheme.colorScheme.onTertiaryContainer,
+        ),
+        insideMargin = PaddingValues(16.dp),
+    ) {
+        Text(
+            text = "热水阀使用中",
+            style = MiuixTheme.textStyles.title4,
+            color = MiuixTheme.colorScheme.onTertiaryContainer,
+        )
+        val minutes = ((System.currentTimeMillis() - using.openTime) / 60000L)
+            .coerceAtLeast(0)
+        Text(
+            text = "已使用约 $minutes 分钟 · 请在洗澡机上结束用水",
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onTertiaryContainer,
+        )
+        TextButton(text = "刷新状态", onClick = onRefreshValve)
     }
 }

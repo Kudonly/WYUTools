@@ -381,7 +381,9 @@ fun WyuLiquidGlassTuning.liquidValueFor(param: WyuGlassParam, dark: Boolean): Fl
     WyuGlassParam.RefractionIor -> refractionIor
     WyuGlassParam.EdgeThickness -> edgeThickness
     WyuGlassParam.ShapeEdgePx -> shapeEdgePx
+    WyuGlassParam.ShapeEdgePow -> shapeEdgePow
     WyuGlassParam.ReflectOffset -> reflectOffset
+    WyuGlassParam.ReflectLighten -> reflectLighten
     WyuGlassParam.ReflectionStrength -> reflectionStrength
     // 本地 shader 没有 blend/inner/light 层，滑条对液态玻璃无效。
     else -> 0f
@@ -403,7 +405,16 @@ fun WyuLiquidGlassTuning.editedLiquid(
         WyuTuneScope.Dark -> copy(cardTintAlphaDark = value)
         WyuTuneScope.Sync -> copy(cardTintAlphaLight = value, cardTintAlphaDark = value)
     }
-    WyuGlassParam.BlendAmount, WyuGlassParam.InnerColorMix, WyuGlassParam.LightIntensity -> this
+    WyuGlassParam.ShapeEdgePow -> copy(shapeEdgePow = value)
+    WyuGlassParam.ReflectLighten -> copy(reflectLighten = value)
+    // 本地 shader 没有 blend/inner/light 层，对应滑条原样保留输入。
+    WyuGlassParam.BlendAmount, WyuGlassParam.BlendSaturation,
+    WyuGlassParam.BlendBrightness, WyuGlassParam.InnerBottom,
+    WyuGlassParam.InnerColorWhite, WyuGlassParam.InnerColorMix,
+    WyuGlassParam.InnerColorPow, WyuGlassParam.LightIntensity,
+    WyuGlassParam.LightOppositeIntensity, WyuGlassParam.BackgroundBrightness,
+    WyuGlassParam.NoiseCoefficient,
+    -> this
     WyuGlassParam.RefractionIor -> copy(refractionIor = value)
     WyuGlassParam.EdgeThickness -> copy(edgeThickness = value)
     WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = value)
@@ -522,8 +533,11 @@ enum class WyuTuneScope(val label: String) {
 
 /** 高级模式暴露的参数；深色可单独覆盖，浅色存主字段。 */
 enum class WyuGlassParam {
-    RefractionIor, EdgeThickness, ShapeEdgePx, ReflectOffset, ReflectionStrength,
-    Saturation, CardTintAlpha, BlendAmount, InnerColorMix, LightIntensity,
+    RefractionIor, EdgeThickness, ShapeEdgePx, ShapeEdgePow, ReflectOffset,
+    ReflectionStrength, ReflectLighten, Saturation, CardTintAlpha,
+    BlendAmount, BlendSaturation, BlendBrightness,
+    InnerBottom, InnerColorWhite, InnerColorMix, InnerColorPow,
+    LightIntensity, LightOppositeIntensity, BackgroundBrightness, NoiseCoefficient,
 }
 
 /** 深色模式下对共享参数的覆盖；null 表示沿用浅色值。 */
@@ -605,13 +619,23 @@ fun WyuSoftGlassTuning.valueFor(param: WyuGlassParam, dark: Boolean): Float {
         WyuGlassParam.RefractionIor -> t.refractionIor
         WyuGlassParam.EdgeThickness -> t.edgeThickness
         WyuGlassParam.ShapeEdgePx -> t.shapeEdgePx
+        WyuGlassParam.ShapeEdgePow -> t.shapeEdgePow
         WyuGlassParam.ReflectOffset -> t.reflectOffset
+        WyuGlassParam.ReflectLighten -> t.reflectLighten
         WyuGlassParam.ReflectionStrength -> t.reflectionStrength
         WyuGlassParam.Saturation -> t.saturationLight
         WyuGlassParam.CardTintAlpha -> t.cardTintAlphaLight
         WyuGlassParam.BlendAmount -> t.blendAmount
+        WyuGlassParam.BlendSaturation -> t.blendSaturation
+        WyuGlassParam.BlendBrightness -> t.blendBrightness
+        WyuGlassParam.InnerBottom -> t.innerBottom
+        WyuGlassParam.InnerColorWhite -> t.innerColorWhite
         WyuGlassParam.InnerColorMix -> t.innerColorMix
+        WyuGlassParam.InnerColorPow -> t.innerColorPow
         WyuGlassParam.LightIntensity -> t.lightIntensity
+        WyuGlassParam.LightOppositeIntensity -> t.lightOppositeIntensity
+        WyuGlassParam.BackgroundBrightness -> t.backgroundBrightness
+        WyuGlassParam.NoiseCoefficient -> t.noiseCoefficient
     }
 }
 
@@ -625,18 +649,35 @@ fun WyuSoftGlassTuning.edited(
         WyuGlassParam.RefractionIor -> copy(refractionIor = v)
         WyuGlassParam.EdgeThickness -> copy(edgeThickness = v)
         WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = v)
+        WyuGlassParam.ShapeEdgePow -> copy(shapeEdgePow = v)
         WyuGlassParam.ReflectOffset -> copy(reflectOffset = v)
+        WyuGlassParam.ReflectLighten -> copy(reflectLighten = v)
         WyuGlassParam.ReflectionStrength -> copy(reflectionStrength = v)
         WyuGlassParam.Saturation -> copy(saturationLight = v)
         WyuGlassParam.CardTintAlpha -> copy(cardTintAlphaLight = v)
         WyuGlassParam.BlendAmount -> copy(blendAmount = v)
+        WyuGlassParam.BlendSaturation -> copy(blendSaturation = v)
+        WyuGlassParam.BlendBrightness -> copy(blendBrightness = v)
+        WyuGlassParam.InnerBottom -> copy(innerBottom = v)
+        WyuGlassParam.InnerColorWhite -> copy(innerColorWhite = v)
         WyuGlassParam.InnerColorMix -> copy(innerColorMix = v)
+        WyuGlassParam.InnerColorPow -> copy(innerColorPow = v)
         WyuGlassParam.LightIntensity -> copy(lightIntensity = v)
+        WyuGlassParam.LightOppositeIntensity -> copy(lightOppositeIntensity = v)
+        WyuGlassParam.BackgroundBrightness -> copy(backgroundBrightness = v)
+        WyuGlassParam.NoiseCoefficient -> copy(noiseCoefficient = v)
     }
 
     fun WyuSoftGlassTuning.setDark(v: Float) = when (param) {
         WyuGlassParam.Saturation -> copy(saturationDark = v)
         WyuGlassParam.CardTintAlpha -> copy(cardTintAlphaDark = v)
+        // 上游材质里单值参数没有深色覆盖位，深色范围下调成跟随浅色。
+        WyuGlassParam.ShapeEdgePow, WyuGlassParam.ReflectLighten,
+        WyuGlassParam.BlendSaturation, WyuGlassParam.BlendBrightness,
+        WyuGlassParam.InnerBottom, WyuGlassParam.InnerColorWhite,
+        WyuGlassParam.InnerColorPow, WyuGlassParam.LightOppositeIntensity,
+        WyuGlassParam.BackgroundBrightness, WyuGlassParam.NoiseCoefficient,
+        -> setLight(v)
         else -> copy(darkValues = darkValues.withParam(param, v))
     }
 
