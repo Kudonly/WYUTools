@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
@@ -18,6 +20,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
@@ -157,6 +160,30 @@ fun DrawScope.drawWyuImageCover(image: ImageBitmap, dim: Float = 0f) {
     }
 }
 
+/** Rasterise a preset gradient so the default-theme menu can blur the same
+ *  wallpaper bitmap as the custom-wallpaper path. */
+internal fun wyuPresetWallpaperImage(
+    wallpaper: WyuWallpaper,
+    dark: Boolean,
+    surface: Color,
+    widthPx: Int,
+    heightPx: Int,
+): ImageBitmap? {
+    val stops = wallpaper.backgroundStops(dark, surface) ?: return null
+    val w = (widthPx / 4f).roundToInt().coerceAtLeast(1)
+    val h = (heightPx / 4f).roundToInt().coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val shader = LinearGradient(
+        0f, 0f, 0f, h.toFloat(),
+        IntArray(stops.size) { stops[it].second.toArgb() },
+        FloatArray(stops.size) { stops[it].first },
+        Shader.TileMode.CLAMP,
+    )
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG).apply { this.shader = shader }
+    Canvas(bitmap).drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+    return bitmap.asImageBitmap()
+}
+
 /** Slider percentage is the wallpaper's actual brightness; each mode stores its own. */
 fun wyuCustomWallpaperDim(brightness: Float): Float =
     (1f - brightness.coerceIn(0.5f, 1f)).coerceIn(0f, 0.92f)
@@ -237,7 +264,7 @@ object WyuAppearance {
     private const val KeyBackgroundBrightness = "glass_background_brightness"
     private const val KeyNoise = "glass_noise_coefficient"
     private const val KeyGlassDarkValues = "glass_dark_values"
-    private const val KeyTuneScope = "glass_tune_scope"
+    private const val KeyTuneSync = "glass_tune_sync"
     private const val KeyMonetSeed = "monet_seed"
     private const val KeyPaletteScheme = "monet_palette_scheme"
     private const val CustomFileName = "custom_wallpaper.jpg"
@@ -281,8 +308,8 @@ object WyuAppearance {
     private val _softGlassTuning = MutableStateFlow(WyuSoftGlassTuning())
     val softGlassTuning: StateFlow<WyuSoftGlassTuning> = _softGlassTuning.asStateFlow()
 
-    private val _softGlassTuneScope = MutableStateFlow(WyuTuneScope.Sync)
-    val softGlassTuneScope: StateFlow<WyuTuneScope> = _softGlassTuneScope.asStateFlow()
+    private val _softGlassTuneSync = MutableStateFlow(false)
+    val softGlassTuneSync: StateFlow<Boolean> = _softGlassTuneSync.asStateFlow()
     private val _liquidGlassBlur = MutableStateFlow(LiquidGlassBlurDefault)
     val liquidGlassBlur: StateFlow<Int> = _liquidGlassBlur.asStateFlow()
     private val _liquidGlassTuning = MutableStateFlow(WyuLiquidGlassTuning())
@@ -478,9 +505,7 @@ object WyuAppearance {
             noiseCoefficient = loaded.getFloat(KeyNoise, tuningDefaults.noiseCoefficient).coerceIn(0f, 0.03f),
             darkValues = decodeGlassDarkValues(loaded.getString(KeyGlassDarkValues, null)),
         )
-        _softGlassTuneScope.value = WyuTuneScope.entries
-            .firstOrNull { it.name == loaded.getString(KeyTuneScope, null) }
-            ?: WyuTuneScope.Sync
+        _softGlassTuneSync.value = loaded.getBoolean(KeyTuneSync, false)
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         _paletteScheme.value = WyuPaletteScheme.fromStored(loaded.getString(KeyPaletteScheme, null))
         val saved = WyuWallpaper.entries
@@ -681,12 +706,12 @@ object WyuAppearance {
             ?.apply()
     }
 
-    /** 切换高级模式当前编辑的深浅色范围。 */
-    fun setSoftGlassTuneScope(context: Context, scope: WyuTuneScope) {
+    /** 两种玻璃的高级模式共用同步调节开关，默认只改当前深浅色。 */
+    fun setSoftGlassTuneSync(context: Context, sync: Boolean) {
         ensureLoaded(context)
-        if (_softGlassTuneScope.value == scope) return
-        _softGlassTuneScope.value = scope
-        prefs?.edit()?.putString(KeyTuneScope, scope.name)?.apply()
+        if (_softGlassTuneSync.value == sync) return
+        _softGlassTuneSync.value = sync
+        prefs?.edit()?.putBoolean(KeyTuneSync, sync)?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {

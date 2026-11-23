@@ -1,6 +1,7 @@
 package com.wyutools.app.ui
 
 import android.view.View
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.snap
@@ -144,14 +145,17 @@ internal fun WyuDropdownMenu(
     // 因为面板要先缩回按钮再消失，太短会在半路上没影。
     val fade by transition.animateFloat(
         transitionSpec = {
-            tween(durationMillis = if (targetState) 50 else 260, easing = LinearEasing)
+            tween(
+                durationMillis = if (targetState) 50 else 220,
+                easing = if (targetState) LinearEasing else FastOutLinearInEasing,
+            )
         },
         label = "wyuDropdownFade",
     ) { if (it) 1f else 0f }
     // 模糊是单向的：进场直接吸附到清晰，只有出场才线性涨到 30dp（与淡出同窗）。
     val sharpness by transition.animateFloat(
         transitionSpec = {
-            if (targetState) snap() else tween(durationMillis = 260, easing = LinearEasing)
+            if (targetState) snap() else tween(durationMillis = 240, easing = LinearEasing)
         },
         label = "wyuDropdownBlur",
     ) { if (it) 1f else 0f }
@@ -299,9 +303,12 @@ internal fun WyuDropdownMenu(
                                 width = with(density) { frame.width.toDp() },
                                 height = with(density) { frame.height.toDp() },
                             )
+                            .graphicsLayer { alpha = panelAlpha }
+                            .shadow(elevation = 12.dp, shape = shape, clip = false)
+                            .clip(shape)
+                            // 模糊层必须排在 clip 内侧：否则圆角之外的透明区域也被糊成
+                            // 一圈矩形光晕，收起时看起来就是一块方形模糊突然消失。
                             .graphicsLayer {
-                                alpha = panelAlpha
-                                // 整块（含底色、描边、投影）一起糊，参考实现的 panelLayer 就是这样。
                                 if (MorphBlurSupported) {
                                     renderEffect = if (blurPx > 0.5f) {
                                         backdropBlurEffect(blurPx)
@@ -310,8 +317,6 @@ internal fun WyuDropdownMenu(
                                     }
                                 }
                             }
-                            .shadow(elevation = 12.dp, shape = shape, clip = false)
-                            .clip(shape)
                             .then(
                                 if (useLiquidGlass) {
                                     Modifier.wyuLiquidGlass(
@@ -399,7 +404,7 @@ private const val ArcStartRatio = 0.2f
 private const val ArcVisibleFraction = 0.1f
 
 /** 收起时的模糊半径，dp。 */
-private const val ArcExitBlurDp = 30f
+private const val ArcExitBlurDp = 18f
 
 /** 起点与展开后的圆角。 */
 private val ArcStartCorner = 4.dp

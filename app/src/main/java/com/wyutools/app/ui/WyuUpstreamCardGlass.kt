@@ -98,12 +98,10 @@ internal fun wyuUpstreamGlassStyle(
             brightness = t.backgroundBrightness,
         ),
         blur = base.blur.copy(
-            // 半径低于 ~22px 时上游管线退回 1x 全分辨率采样（GPU 会被打满）；
-            // 给模糊度设一个下限，外观仍有差别但始终走降采样快路径。
-            // 烘焙底图路径也用同一半径：底图不带模糊，模糊仍由管线完成，
-            // 观感与实时路径完全一致，省掉的只是每帧的实时层录制。
-            small = (maxOf(wyuSoftGlassScreenBlurPx(blurPercent) * 4f, 22f) * scale)
-                .coerceIn(4f, 160f),
+            // 0% 必须真的是 0 模糊；下限只做数值保护，不再抬高实际半径。
+            // 烘焙底图路径也用同一半径，观感与实时路径保持一致。
+            small = (wyuSoftGlassScreenBlurPx(blurPercent) * 4f * scale)
+                .coerceIn(0f, 160f),
         ),
     )
 }

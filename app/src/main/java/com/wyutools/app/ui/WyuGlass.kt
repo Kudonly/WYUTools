@@ -235,20 +235,28 @@ fun Card(
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val isLiquid = cardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
+    val wallpaper = LocalWyuWallpaper.current
+    // Preset gradients are tinted by Monet; in light mode the user wants
+    // their cards to stay pure white regardless of the wallpaper seed.
+    val cardColors = if (!dark && wallpaper != WyuWallpaper.Custom) {
+        colors.copy(color = Color.White)
+    } else {
+        colors
+    }
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
     // The dark wash starts at zero alpha, so the slider adds smoke from nothing;
     // custom tints must not follow it or coloured cards lose their colour in
     // dark mode.
     val softGlassCardTint = when {
-        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
+        cardColors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            cardColors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
         dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
         else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
     val liquidCardTint = when {
-        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
+        cardColors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            cardColors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
         dark -> Color.Black.copy(alpha = liquidTuning.cardTintAlphaDark)
         else -> Color.White.copy(alpha = liquidTuning.cardTintAlphaLight)
     }
@@ -337,9 +345,9 @@ fun Card(
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
         colors = if (glass != null) {
-            colors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
+            cardColors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
         } else {
-            colors
+            cardColors
         },
         content = content,
     )
@@ -373,20 +381,28 @@ fun Card(
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val isLiquid = cardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
+    val wallpaper = LocalWyuWallpaper.current
+    // Preset gradients are tinted by Monet; in light mode the user wants
+    // their cards to stay pure white regardless of the wallpaper seed.
+    val cardColors = if (!dark && wallpaper != WyuWallpaper.Custom) {
+        colors.copy(color = Color.White)
+    } else {
+        colors
+    }
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
     // The dark wash starts at zero alpha, so the slider adds smoke from nothing;
     // custom tints must not follow it or coloured cards lose their colour in
     // dark mode.
     val softGlassCardTint = when {
-        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
+        cardColors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            cardColors.color.copy(alpha = tuningForTheme.cardTintAlphaLight)
         dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
         else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
     val liquidCardTint = when {
-        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
-            colors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
+        cardColors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            cardColors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
         dark -> Color.Black.copy(alpha = liquidTuning.cardTintAlphaDark)
         else -> Color.White.copy(alpha = liquidTuning.cardTintAlphaLight)
     }
@@ -456,9 +472,9 @@ fun Card(
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
         colors = if (glass != null) {
-            colors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
+            cardColors.frosted(if (softGlass && wyuSoftGlassSupported) CardSoftGlassAlpha else CardGlassAlpha)
         } else {
-            colors
+            cardColors
         },
         pressFeedbackType = pressFeedbackType,
         showIndication = showIndication,

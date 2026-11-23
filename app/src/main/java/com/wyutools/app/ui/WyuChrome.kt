@@ -472,6 +472,22 @@ fun WyuPageScaffold(
         if (bakedUnderlay != null) WyuDelegatingBackdrop(bakedBackdrop) else null
     }
     val bounds = pageBounds.value
+    val presetWallpaperSource = remember(
+        wallpaper, dark, surface, bounds?.width, bounds?.height,
+    ) {
+        val b = bounds
+        if (!softGlassEnabled && wallpaper != WyuWallpaper.Custom && b != null) {
+            wyuPresetWallpaperImage(
+                wallpaper = wallpaper,
+                dark = dark,
+                surface = surface,
+                widthPx = b.width.roundToInt(),
+                heightPx = b.height.roundToInt(),
+            )
+        } else {
+            null
+        }
+    }
     val glassUnderlay = if (
         softGlassEnabled && customWallpaper != null && bounds != null
     ) {
@@ -575,18 +591,20 @@ fun WyuPageScaffold(
     // textureBlur pipeline for every card on every frame.
     val gaussianSigmaPx = remember(density) { wyuGaussianSigmaPx(CardBlurRadius, density.density) }
     val gaussianUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
+    val gaussianWallpaper = customWallpaper ?: presetWallpaperSource
+    val gaussianDim = if (customWallpaper != null) customDim else 0f
     val gaussianUnderlay = if (
-        !softGlassEnabled && customWallpaper != null && bounds != null
+        !softGlassEnabled && gaussianWallpaper != null && bounds != null
     ) {
         val current = gaussianUnderlayState.value
-        if (current == null || current.source !== customWallpaper ||
+        if (current == null || current.source !== gaussianWallpaper ||
             current.origin != bounds.topLeft ||
             current.widthPx != bounds.width.roundToInt() ||
             current.heightPx != bounds.height.roundToInt()
         ) {
             wyuGlassUnderlay(
-                image = customWallpaper,
-                dim = customDim,
+                image = gaussianWallpaper,
+                dim = gaussianDim,
                 blurSigmaPx = gaussianSigmaPx,
                 widthPx = bounds.width.roundToInt(),
                 heightPx = bounds.height.roundToInt(),
@@ -598,8 +616,11 @@ fun WyuPageScaffold(
     } else {
         null
     }
-    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, gaussianSigmaPx, bounds) {
-        if (softGlassEnabled || customWallpaper == null) {
+    LaunchedEffect(
+        customWallpaper, presetWallpaperSource, customDim,
+        softGlassEnabled, gaussianSigmaPx, bounds,
+    ) {
+        if (softGlassEnabled || gaussianWallpaper == null) {
             gaussianUnderlayState.value = null
             return@LaunchedEffect
         }
@@ -608,15 +629,15 @@ fun WyuPageScaffold(
         val h = b.height.roundToInt()
         val current = gaussianUnderlayState.value
         if (current != null &&
-            current.matches(customWallpaper, customDim, gaussianSigmaPx, w, h, b.topLeft)
+            current.matches(gaussianWallpaper, gaussianDim, gaussianSigmaPx, w, h, b.topLeft)
         ) {
             return@LaunchedEffect
         }
         delay(120)
         gaussianUnderlayState.value = withContext(Dispatchers.Default) {
             wyuGlassUnderlay(
-                image = customWallpaper,
-                dim = customDim,
+                image = gaussianWallpaper,
+                dim = gaussianDim,
                 blurSigmaPx = gaussianSigmaPx,
                 widthPx = w,
                 heightPx = h,

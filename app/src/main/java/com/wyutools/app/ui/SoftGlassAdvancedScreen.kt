@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Restore
+import top.yukonga.miuix.kmp.basic.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,8 +51,15 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
     val isLiquid = cardTheme == WyuCardTheme.Liquid
     val softTuning by WyuAppearance.softGlassTuning.collectAsState()
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val scope by WyuAppearance.softGlassTuneScope.collectAsState()
+    val tuneSync by WyuAppearance.softGlassTuneSync.collectAsState()
     val dark = LocalWyuDarkTheme.current
+    val scope = if (tuneSync) {
+        WyuTuneScope.Sync
+    } else if (dark) {
+        WyuTuneScope.Dark
+    } else {
+        WyuTuneScope.Light
+    }
     var showResetConfirm by remember { mutableStateOf(false) }
 
     fun paramValue(param: WyuGlassParam): Float =
@@ -105,9 +114,9 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
             )
             Spacer(Modifier.height(4.dp))
-            ScopeCard(
-                scope = scope,
-                onSelect = { WyuAppearance.setSoftGlassTuneScope(context, it) },
+            SyncTuneCard(
+                checked = tuneSync,
+                onCheckedChange = { WyuAppearance.setSoftGlassTuneSync(context, it) },
             )
             TuningSection(title = "折射与边缘") {
                 Text(
@@ -332,9 +341,9 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
         show = showResetConfirm,
         title = "恢复默认参数",
         summary = if (isLiquid) {
-            "将液态玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。柔光玻璃的参数不受影响。"
+            "将液态玻璃的高级参数与同步开关一并恢复为默认值，恢复后立即生效。柔光玻璃的参数不受影响。"
         } else {
-            "将柔光玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。液态玻璃的参数不受影响。"
+            "将柔光玻璃的高级参数与同步开关一并恢复为默认值，恢复后立即生效。液态玻璃的参数不受影响。"
         },
         onDismissRequest = { showResetConfirm = false },
     ) {
@@ -347,7 +356,7 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 } else {
                     WyuAppearance.setSoftGlassTuning(context, WyuSoftGlassTuning())
                 }
-                WyuAppearance.setSoftGlassTuneScope(context, WyuTuneScope.Sync)
+                WyuAppearance.setSoftGlassTuneSync(context, false)
                 showResetConfirm = false
                 Toast.makeText(context, "已恢复默认参数", Toast.LENGTH_SHORT).show()
             },
@@ -358,12 +367,10 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ScopeCard(
-    scope: WyuTuneScope,
-    onSelect: (WyuTuneScope) -> Unit,
+private fun SyncTuneCard(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var anchor by remember { mutableStateOf(Rect.Zero) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -377,32 +384,15 @@ private fun ScopeCard(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "调节范围", style = MiuixTheme.textStyles.body1)
+                Text(text = "同步调节", style = MiuixTheme.textStyles.body1)
                 Text(
-                    text = "选择滑条作用于浅色、深色，还是两者同步。",
+                    text = "关闭时只修改当前深浅色；开启后浅色和深色一起修改。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
-            Box(modifier = Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }) {
-                WyuDropdownTrigger(label = scope.label, onClick = { expanded = true })
-                WyuDropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    anchor = anchor,
-                ) {
-                    WyuTuneScope.entries.forEach { option ->
-                        WyuDropdownItem(
-                            text = option.label,
-                            selected = scope == option,
-                            onClick = {
-                                expanded = false
-                                onSelect(option)
-                            },
-                        )
-                    }
-                }
-            }
+            Spacer(Modifier.width(16.dp))
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
     Spacer(Modifier.height(12.dp))
