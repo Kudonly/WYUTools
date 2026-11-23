@@ -892,17 +892,27 @@ private fun WeekTimeAxis(
  * the tint, so the block frosts whatever the page is showing without needing a
  * card container. Soft glass uses its underlay, plain mode the Gaussian one;
  * with a stock (gradient) wallpaper there is no bitmap to sample and only the
- * tint remains. 莫奈 keeps the opaque tonal tile — glass is a 柔光玻璃 idea.
+ * tint remains.
  */
 @Composable
 private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
-    if (LocalWyuMd3Style.current) return background(tint, shape)
     val softGlass by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
     val blur = when {
+        softGlass && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
+            wyuUpstreamCardGlass(
+                backdrop = wallpaper,
+                cornerRadius = 11.dp,
+                tuning = tuning.resolvedFor(dark),
+                dark = dark,
+                blurPercent = softGlassBlur,
+                tint = Color.Transparent,
+            )
         softGlass && underlay != null -> wyuWallpaperBlur(underlay, shape)
         !softGlass && gaussian != null -> wyuWallpaperBlur(gaussian, shape)
         wallpaper != null ->

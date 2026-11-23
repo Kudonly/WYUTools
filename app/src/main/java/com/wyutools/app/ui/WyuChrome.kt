@@ -421,10 +421,6 @@ fun WyuPageScaffold(
     val customDim = wyuCustomWallpaperDim(if (dark) brightnessDark else brightnessLight)
     val softGlassEnabled by WyuAppearance.softGlass.collectAsState()
     val softGlassPercent by WyuAppearance.softGlassBlur.collectAsState()
-    // 莫奈 draws opaque containers and never samples a backdrop, so both
-    // pre-blurred underlays are dead weight there: skipping them saves a
-    // full-screen blur bake per wallpaper change.
-    val md3Surfaces = LocalWyuMd3Style.current
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val windowSize = LocalWindowInfo.current.containerSize
@@ -452,7 +448,7 @@ fun WyuPageScaffold(
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     val bounds = pageBounds.value
     val glassUnderlay = if (
-        !md3Surfaces && softGlassEnabled && customWallpaper != null && bounds != null
+        softGlassEnabled && customWallpaper != null && bounds != null
     ) {
         val current = glassUnderlayState.value
         if (current == null || current.source !== customWallpaper) {
@@ -475,7 +471,7 @@ fun WyuPageScaffold(
         null
     }
     LaunchedEffect(customWallpaper, customDim, softGlassEnabled, softGlassPercent, bounds) {
-        if (md3Surfaces || !softGlassEnabled || customWallpaper == null) {
+        if (!softGlassEnabled || customWallpaper == null) {
             glassUnderlayState.value = null
             return@LaunchedEffect
         }
@@ -507,7 +503,7 @@ fun WyuPageScaffold(
     val gaussianSigmaPx = remember(density) { wyuGaussianSigmaPx(CardBlurRadius, density.density) }
     val gaussianUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     val gaussianUnderlay = if (
-        !md3Surfaces && !softGlassEnabled && customWallpaper != null && bounds != null
+        !softGlassEnabled && customWallpaper != null && bounds != null
     ) {
         val current = gaussianUnderlayState.value
         if (current == null || current.source !== customWallpaper) {
@@ -526,7 +522,7 @@ fun WyuPageScaffold(
         null
     }
     LaunchedEffect(customWallpaper, customDim, softGlassEnabled, gaussianSigmaPx, bounds) {
-        if (md3Surfaces || softGlassEnabled || customWallpaper == null) {
+        if (softGlassEnabled || customWallpaper == null) {
             gaussianUnderlayState.value = null
             return@LaunchedEffect
         }
@@ -1023,75 +1019,58 @@ internal fun WyuChromeGlassSurface(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
     val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
-    // 莫奈: opaque tonal block, no shadow, no sampling and no rim light.
-    val md3 = LocalWyuMd3Style.current
-    val useSoftGlass = !md3 && softGlass && wyuSoftGlassSupported
+    val useSoftGlass = softGlass && wyuSoftGlassSupported && backdrop != null
+    val glassReady = LocalWyuGlassReady.current
+    val useUpstreamGlass = useSoftGlass && glassReady
     Box(
         modifier = modifier.then(
-            if (md3) {
-                Modifier
-                    .clip(shape)
-                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-            } else {
-                Modifier
-                    .shadow(
-                        elevation = 3.dp,
-                        shape = shape,
-                        clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.10f),
-                        spotColor = Color.Black.copy(alpha = 0.16f),
-                    )
-                    .then(
-                        when {
-                            backdrop == null -> Modifier
-                            useSoftGlass -> Modifier.wyuSoftGlass(
-                                backdrop = backdrop,
-                                shape = shape,
-                                glassShape = glassShape,
-                                cornerRadius = cornerRadius,
-                                blurPercent = softGlassBlur,
-                                baseTint = if (dark) {
-                                    Color.Transparent
-                                } else {
-                                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                                },
-                                refractionThicknessPx = TopBarGlassRefractionPx,
-                                reflectionThicknessPx = TopBarGlassReflectionPx,
-                                shapeEdgePx = glassTuningForTheme.shapeEdgePx,
-                                shapeEdgePow = glassTuningForTheme.shapeEdgePow,
-                                reflectionLighten = glassTuningForTheme.reflectLighten,
-                                bgSaturation = glassTuningForTheme.saturation(dark),
-                                reflectionStrength = glassTuningForTheme.reflectionStrength,
-                                refractionIor = glassTuningForTheme.refractionIor,
-                            )
+            Modifier
+                .shadow(
+                    elevation = 3.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.10f),
+                    spotColor = Color.Black.copy(alpha = 0.16f),
+                )
+                .then(
+                    when {
+                        backdrop == null -> Modifier
+                        useUpstreamGlass -> Modifier.wyuUpstreamCardGlass(
+                            backdrop = backdrop,
+                            cornerRadius = cornerRadius,
+                            tuning = glassTuningForTheme,
+                            dark = dark,
+                            blurPercent = softGlassBlur,
+                            tint = wyuGlassControlWash(),
+                        )
 
-                            else -> Modifier.textureBlur(
-                                backdrop = backdrop,
-                                shape = shape,
-                                blurRadius = 24f,
-                            )
-                        },
-                    )
-                    .clip(shape)
-                    .then(
-                        if (useSoftGlass && backdrop != null) {
-                            Modifier
-                        } else {
-                            // 卡片同色，而不是写死的白：深色模式下白色会让
-                            // 这些玻璃钮比卡片亮出一截，看着就是"白块"。
-                            Modifier.background(wyuGlassControlWash())
-                        },
-                    )
-                    .border(
-                        width = 0.5.dp,
-                        color = if (dark) {
-                            Color.White.copy(alpha = 0.14f)
-                        } else {
-                            Color.Black.copy(alpha = 0.06f)
-                        },
-                        shape = shape,
-                    )
-            },
+                        else -> Modifier.textureBlur(
+                            backdrop = backdrop,
+                            shape = shape,
+                            blurRadius = 24f,
+                        )
+                    },
+                )
+                .clip(shape)
+                .then(
+                    if (useUpstreamGlass) {
+                        Modifier
+                    } else {
+                        // 卡片同色，而不是写死的白：深色模式下白色会让
+                        // 这些玻璃钮比卡片亮出一截，看着就是"白块"。
+                        Modifier.background(wyuGlassControlWash())
+                    },
+                )
+                .border(
+                    width = 0.5.dp,
+                    color = if (dark) {
+                        Color.White.copy(alpha = 0.14f)
+                    } else {
+                        Color.Black.copy(alpha = 0.06f)
+                    },
+                    shape = shape,
+                )
+        ,
         ),
         contentAlignment = Alignment.Center,
         content = content,
@@ -1354,42 +1333,38 @@ fun WyuFloatingTabs(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
     val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
-    // 莫奈 turns the pill into an MD3 segmented control: opaque container,
-    // primary thumb, onPrimary label. Nothing is blurred or shadowed.
-    val md3 = LocalWyuMd3Style.current
-    val useSoftGlass = !md3 && backdrop != null && softGlass && wyuSoftGlassSupported
+    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
+    val glassReady = LocalWyuGlassReady.current
+    val useUpstreamGlass = useSoftGlass && glassReady
     val scheme = MiuixTheme.colorScheme
     val containerColor = when {
-        md3 -> scheme.surfaceContainerHigh
         // 与卡片同源取色：深色下原来的 #2C2C2C 比卡片亮，看着发白。
         glass -> wyuGlassControlWash()
         dark -> Color(0xFF2C2C2C)
         else -> Color.White
     }
     val indicatorColor = when {
-        md3 -> scheme.primary
         lightThumb && dark -> Color.White.copy(alpha = 0.22f)
         lightThumb -> Color.White
         dark -> Color.White.copy(alpha = 0.16f)
         else -> Color.Black.copy(alpha = 0.10f)
     }
     val borderColor = when {
-        md3 -> Color.Transparent
         glass && dark -> Color.White.copy(alpha = 0.14f)
         glass -> Color.Black.copy(alpha = 0.06f)
         dark -> Color.White.copy(alpha = 0.08f)
         else -> Color.Black.copy(alpha = 0.04f)
     }
     val contentColor = if (dark) Color.White else Color.Black
-    val selectedContentColor = if (md3) scheme.onPrimary else contentColor
-    val unselectedContentColor = if (md3) scheme.onSurface else contentColor
+    val selectedContentColor = contentColor
+    val unselectedContentColor = contentColor
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .height(38.dp)
             .shadow(
-                elevation = if (md3) 0.dp else 10.dp,
+                elevation = 10.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = Color.Black.copy(alpha = 0.10f),
@@ -1397,26 +1372,14 @@ fun WyuFloatingTabs(
             )
             .then(
                 when {
-                    md3 -> Modifier
                     backdrop == null -> Modifier
-                    useSoftGlass -> Modifier.wyuSoftGlass(
+                    useUpstreamGlass -> Modifier.wyuUpstreamCardGlass(
                         backdrop = backdrop,
-                        shape = shape,
-                        glassShape = WyuSoftGlassShape.RoundedRect,
                         cornerRadius = 19.dp,
+                        tuning = glassTuningForTheme,
+                        dark = dark,
                         blurPercent = softGlassBlur,
-                        baseTint = if (dark) {
-                            Color.Transparent
-                        } else {
-                            Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                        },
-                        shapeEdgePx = TabsGlassEdgePx,
-                        shapeEdgePow = TabsGlassEdgePow,
-                        refractionThicknessPx = TabsGlassRefractionPx,
-                        reflectionLighten = glassTuningForTheme.reflectLighten,
-                        bgSaturation = glassTuningForTheme.saturation(dark),
-                        reflectionStrength = glassTuningForTheme.reflectionStrength,
-                        refractionIor = glassTuningForTheme.refractionIor,
+                        tint = wyuGlassControlWash(),
                     )
 
                     else -> Modifier.textureBlur(
@@ -1427,7 +1390,7 @@ fun WyuFloatingTabs(
                 },
             )
             .clip(shape)
-            .background(if (useSoftGlass) Color.Transparent else containerColor)
+            .background(if (useUpstreamGlass) Color.Transparent else containerColor)
             .border(0.5.dp, borderColor, shape)
             .padding(3.dp)
             .pointerInput(options.size, lastIndex) {
@@ -1617,9 +1580,9 @@ fun WyuFloatingTabs(
                 )
                 val textColor by animateColorAsState(
                     targetValue = if (selected) {
-                        selectedContentColor.copy(alpha = if (md3) 1f else 0.95f)
+                        selectedContentColor.copy(alpha = 0.95f)
                     } else {
-                        unselectedContentColor.copy(alpha = if (md3) 0.72f else 0.55f)
+                        unselectedContentColor.copy(alpha = 0.55f)
                     },
                     animationSpec = tween(180),
                     label = "floatingTabText",
@@ -2130,7 +2093,13 @@ fun WyuNavigatorBar(
     } else {
         Color.Black.copy(alpha = 0.10f)
     }
-    val glassContainerColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
+    val glassContainerColor = if (dark) {
+        Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
+    } else {
+        Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
+    }
     val glassBackdrop = backdrop
     val barBackdrop = rememberLayerBackdrop()
     val thumbBackdrop = if (glassBackdrop != null) {
@@ -2252,19 +2221,40 @@ fun WyuNavigatorBar(
                     },
                 )
                 .then(
-                    if (glassBackdrop != null) {
-                        Modifier.drawBackdrop(
+                    when {
+                        glassBackdrop == null -> Modifier
+                        // 底栏玻璃背景与卡片同一套上游材质；悬浮液态按钮（thumb）
+                        // 仍走原来的 lens 液态玻璃路径。
+                        wyuSoftGlassSupported -> Modifier
+                            .wyuUpstreamCardGlass(
+                                backdrop = glassBackdrop,
+                                cornerRadius = WyuNavigatorBarHeight / 2,
+                                tuning = tuningForTheme,
+                                dark = dark,
+                                blurPercent = if (softGlass) softGlassBlur else 100,
+                                tint = glassContainerColor,
+                            )
+                            .graphicsLayer {
+                                val width = size.width.coerceAtLeast(1f)
+                                val s = lerp(
+                                    1f,
+                                    1f + 8.dp.toPx() / width,
+                                    damped.pressProgress,
+                                )
+                                scaleX = s
+                                scaleY = s
+                            }
+                            .drawBehind {
+                                drawRect(Color.White.copy(alpha = 0.1f * damped.pressProgress))
+                            }
+
+                        else -> Modifier.drawBackdrop(
                             backdrop = glassBackdrop,
                             shape = { pillShape },
                             effects = {
                                 padding = maxOf(padding, 40.dp.toPx())
                                 vibrancy()
-                                // The 2dp radius would otherwise stay at full resolution;
-                                // 1/2 linear keeps its variance while quartering the work.
                                 forceDownscaleExp(1)
-                                // Match the card glass blur exactly so the bar and
-                                // cards stay in sync; with soft glass off the
-                                // slider is hidden, so use the full radius.
                                 val blurRadius = wyuSoftGlassScreenBlurPx(
                                     if (softGlass) softGlassBlur else 100,
                                 )
@@ -2277,23 +2267,11 @@ fun WyuNavigatorBar(
                             onDrawFront = {
                                 drawWyuSpecular(pillSpecular ?: WyuGlassSpecular, 0.75f)
                             },
-                            layerBlock = {
-                                val width = size.width.coerceAtLeast(1f)
-                                val s = lerp(
-                                    1f,
-                                    1f + 8.dp.toPx() / width,
-                                    damped.pressProgress,
-                                )
-                                scaleX = s
-                                scaleY = s
-                            },
                             onDrawSurface = {
                                 drawRect(glassContainerColor)
                                 drawRect(Color.White.copy(alpha = 0.1f * damped.pressProgress))
                             },
                         )
-                    } else {
-                        Modifier
                     },
                 )
                 .then(

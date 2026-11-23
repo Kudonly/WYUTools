@@ -174,11 +174,9 @@ internal fun WyuDropdownMenu(
     val dark = LocalWyuDarkTheme.current
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val md3 = LocalWyuMd3Style.current
     // 玻璃面板：模糊身后的页面内容，再压一层卡片同档的容器色。
     val glassBackdrop = LocalWyuPageBackdrop.current
     val panelColor = when {
-        md3 -> MiuixTheme.colorScheme.surfaceContainerHigh
         // 没有可模糊的底时（不支持模糊的机器）退回不透明容器色，
         // 否则半透明面板会直接透出下面的页面。
         glassBackdrop == null -> MiuixTheme.colorScheme.surfaceContainer
@@ -186,7 +184,7 @@ internal fun WyuDropdownMenu(
     }
     // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
     // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
-    val useUpstreamGlass = glassBackdrop != null && !md3
+    val useUpstreamGlass = glassBackdrop != null
     val strokeColor = if (dark) {
         Color.White.copy(alpha = 0.08f)
     } else {

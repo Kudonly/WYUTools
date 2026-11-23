@@ -498,7 +498,7 @@ object WyuAppearance {
         prefs?.edit()?.putString(KeyCardTheme, resolved.name)?.apply()
     }
 
-    /** 莫奈 palette style; independent of the surface theme, so it survives switching away. */
+    /** 取色方案；独立于卡片表面主题，切换主题后仍然保留。 */
     fun setPaletteScheme(context: Context, scheme: WyuPaletteScheme) {
         ensureLoaded(context)
         if (_paletteScheme.value == scheme) return

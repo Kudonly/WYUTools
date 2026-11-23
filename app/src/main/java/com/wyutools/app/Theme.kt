@@ -17,10 +17,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import com.wyutools.app.ui.LocalWyuCustomWallpaper
 import com.wyutools.app.ui.LocalWyuDarkTheme
-import com.wyutools.app.ui.LocalWyuMd3Style
 import com.wyutools.app.ui.LocalWyuWallpaper
 import com.wyutools.app.ui.WyuAppearance
-import com.wyutools.app.ui.WyuCardTheme
 import com.wyutools.app.ui.WyuThemeMode
 import com.wyutools.app.ui.WyuWallpaper
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -47,9 +45,7 @@ fun WyuTheme(
     val customWallpaper by WyuAppearance.customWallpaper.collectAsState()
     val hasCustomWallpaper by WyuAppearance.hasCustomWallpaper.collectAsState()
     val monetSeed by WyuAppearance.monetSeed.collectAsState()
-    val cardTheme by WyuAppearance.cardTheme.collectAsState()
     val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
-    val md3 = cardTheme == WyuCardTheme.Monet
     // 字号只改字体缩放，不动 dp：布局尺寸保持不变，只有文字跟着放大／缩小。
     // 编译期的系统值仍然是基准，跟随系统（0）时原样透传。
     val systemDensity = LocalDensity.current
@@ -61,17 +57,12 @@ fun WyuTheme(
     LaunchedEffect(hasCustomWallpaper) {
         if (hasCustomWallpaper) WyuAppearance.loadCustomWallpaper(appContext)
     }
-    val controller = remember(darkTheme, wallpaper, monetSeed, md3, paletteScheme) {
-        // 默认/柔光玻璃 only take a custom photo's seed; 莫奈 always derives one,
-        // falling back to the gradient's middle stop for stock wallpapers.
-        val seed = if (md3) {
-            if (wallpaper == WyuWallpaper.Custom) {
-                monetSeed
-            } else {
-                wallpaper.seedColor(darkTheme)?.toArgb()
-            }
+    val controller = remember(darkTheme, wallpaper, monetSeed, paletteScheme) {
+        // 取色方案对所有卡片主题生效：自定义壁纸取照片种子，系统壁纸取渐变主色。
+        val seed = if (wallpaper == WyuWallpaper.Custom) {
+            monetSeed
         } else {
-            monetSeed?.takeIf { wallpaper == WyuWallpaper.Custom }
+            wallpaper.seedColor(darkTheme)?.toArgb()
         }
         if (seed != null) {
             // 2025 规范只重定义了 均衡 / 鲜艳 / 表达 / 柔和；选到仍然沿用 2021
@@ -96,7 +87,6 @@ fun WyuTheme(
         LocalWyuDarkTheme provides darkTheme,
         LocalWyuWallpaper provides wallpaper,
         LocalWyuCustomWallpaper provides customWallpaper,
-        LocalWyuMd3Style provides md3,
     ) {
         MiuixTheme(controller = controller) {
             // Miuix dialogs only work inside its Scaffold: it provides the dialog

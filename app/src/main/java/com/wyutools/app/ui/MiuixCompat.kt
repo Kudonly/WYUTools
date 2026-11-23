@@ -71,7 +71,6 @@ import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 private val DialogCardCorner = 32.dp
 
 /** M3 Expressive extra-large corner: dialogs, sheets and cards. */
-private val Md3DialogCorner = 28.dp
 private val DialogScreenMargin = 16.dp
 private const val DialogCardTint = 0.62f
 // Dialogs keep their own fixed blur instead of following the soft-glass slider;
@@ -143,43 +142,28 @@ fun WyuOverlayDialog(
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
-    // 莫奈 renders the sheet as an opaque MD3 dialog: no frost, no page sampling.
-    val md3 = LocalWyuMd3Style.current
-    val useSoftGlass = !md3 && backdrop != null && softGlass && wyuSoftGlassSupported
+    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
+    val glassReady = LocalWyuGlassReady.current
+    val useUpstreamGlass = useSoftGlass && glassReady
     val cardColor = when {
-        md3 -> MiuixTheme.colorScheme.surfaceContainerHigh
         backdrop == null -> surface
-        useSoftGlass -> Color.Transparent
+        useUpstreamGlass -> Color.Transparent
         else -> surface.copy(alpha = DialogCardTint)
     }
     val dialogShape = remember { WyuSquircleShape(DialogCardCorner) }
-    // 莫奈/MD3E uses the extra-large 28dp rounded corner, no squircle and no rim.
-    val md3DialogShape = remember { RoundedCornerShape(Md3DialogCorner) }
-    val frostModifier = if (backdrop != null && !md3) {
-        if (useSoftGlass) {
-            Modifier.wyuSoftGlass(
+    val frostModifier = if (backdrop != null) {
+        if (useUpstreamGlass) {
+            Modifier.wyuUpstreamCardGlass(
                 backdrop = backdrop,
-                shape = dialogShape,
-                glassShape = WyuSoftGlassShape.RoundedRect,
                 cornerRadius = DialogCardCorner,
+                tuning = tuningForTheme,
+                dark = dark,
                 blurPercent = if (dark) {
                     DialogSoftGlassBlurPercentDark
                 } else {
                     DialogSoftGlassBlurPercentLight
                 },
-                baseTint = if (dark) {
-                    Color.Transparent
-                } else {
-                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
-                },
-                shapeEdgePx = tuningForTheme.shapeEdgePx,
-                shapeEdgePow = tuningForTheme.shapeEdgePow,
-                refractionThicknessPx = tuningForTheme.edgeThickness,
-                reflectionThicknessPx = tuningForTheme.reflectOffset,
-                reflectionLighten = tuningForTheme.reflectLighten,
-                bgSaturation = tuningForTheme.saturation(dark),
-                reflectionStrength = tuningForTheme.reflectionStrength,
-                refractionIor = tuningForTheme.refractionIor,
+                tint = surface.copy(alpha = DialogCardTint),
             )
         } else {
             Modifier.textureBlur(
@@ -248,31 +232,23 @@ fun WyuOverlayDialog(
                         }
                         .widthIn(max = 440.dp)
                         .fillMaxWidth()
-                        .then(
-                            if (md3) {
-                                Modifier.clip(md3DialogShape)
-                            } else {
-                                Modifier.squircleClip(DialogCardCorner)
-                            },
-                        )
+                        .then(Modifier.squircleClip(DialogCardCorner))
                         .then(frostModifier)
                         .background(cardColor)
                         .then(
-                            if (md3) {
-                                Modifier
-                            } else {
-                                Modifier.squircleBorder(
-                                    width = { 0.5.dp },
-                                    color = {
-                                        if (dark) {
-                                            Color.White.copy(alpha = 0.16f)
-                                        } else {
-                                            Color.White.copy(alpha = 0.5f)
-                                        }
-                                    },
-                                    cornerRadius = DialogCardCorner,
-                                )
-                            },
+                            
+                            Modifier.squircleBorder(
+                                width = { 0.5.dp },
+                                color = {
+                                    if (dark) {
+                                        Color.White.copy(alpha = 0.16f)
+                                    } else {
+                                        Color.White.copy(alpha = 0.5f)
+                                    }
+                                },
+                                cornerRadius = DialogCardCorner,
+                            )
+                        ,
                         )
                         .pointerInput(Unit) { detectTapGestures { } }
                         .padding(horizontal = 20.dp, vertical = 24.dp),

@@ -424,56 +424,55 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // Palette styles only exist for 莫奈: the other materials paint with
-            // the wallpaper wash and have no seed to re-map.
-            if (cardTheme == WyuCardTheme.Monet) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    pressFeedbackType = PressFeedbackType.Sink,
-                    onClick = { palettePickerOpen = true },
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "取色方案",
-                                    style = MiuixTheme.textStyles.headline2,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    text = paletteScheme.summary,
-                                    style = MiuixTheme.textStyles.footnote1,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
+            // 取色方案对默认与柔光玻璃主题同样生效：壁纸种子重映射强调色。
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                pressFeedbackType = PressFeedbackType.Sink,
+                onClick = { palettePickerOpen = true },
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = paletteScheme.label,
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.primary,
+                                text = "取色方案",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
                             )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.size(22.dp),
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = paletteScheme.summary,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
-                        Spacer(Modifier.height(12.dp))
-                        PaletteStripe(
-                            colors = remember(paletteSeed, paletteScheme, dark) {
-                                paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
-                            },
-                            height = 10.dp,
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = paletteScheme.label,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
                         )
                     }
+                    Spacer(Modifier.height(12.dp))
+                    PaletteStripe(
+                        colors = remember(paletteSeed, paletteScheme, dark) {
+                            paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
+                        },
+                        height = 10.dp,
+                    )
                 }
-                // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
-                Spacer(Modifier.height(12.dp))
             }
+            // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
+            Spacer(Modifier.height(12.dp))
+        
             // The blur is the one knob everyone touches, so it gets its own card
             // next to the tuning screen instead of hiding under 主题.
             if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
@@ -851,7 +850,7 @@ private fun PaletteStripe(colors: List<Color>?, height: Dp) {
     }
 }
 
-/** 44dp preview tile: frosted wash, liquid-glass highlight, or MD3 tone pair. */
+/** 44dp preview tile: frosted wash or liquid-glass highlight. */
 @Composable
 private fun ThemeSwatch(theme: WyuCardTheme) {
     val scheme = MiuixTheme.colorScheme
@@ -871,9 +870,6 @@ private fun ThemeSwatch(theme: WyuCardTheme) {
             ),
         )
 
-        WyuCardTheme.Monet -> Brush.linearGradient(
-            listOf(scheme.primary, scheme.surfaceContainerHigh),
-        )
     }
     Box(
         modifier = Modifier

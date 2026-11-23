@@ -13,7 +13,7 @@ import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /**
- * How the 莫奈 theme turns the wallpaper seed into a palette. This is the
+ * How the palette scheme turns the wallpaper seed into a palette. This is the
  * Material 3 Expressive knob (`paletteStyle`); it changes hues and chroma only,
  * never the shape language, so every option keeps the same surfaces.
  *

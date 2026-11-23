@@ -200,18 +200,6 @@ fun Card(
     compactGlass: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // 莫奈 drops the glass pipeline entirely: MD3 renders opaque tonal
-    // containers with a state layer instead of sampling anything behind.
-    if (LocalWyuMd3Style.current) {
-        Md3CardSurface(
-            modifier = modifier,
-            cornerRadius = cornerRadius,
-            insideMargin = insideMargin,
-            colors = colors,
-            content = content,
-        )
-        return
-    }
     val glassReady = LocalWyuGlassReady.current
     val glass = if (samplePageContent) {
         LocalWyuPageBackdrop.current
@@ -288,18 +276,6 @@ fun Card(
     onLongPress: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    if (LocalWyuMd3Style.current) {
-        Md3CardSurface(
-            modifier = modifier,
-            cornerRadius = cornerRadius,
-            insideMargin = insideMargin,
-            colors = colors,
-            onClick = onClick,
-            onLongPress = onLongPress,
-            content = content,
-        )
-        return
-    }
     val glass = LocalWyuGlassBackdrop.current
     val glassReady = LocalWyuGlassReady.current
     val underlay = LocalWyuGlassUnderlay.current
@@ -386,16 +362,6 @@ fun LiveGlassCard(
     colors: CardColors = CardDefaults.defaultColors(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    if (LocalWyuMd3Style.current) {
-        Md3CardSurface(
-            modifier = modifier,
-            cornerRadius = cornerRadius,
-            insideMargin = insideMargin,
-            colors = colors,
-            content = content,
-        )
-        return
-    }
     // Same live source as the adjacent top-bar glass buttons: the content layer,
     // not the wallpaper-only backdrop.
     val backdrop = LocalWyuPageBackdrop.current
@@ -454,19 +420,6 @@ fun Button(
     insideMargin: PaddingValues = ButtonDefaults.InsideMargin,
     content: @Composable RowScope.() -> Unit,
 ) {
-    if (LocalWyuMd3Style.current) {
-        Md3Button(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            minWidth = minWidth,
-            minHeight = minHeight,
-            colors = colors,
-            insideMargin = insideMargin,
-            content = content,
-        )
-        return
-    }
     val glass = LocalWyuGlassBackdrop.current
     val useGlass = glass != null && colors.color.alpha > 0.01f
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
@@ -534,133 +487,6 @@ fun IconButton(
  * only the stock `surfaceContainer` is remapped to MD3's `surfaceContainerHigh`
  * so cards still separate from the page.
  */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun Md3CardSurface(
-    modifier: Modifier,
-    cornerRadius: Dp,
-    insideMargin: PaddingValues,
-    colors: CardColors,
-    onClick: (() -> Unit)? = null,
-    onLongPress: (() -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    val container = if (colors.color == CardDefaults.defaultColors().color) {
-        scheme.surfaceContainerHigh
-    } else {
-        colors.color
-    }
-    // MD3 Expressive gives containers the extra-large corner (28dp); the
-    // squircle look belongs to the glass themes, so plain rounded corners here.
-    val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
-    val dark = LocalWyuDarkTheme.current
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val interactive = onClick != null || onLongPress != null
-    val stateLayer = if (interactive && pressed) {
-        colors.contentColor.copy(alpha = 0.12f)
-    } else {
-        Color.Transparent
-    }
-    Column(
-        modifier = modifier
-            .wyuCardShadow(shape, dark)
-            .clip(shape)
-            .background(container)
-            .background(stateLayer)
-            .then(
-                when {
-                    onClick != null && onLongPress != null -> Modifier.combinedClickable(
-                        interactionSource = interaction,
-                        indication = null,
-                        onLongClick = onLongPress,
-                        onClick = onClick,
-                    )
-
-                    onClick != null -> Modifier.clickable(
-                        interactionSource = interaction,
-                        indication = null,
-                        onClick = onClick,
-                    )
-
-                    onLongPress != null -> Modifier.combinedClickable(
-                        interactionSource = interaction,
-                        indication = null,
-                        onLongClick = onLongPress,
-                        onClick = {},
-                    )
-
-                    else -> Modifier
-                },
-            )
-            .padding(insideMargin),
-        content = content,
-    )
-}
-
-/**
- * MD3 filled button. The stock miuix colours carry the glass wash, so they are
- * mapped onto the MD3 roles instead: default → `primary`, a half-transparent
- * neutral → `surfaceContainerHigh` (tonal), a solid custom colour is kept as-is
- * (destructive stays `error`). Corner radius is always the button's own half
- * height, which is MD3's full pill.
- */
-@Composable
-private fun Md3Button(
-    onClick: () -> Unit,
-    modifier: Modifier,
-    enabled: Boolean,
-    minWidth: Dp,
-    minHeight: Dp,
-    colors: ButtonColors,
-    insideMargin: PaddingValues,
-    content: @Composable RowScope.() -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    val defaults = ButtonDefaults.buttonColors()
-    val isTransparent = colors.color.alpha <= 0.01f
-    val container = when {
-        isTransparent -> colors.color
-        colors.color == defaults.color -> scheme.primary
-        colors.color.alpha < 0.99f -> scheme.surfaceContainerHigh
-        else -> colors.color
-    }
-    val contentColor = when {
-        isTransparent -> colors.contentColor
-        colors.color == defaults.color -> scheme.onPrimary
-        else -> colors.contentColor
-    }
-    val shape = RoundedCornerShape(minHeight / 2)
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val stateLayer = if (enabled && pressed) {
-        contentColor.copy(alpha = 0.12f)
-    } else {
-        Color.Transparent
-    }
-    val tap = hapticClick(enabled, onClick)
-    CompositionLocalProvider(LocalContentColor provides contentColor) {
-        Row(
-            modifier = modifier
-                .clip(shape)
-                .background(if (enabled) container else colors.disabledColor)
-                .background(stateLayer)
-                .defaultMinSize(minWidth = minWidth, minHeight = minHeight)
-                .clickable(
-                    enabled = enabled,
-                    interactionSource = interaction,
-                    indication = null,
-                    onClick = tap,
-                )
-                .padding(insideMargin),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
-        )
-    }
-}
-
 private fun CardColors.frosted(alpha: Float): CardColors =
     if (color.alpha >= 0.99f) copy(color = color.copy(alpha = alpha)) else this
 
@@ -697,14 +523,30 @@ fun GlassTextField(
     // 采样自己会让 hwui 递归到栈溢出（成绩页页签那次闪退就是这个原因）。
     val glass = LocalWyuGlassBackdrop.current ?: LocalWyuDialogInputBackdrop.current
     val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
+    // 柔光玻璃开启时输入框与卡片共用同一套上游玻璃材质。
+    val softGlassOn by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    val useUpstreamGlass = glass != null &&
+        softGlassOn && wyuSoftGlassSupported && LocalWyuGlassReady.current
+    val glassModifier = when {
+        glass == null -> modifier
+        useUpstreamGlass -> modifier.wyuUpstreamCardGlass(
+            backdrop = glass,
+            cornerRadius = TextFieldDefaults.CornerRadius,
+            tuning = tuning.resolvedFor(dark),
+            dark = dark,
+            blurPercent = softGlassBlur,
+            tint = wyuGlassControlWash(),
+        )
+
+        else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
+    }
     MiuixTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = if (glass != null) {
-            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
-        } else {
-            modifier
-        },
+        modifier = glassModifier,
         insideMargin = insideMargin,
         colors = glassTextFieldColors(glass != null),
         label = label,
@@ -734,14 +576,30 @@ fun GlassTextField(
     // 采样自己会让 hwui 递归到栈溢出（成绩页页签那次闪退就是这个原因）。
     val glass = LocalWyuGlassBackdrop.current ?: LocalWyuDialogInputBackdrop.current
     val shape = remember { WyuSquircleShape(TextFieldDefaults.CornerRadius) }
+    // 柔光玻璃开启时输入框与卡片共用同一套上游玻璃材质。
+    val softGlassOn by WyuAppearance.softGlass.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val dark = LocalWyuDarkTheme.current
+    val useUpstreamGlass = glass != null &&
+        softGlassOn && wyuSoftGlassSupported && LocalWyuGlassReady.current
+    val glassModifier = when {
+        glass == null -> modifier
+        useUpstreamGlass -> modifier.wyuUpstreamCardGlass(
+            backdrop = glass,
+            cornerRadius = TextFieldDefaults.CornerRadius,
+            tuning = tuning.resolvedFor(dark),
+            dark = dark,
+            blurPercent = softGlassBlur,
+            tint = wyuGlassControlWash(),
+        )
+
+        else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
+    }
     MiuixTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = if (glass != null) {
-            modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
-        } else {
-            modifier
-        },
+        modifier = glassModifier,
         insideMargin = insideMargin,
         colors = glassTextFieldColors(glass != null),
         label = label,
