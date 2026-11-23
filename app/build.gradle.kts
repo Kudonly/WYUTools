@@ -64,7 +64,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.5-beta03")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.5-beta03")
     implementation("top.yukonga.miuix.kmp:miuix-glass-android:0.9.5-beta03")
-    implementation("com.materialkolor:material-color-utilities:5.0.1")
+    implementation("com.materialkolor:material-color-utilities:6.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(files("libs/core-3.5.3.jar"))
     implementation(files("libs/sharedview-kit-1.0.0.5.aar"))

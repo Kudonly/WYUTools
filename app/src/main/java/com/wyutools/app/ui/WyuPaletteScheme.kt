@@ -3,7 +3,7 @@ package com.wyutools.app.ui
 import androidx.compose.ui.graphics.Color
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.hct.Hct
-import com.materialkolor.scheme.DynamicScheme
+import com.materialkolor.dynamiccolor.DynamicScheme
 import com.materialkolor.scheme.SchemeExpressive
 import com.materialkolor.scheme.SchemeMonochrome
 import com.materialkolor.scheme.SchemeNeutral
