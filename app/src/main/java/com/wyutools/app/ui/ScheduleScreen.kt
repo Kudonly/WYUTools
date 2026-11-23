@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -97,8 +98,9 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Slider
-import top.yukonga.miuix.kmp.basic.SliderDefaults
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -600,12 +602,16 @@ private fun ScheduleWeekSlider(
                 .padding(vertical = ScheduleWeekBarGlassInset),
             cornerRadius = (ScheduleWeekBarHeight - ScheduleWeekBarGlassInset * 2) / 2,
         ) {}
-        Slider(
-            value = if (pagerState.isScrollInProgress) live else selectedWeek.toFloat(),
-            onValueChange = { value ->
-                val week = value.roundToInt()
-                if (week != lastHapticWeek.intValue) {
-                    lastHapticWeek.intValue = week
+        // 自绘滑条：miuix Slider 在拖动时会硬编码叠一层 4.4% 的黑色条形高亮，
+        // 无法通过 colors 关闭，这里用 Canvas 复刻「填充 + 圆形拇指」的视觉。
+        var dragFraction by remember { mutableStateOf<Float?>(null) }
+        var trackWidthPx by remember { mutableStateOf(0) } 
+        val updateFraction: (Float, Boolean) -> Unit = { fraction, haptic ->
+            dragFraction = fraction
+            val week = (fraction * (maxWeek - 1)).roundToInt() + 1
+            if (week != lastHapticWeek.intValue) {
+                lastHapticWeek.intValue = week
+                if (haptic) {
                     view.performHapticFeedback(
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             HapticFeedbackConstants.SEGMENT_TICK
@@ -614,14 +620,60 @@ private fun ScheduleWeekSlider(
                         },
                     )
                 }
-                onSelectWeek(week)
-            },
-            valueRange = 1f..maxWeek.toFloat(),
-            // No unfilled track: on glass the grey run read as a second plate
-            // behind the control. Only the filled part and the thumb show.
-            colors = SliderDefaults.sliderColors(backgroundColor = Color.Transparent),
-            modifier = Modifier.fillMaxSize(),
-        )
+            }
+            onSelectWeek(week)
+        }
+        val liveFraction =
+            ((pagerState.currentPage + pagerState.currentPageOffsetFraction + 1f) - 1f) /
+                (maxWeek - 1).coerceAtLeast(1)
+        val fraction = dragFraction
+            ?: if (pagerState.isScrollInProgress) liveFraction
+            else (selectedWeek - 1f) / (maxWeek - 1).coerceAtLeast(1)
+        val filledColor = MiuixTheme.colorScheme.primary
+        val thumbPaint = MiuixTheme.colorScheme.onPrimary
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { trackWidthPx = it.width }
+                .pointerInput(maxWeek) {
+                    detectTapGestures { pos ->
+                        if (trackWidthPx > 0) {
+                            updateFraction((pos.x / trackWidthPx).coerceIn(0f, 1f), false)
+                        }
+                    }
+                }
+                .pointerInput(maxWeek) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { pos ->
+                            if (trackWidthPx > 0) {
+                                updateFraction((pos.x / trackWidthPx).coerceIn(0f, 1f), true)
+                            }
+                        },
+                        onDragEnd = { dragFraction = null },
+                        onDragCancel = { dragFraction = null },
+                    ) { change, _ ->
+                        change.consume()
+                        if (trackWidthPx > 0) {
+                            updateFraction((change.position.x / trackWidthPx).coerceIn(0f, 1f), true)
+                        }
+                    }
+                },
+        ) {
+            val barHeight = size.height
+            val centerX = fraction * size.width
+            drawLine(
+                color = filledColor,
+                start = Offset(0f, barHeight / 2f),
+                end = Offset(centerX, barHeight / 2f),
+                strokeWidth = barHeight,
+                cap = StrokeCap.Round,
+            )
+            drawCircle(
+                color = thumbPaint,
+                radius = barHeight / 2f * 0.72f,
+                center = Offset(centerX, barHeight / 2f),
+            )
+        }
     }
 }
 
@@ -899,12 +951,30 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
+    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
     val blur = when {
-        softGlass && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
+        // 课程块很小，液态玻璃用收窄的边缘参数，避免 rim 吃掉整块高度。
+        isLiquid && softGlass && wyuSoftGlassSupported && wallpaper != null ->
+            wyuLiquidGlass(
+                backdrop = wallpaper,
+                shape = shape,
+                cornerRadius = 11.dp,
+                tuning = liquidTuning,
+                dark = dark,
+                baseTint = Color.Transparent,
+                blurPercent = liquidBlur,
+                shapeEdgePx = 40f,
+                shapeEdgePow = 2.2f,
+                refractionThicknessPx = 56f,
+                reflectionThicknessPx = 800f,
+            )
+        softGlass && !isLiquid && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
             wyuUpstreamCardGlass(
                 backdrop = wallpaper,
                 cornerRadius = 11.dp,

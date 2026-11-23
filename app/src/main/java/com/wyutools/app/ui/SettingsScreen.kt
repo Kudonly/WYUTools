@@ -107,6 +107,7 @@ fun SettingsScreen(
     val paletteScheme by WyuAppearance.paletteScheme.collectAsState()
     val monetSeed by WyuAppearance.monetSeed.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val liquidGlassBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val softGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     var palettePickerOpen by remember { mutableStateOf(false) }
     // Exactly the seed the theme derives from, so the picker previews the
@@ -408,15 +409,15 @@ fun SettingsScreen(
                             options = WyuCardTheme.entries,
                             optionLabel = { it.label },
                             optionEnabled = {
-                                it != WyuCardTheme.SoftGlass || softGlassSupported
+                                it == WyuCardTheme.Default || softGlassSupported
                             },
                             onSelect = { WyuAppearance.setCardTheme(context, it) },
                         )
                     }
-                    if (cardTheme != WyuCardTheme.SoftGlass && !softGlassSupported) {
+                    if (cardTheme != WyuCardTheme.Default && !softGlassSupported) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "柔光玻璃需要 Android 13 及以上系统",
+                            text = "玻璃主题需要 Android 13 及以上系统",
                             style = MiuixTheme.textStyles.footnote2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
@@ -475,7 +476,7 @@ fun SettingsScreen(
         
             // The blur is the one knob everyone touches, so it gets its own card
             // next to the tuning screen instead of hiding under 主题.
-            if (cardTheme == WyuCardTheme.SoftGlass && softGlassSupported) {
+            if (cardTheme != WyuCardTheme.Default && softGlassSupported) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -493,16 +494,21 @@ fun SettingsScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                text = "$softGlassBlur%",
+                                text = "${if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur}%",
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                         Spacer(Modifier.height(6.dp))
                         Slider(
-                            value = softGlassBlur.toFloat(),
+                            value = (if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur)
+                                .toFloat(),
                             onValueChange = {
-                                WyuAppearance.setSoftGlassBlur(context, it.roundToInt())
+                                if (cardTheme == WyuCardTheme.Liquid) {
+                                    WyuAppearance.setLiquidGlassBlur(context, it.roundToInt())
+                                } else {
+                                    WyuAppearance.setSoftGlassBlur(context, it.roundToInt())
+                                }
                             },
                             valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
                             modifier = Modifier.fillMaxWidth(),
@@ -867,6 +873,14 @@ private fun ThemeSwatch(theme: WyuCardTheme) {
             listOf(
                 Color.White.copy(alpha = 0.92f),
                 scheme.primary.copy(alpha = 0.32f),
+            ),
+        )
+
+        WyuCardTheme.Liquid -> Brush.linearGradient(
+            listOf(
+                scheme.primary.copy(alpha = 0.5f),
+                Color.White.copy(alpha = 0.85f),
+                scheme.primary.copy(alpha = 0.24f),
             ),
         )
 

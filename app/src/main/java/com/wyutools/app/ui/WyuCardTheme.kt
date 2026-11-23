@@ -10,5 +10,8 @@ enum class WyuCardTheme(val label: String, val summary: String) {
     Default("默认", "磨砂玻璃卡片，透出壁纸底色"),
 
     /** The liquid-glass material: refraction, reflection and edge highlight. */
-    SoftGlass("柔光玻璃", "带折射与反射的液态玻璃材质"),
+    SoftGlass("柔光玻璃", "miuix-glass 材质：折射、反射与边缘高光"),
+
+    /** main 分支的本地柔光玻璃 shader，参数与柔光玻璃完全独立。 */
+    Liquid("液态玻璃", "本地 shader 材质：折射、反射与边缘高光"),
 }

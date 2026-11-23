@@ -35,14 +35,34 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
 
+/**
+ * 玻璃材质高级模式。滑条编辑的是「当前主题」的参数：
+ * 柔光玻璃（上游 miuix-glass）与液态玻璃（本地 shader）各自独立存储；
+ * 液态玻璃没有 blend/inner/light 层，对应滑条隐藏。
+ */
 @Composable
 fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scroll = rememberScrollState()
     val fraction = rememberWyuCollapseFraction(scroll)
-    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = cardTheme == WyuCardTheme.Liquid
+    val softTuning by WyuAppearance.softGlassTuning.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val scope by WyuAppearance.softGlassTuneScope.collectAsState()
+    val dark = LocalWyuDarkTheme.current
     var showResetConfirm by remember { mutableStateOf(false) }
+
+    fun paramValue(param: WyuGlassParam): Float =
+        if (isLiquid) liquidTuning.liquidValueFor(param, dark) else softTuning.valueFor(param, dark)
+
+    fun paramEdit(param: WyuGlassParam, value: Float) {
+        if (isLiquid) {
+            WyuAppearance.setLiquidGlassTuning(context, liquidTuning.editedLiquid(param, scope, value))
+        } else {
+            WyuAppearance.setSoftGlassTuning(context, softTuning.edited(param, value, scope))
+        }
+    }
 
     WyuPageScaffold(
         progress = { fraction.value },
@@ -75,7 +95,11 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 .padding(top = padding.calculateTopPadding()),
         ) {
             Text(
-                text = "参数默认值对齐 miuix-glass 的推荐材质，卡片与弹出菜单共用同一套参数。修改会实时保存并立即生效。",
+                text = if (isLiquid) {
+                    "正在调整液态玻璃（本地 shader）：参数与柔光玻璃互相独立，默认值即原始推荐值。修改会实时保存并立即生效。"
+                } else {
+                    "正在调整柔光玻璃（miuix-glass 材质）：卡片与弹出菜单共用同一套参数。修改会实时保存并立即生效。"
+                },
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -95,26 +119,26 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 TuneSlider(
                     label = "折射率",
                     param = WyuGlassParam.RefractionIor,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.RefractionIor),
                     valueRange = 0.1f..10f,
                     format = { "%.1f".format(it) },
+                    onChange = { paramEdit(WyuGlassParam.RefractionIor, it) },
                 )
                 TuneSlider(
                     label = "边缘厚度",
                     param = WyuGlassParam.EdgeThickness,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.EdgeThickness),
                     valueRange = 0f..800f,
                     format = { it.roundToInt().toString() },
+                    onChange = { paramEdit(WyuGlassParam.EdgeThickness, it) },
                 )
                 TuneSlider(
                     label = "边缘宽度",
                     param = WyuGlassParam.ShapeEdgePx,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.ShapeEdgePx),
                     valueRange = 0.5f..432f,
                     format = { it.roundToInt().toString() },
+                    onChange = { paramEdit(WyuGlassParam.ShapeEdgePx, it) },
                 )
             }
             TuningSection(title = "反射") {
@@ -127,18 +151,18 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 TuneSlider(
                     label = "反射偏移",
                     param = WyuGlassParam.ReflectOffset,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.ReflectOffset),
                     valueRange = -3200f..4800f,
                     format = { it.roundToInt().toString() },
+                    onChange = { paramEdit(WyuGlassParam.ReflectOffset, it) },
                 )
                 TuneSlider(
                     label = "反射强度",
                     param = WyuGlassParam.ReflectionStrength,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.ReflectionStrength),
                     valueRange = 0f..2f,
                     format = { "${(it * 100).roundToInt()}%" },
+                    onChange = { paramEdit(WyuGlassParam.ReflectionStrength, it) },
                 )
             }
             TuningSection(title = "背景与色调") {
@@ -151,54 +175,63 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                 TuneSlider(
                     label = "背景饱和度",
                     param = WyuGlassParam.Saturation,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.Saturation),
                     valueRange = 0f..2f,
                     format = { "${(it * 100).roundToInt()}%" },
+                    onChange = { paramEdit(WyuGlassParam.Saturation, it) },
                 )
                 TuneSlider(
                     label = "卡片底色不透明度",
                     param = WyuGlassParam.CardTintAlpha,
-                    tuning = tuning,
-                    scope = scope,
+                    value = paramValue(WyuGlassParam.CardTintAlpha),
                     valueRange = 0f..1f,
                     format = { "${(it * 100).roundToInt()}%" },
+                    onChange = { paramEdit(WyuGlassParam.CardTintAlpha, it) },
                 )
             }
-            TuningSection(title = "混合与光照") {
+            if (!isLiquid) {
+                TuningSection(title = "混合与光照") {
+                    Text(
+                        text = "对应 miuix-glass 的 blend、inner 与 light 层，控制底色混合和内部白度。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TuneSlider(
+                        label = "混合量",
+                        param = WyuGlassParam.BlendAmount,
+                        value = paramValue(WyuGlassParam.BlendAmount),
+                        valueRange = 0f..1f,
+                        format = { "${(it * 100).roundToInt()}%" },
+                        onChange = { paramEdit(WyuGlassParam.BlendAmount, it) },
+                    )
+                    TuneSlider(
+                        label = "内层混色",
+                        param = WyuGlassParam.InnerColorMix,
+                        value = paramValue(WyuGlassParam.InnerColorMix),
+                        valueRange = 0f..2f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.InnerColorMix, it) },
+                    )
+                    TuneSlider(
+                        label = "主光强度",
+                        param = WyuGlassParam.LightIntensity,
+                        value = paramValue(WyuGlassParam.LightIntensity),
+                        valueRange = 0f..4f,
+                        format = { "%.2f".format(it) },
+                        onChange = { paramEdit(WyuGlassParam.LightIntensity, it) },
+                    )
+                }
+            } else {
                 Text(
-                    text = "对应 miuix-glass 的 blend、inner 与 light 层，控制底色混合和内部白度。",
+                    text = "液态玻璃是本地 shader 渲染，没有 blend、inner 与 light 层，以上滑条即全部可调项。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                Spacer(Modifier.height(8.dp))
-                TuneSlider(
-                    label = "混合量",
-                    param = WyuGlassParam.BlendAmount,
-                    tuning = tuning,
-                    scope = scope,
-                    valueRange = 0f..1f,
-                    format = { "${(it * 100).roundToInt()}%" },
-                )
-                TuneSlider(
-                    label = "内层混色",
-                    param = WyuGlassParam.InnerColorMix,
-                    tuning = tuning,
-                    scope = scope,
-                    valueRange = 0f..2f,
-                    format = { "%.2f".format(it) },
-                )
-                TuneSlider(
-                    label = "主光强度",
-                    param = WyuGlassParam.LightIntensity,
-                    tuning = tuning,
-                    scope = scope,
-                    valueRange = 0f..4f,
-                    format = { "%.2f".format(it) },
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                 )
             }
             Text(
-                text = "不同设备与壁纸下的观感可能略有差异，可随时点按右上角的恢复按钮还原默认参数。",
+                text = "不同设备与壁纸下的观感可能略有差异，可随时点按右上角的恢复按钮还原当前主题的默认参数。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -210,14 +243,22 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
     WyuOverlayDialog(
         show = showResetConfirm,
         title = "恢复默认参数",
-        summary = "将柔光玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。",
+        summary = if (isLiquid) {
+            "将液态玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。柔光玻璃的参数不受影响。"
+        } else {
+            "将柔光玻璃的高级参数与调节范围一并恢复为默认值，恢复后立即生效。液态玻璃的参数不受影响。"
+        },
         onDismissRequest = { showResetConfirm = false },
     ) {
         Spacer(Modifier.height(16.dp))
         WyuDialogButton(
             text = "恢复默认",
             onClick = {
-                WyuAppearance.setSoftGlassTuning(context, WyuSoftGlassTuning())
+                if (isLiquid) {
+                    WyuAppearance.setLiquidGlassTuning(context, WyuLiquidGlassTuning())
+                } else {
+                    WyuAppearance.setSoftGlassTuning(context, WyuSoftGlassTuning())
+                }
                 WyuAppearance.setSoftGlassTuneScope(context, WyuTuneScope.Sync)
                 showResetConfirm = false
                 Toast.makeText(context, "已恢复默认参数", Toast.LENGTH_SHORT).show()
@@ -283,24 +324,17 @@ private fun ScopeCard(
 private fun TuneSlider(
     label: String,
     param: WyuGlassParam,
-    tuning: WyuSoftGlassTuning,
-    scope: WyuTuneScope,
+    value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
     format: (Float) -> String,
+    onChange: (Float) -> Unit,
 ) {
-    val context = LocalContext.current
-    val value = tuning.valueFor(param, scope == WyuTuneScope.Dark)
     SoftGlassSliderRow(
         label = label,
         valueText = format(value),
         value = value,
         valueRange = valueRange,
-        onChange = {
-            WyuAppearance.setSoftGlassTuning(
-                context,
-                tuning.edited(param, it, scope),
-            )
-        },
+        onChange = onChange,
     )
     Spacer(Modifier.height(8.dp))
 }

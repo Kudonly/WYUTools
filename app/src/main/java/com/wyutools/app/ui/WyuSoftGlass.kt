@@ -352,6 +352,127 @@ private const val RawCardTintAlphaDark = 0f
 // Half-resolution sampling for the live backdrop. The shader uniforms are
 // scaled by the factor, so this only trades backdrop detail for GPU time.
 private const val RawDownscale = 2
+
+/**
+ * 液态玻璃主题（main 分支的本地柔光玻璃 shader）的调参数据类。
+ * 默认值即 main 分支的 Raw* 默认，与柔光玻璃（上游 miuix-glass）的参数互相独立。
+ */
+data class WyuLiquidGlassTuning(
+    val refractionIor: Float = RawRefractionIor,
+    val saturationLight: Float = RawBgSaturationLight,
+    val saturationDark: Float = RawBgSaturation,
+    val edgeThickness: Float = RawRefractionThickness,
+    val shapeEdgePx: Float = RawShapeEdgePx,
+    val shapeEdgePow: Float = RawShapeEdgePow,
+    val reflectOffset: Float = RawReflectionThickness,
+    val reflectionStrength: Float = RawReflectionStrength,
+    val reflectLighten: Float = RawReflectionLighten,
+    val cardTintAlphaLight: Float = RawCardTintAlpha,
+    val cardTintAlphaDark: Float = RawCardTintAlphaDark,
+) {
+    fun saturation(dark: Boolean): Float = if (dark) saturationDark else saturationLight
+    fun cardTintAlpha(dark: Boolean): Float = if (dark) cardTintAlphaDark else cardTintAlphaLight
+}
+
+/** 液态玻璃滑条当前值：深浅色仅对饱和度与底色生效，其余共用。 */
+fun WyuLiquidGlassTuning.liquidValueFor(param: WyuGlassParam, dark: Boolean): Float = when (param) {
+    WyuGlassParam.Saturation -> if (dark) saturationDark else saturationLight
+    WyuGlassParam.CardTintAlpha -> if (dark) cardTintAlphaDark else cardTintAlphaLight
+    WyuGlassParam.RefractionIor -> refractionIor
+    WyuGlassParam.EdgeThickness -> edgeThickness
+    WyuGlassParam.ShapeEdgePx -> shapeEdgePx
+    WyuGlassParam.ReflectOffset -> reflectOffset
+    WyuGlassParam.ReflectionStrength -> reflectionStrength
+    // 本地 shader 没有 blend/inner/light 层，滑条对液态玻璃无效。
+    else -> 0f
+}
+
+/** 液态玻璃滑条编辑：按调节范围写浅色/深色/双份。 */
+fun WyuLiquidGlassTuning.editedLiquid(
+    param: WyuGlassParam,
+    scope: WyuTuneScope,
+    value: Float,
+): WyuLiquidGlassTuning = when (param) {
+    WyuGlassParam.Saturation -> when (scope) {
+        WyuTuneScope.Light -> copy(saturationLight = value)
+        WyuTuneScope.Dark -> copy(saturationDark = value)
+        WyuTuneScope.Sync -> copy(saturationLight = value, saturationDark = value)
+    }
+    WyuGlassParam.CardTintAlpha -> when (scope) {
+        WyuTuneScope.Light -> copy(cardTintAlphaLight = value)
+        WyuTuneScope.Dark -> copy(cardTintAlphaDark = value)
+        WyuTuneScope.Sync -> copy(cardTintAlphaLight = value, cardTintAlphaDark = value)
+    }
+    WyuGlassParam.BlendAmount, WyuGlassParam.InnerColorMix, WyuGlassParam.LightIntensity -> this
+    WyuGlassParam.RefractionIor -> copy(refractionIor = value)
+    WyuGlassParam.EdgeThickness -> copy(edgeThickness = value)
+    WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = value)
+    WyuGlassParam.ReflectOffset -> copy(reflectOffset = value)
+    WyuGlassParam.ReflectionStrength -> copy(reflectionStrength = value)
+}
+
+/**
+ * 液态玻璃统一入口：有底图（静态卡片）走 wyuWallpaperGlass，
+ * 有实时层走 wyuSoftGlass，参数全部来自 [WyuLiquidGlassTuning]。
+ */
+@Composable
+internal fun Modifier.wyuLiquidGlass(
+    backdrop: Backdrop?,
+    shape: Shape,
+    cornerRadius: Dp,
+    tuning: WyuLiquidGlassTuning,
+    dark: Boolean,
+    baseTint: Color,
+    blurPercent: Int = RawBlurPercent,
+    blurScale: Float = 1f,
+    downscale: Int = RawDownscale,
+    underlay: WyuGlassUnderlay? = null,
+    shapeEdgePx: Float? = null,
+    shapeEdgePow: Float? = null,
+    refractionThicknessPx: Float? = null,
+    reflectionThicknessPx: Float? = null,
+): Modifier {
+    val edge = shapeEdgePx ?: tuning.shapeEdgePx
+    val pow = shapeEdgePow ?: tuning.shapeEdgePow
+    val refr = refractionThicknessPx ?: tuning.edgeThickness
+    val refl = reflectionThicknessPx ?: tuning.reflectOffset
+    return if (backdrop == null && underlay != null) {
+        wyuWallpaperGlass(
+            underlay = underlay,
+            shape = shape,
+            glassShape = WyuSoftGlassShape.RoundedRect,
+            cornerRadius = cornerRadius,
+            baseTint = baseTint,
+            shapeEdgePx = edge,
+            shapeEdgePow = pow,
+            refractionThicknessPx = refr,
+            reflectionThicknessPx = refl,
+            reflectionLighten = tuning.reflectLighten,
+            bgSaturation = tuning.saturation(dark),
+            reflectionStrength = tuning.reflectionStrength,
+            refractionIor = tuning.refractionIor,
+        )
+    } else {
+        wyuSoftGlass(
+            backdrop = backdrop,
+            shape = shape,
+            glassShape = WyuSoftGlassShape.RoundedRect,
+            cornerRadius = cornerRadius,
+            blurScale = blurScale,
+            blurPercent = blurPercent,
+            downscale = downscale,
+            baseTint = baseTint,
+            shapeEdgePx = edge,
+            shapeEdgePow = pow,
+            refractionThicknessPx = refr,
+            reflectionThicknessPx = refl,
+            reflectionLighten = tuning.reflectLighten,
+            bgSaturation = tuning.saturation(dark),
+            reflectionStrength = tuning.reflectionStrength,
+            refractionIor = tuning.refractionIor,
+        )
+    }
+}
 // The baked wallpaper underlay samples at 1/3 of the screen; the shader upscales
 // with linear filtering and the baked blur hides the coarser lattice.
 private const val UnderlayDownscale = 3

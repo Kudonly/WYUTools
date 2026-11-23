@@ -208,8 +208,23 @@ object WyuAppearance {
     private const val KeySoftGlassTuningCardTintLight = "soft_glass_tuning_card_tint_light"
     private const val KeySoftGlassTuningCardTintDark = "soft_glass_tuning_card_tint_dark"
     private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
-    private const val SoftGlassDefaultsVersion = 7
-    private const val SoftGlassBlurDefault = 20
+    private const val SoftGlassDefaultsVersion = 8
+    private const val SoftGlassBlurDefault = 40
+    private const val KeyLiquidGlassBlur = "liquid_glass_blur_radius"
+    private const val KeyLiquidGlassTuningIor = "liquid_glass_tuning_refraction_ior"
+    private const val KeyLiquidGlassTuningSaturationLight = "liquid_glass_tuning_saturation_light"
+    private const val KeyLiquidGlassTuningSaturationDark = "liquid_glass_tuning_saturation_dark"
+    private const val KeyLiquidGlassTuningEdge = "liquid_glass_tuning_edge_thickness"
+    private const val KeyLiquidGlassTuningShapeEdgePx = "liquid_glass_tuning_shape_edge_px"
+    private const val KeyLiquidGlassTuningShapeEdgePow = "liquid_glass_tuning_shape_edge_pow"
+    private const val KeyLiquidGlassTuningReflectOffset = "liquid_glass_tuning_reflect_offset"
+    private const val KeyLiquidGlassTuningReflection = "liquid_glass_tuning_reflection_strength"
+    private const val KeyLiquidGlassTuningReflectLighten = "liquid_glass_tuning_reflect_lighten"
+    private const val KeyLiquidGlassTuningCardTintLight = "liquid_glass_tuning_card_tint_light"
+    private const val KeyLiquidGlassTuningCardTintDark = "liquid_glass_tuning_card_tint_dark"
+    private const val KeyLiquidGlassDefaultsVersion = "liquid_glass_defaults_version"
+    private const val LiquidGlassDefaultsVersion = 1
+    private const val LiquidGlassBlurDefault = 15
     private const val KeyBlendAmount = "glass_blend_amount"
     private const val KeyBlendSaturation = "glass_blend_saturation"
     private const val KeyBlendBrightness = "glass_blend_brightness"
@@ -268,6 +283,10 @@ object WyuAppearance {
 
     private val _softGlassTuneScope = MutableStateFlow(WyuTuneScope.Sync)
     val softGlassTuneScope: StateFlow<WyuTuneScope> = _softGlassTuneScope.asStateFlow()
+    private val _liquidGlassBlur = MutableStateFlow(LiquidGlassBlurDefault)
+    val liquidGlassBlur: StateFlow<Int> = _liquidGlassBlur.asStateFlow()
+    private val _liquidGlassTuning = MutableStateFlow(WyuLiquidGlassTuning())
+    val liquidGlassTuning: StateFlow<WyuLiquidGlassTuning> = _liquidGlassTuning.asStateFlow()
 
     private val _monetSeed = MutableStateFlow<Int?>(null)
     val monetSeed: StateFlow<Int?> = _monetSeed.asStateFlow()
@@ -289,6 +308,24 @@ object WyuAppearance {
         val appContext = context.applicationContext
         val loaded = appContext.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
         prefs = loaded
+        // v1 起才有液态玻璃主题：老存档直接回默认，避免读到半套旧键。
+        if (loaded.getInt(KeyLiquidGlassDefaultsVersion, 0) < LiquidGlassDefaultsVersion) {
+            loaded.edit()
+                .putInt(KeyLiquidGlassBlur, LiquidGlassBlurDefault)
+                .remove(KeyLiquidGlassTuningIor)
+                .remove(KeyLiquidGlassTuningSaturationLight)
+                .remove(KeyLiquidGlassTuningSaturationDark)
+                .remove(KeyLiquidGlassTuningEdge)
+                .remove(KeyLiquidGlassTuningShapeEdgePx)
+                .remove(KeyLiquidGlassTuningShapeEdgePow)
+                .remove(KeyLiquidGlassTuningReflectOffset)
+                .remove(KeyLiquidGlassTuningReflection)
+                .remove(KeyLiquidGlassTuningReflectLighten)
+                .remove(KeyLiquidGlassTuningCardTintLight)
+                .remove(KeyLiquidGlassTuningCardTintDark)
+                .putInt(KeyLiquidGlassDefaultsVersion, LiquidGlassDefaultsVersion)
+                .apply()
+        }
         // v6 switches every default to miuix-glass recommended values, so drop
         // saved slider overrides and reset blur.
         if (loaded.getInt(KeySoftGlassDefaultsVersion, 0) < SoftGlassDefaultsVersion) {
@@ -353,7 +390,42 @@ object WyuAppearance {
         } else {
             storedCardTheme
         }
-        _softGlass.value = _cardTheme.value == WyuCardTheme.SoftGlass
+        _softGlass.value = _cardTheme.value != WyuCardTheme.Default
+        _liquidGlassBlur.value = loaded.getInt(KeyLiquidGlassBlur, LiquidGlassBlurDefault)
+            .coerceIn(WyuSoftGlassBlurMin, 100)
+        val liquidDefaults = WyuLiquidGlassTuning()
+        _liquidGlassTuning.value = WyuLiquidGlassTuning(
+            refractionIor = loaded.getFloat(KeyLiquidGlassTuningIor, liquidDefaults.refractionIor)
+                .coerceIn(0.1f, 10f),
+            saturationLight = loaded
+                .getFloat(KeyLiquidGlassTuningSaturationLight, liquidDefaults.saturationLight)
+                .coerceIn(0f, 2f),
+            saturationDark = loaded
+                .getFloat(KeyLiquidGlassTuningSaturationDark, liquidDefaults.saturationDark)
+                .coerceIn(0f, 2f),
+            edgeThickness = loaded.getFloat(KeyLiquidGlassTuningEdge, liquidDefaults.edgeThickness)
+                .coerceIn(0f, 800f),
+            shapeEdgePx = loaded.getFloat(KeyLiquidGlassTuningShapeEdgePx, liquidDefaults.shapeEdgePx)
+                .coerceIn(0.5f, 432f),
+            shapeEdgePow = loaded
+                .getFloat(KeyLiquidGlassTuningShapeEdgePow, liquidDefaults.shapeEdgePow)
+                .coerceIn(0.05f, 22.8f),
+            reflectOffset = loaded
+                .getFloat(KeyLiquidGlassTuningReflectOffset, liquidDefaults.reflectOffset)
+                .coerceIn(-3200f, 4800f),
+            reflectionStrength = loaded
+                .getFloat(KeyLiquidGlassTuningReflection, liquidDefaults.reflectionStrength)
+                .coerceIn(0f, 2f),
+            reflectLighten = loaded
+                .getFloat(KeyLiquidGlassTuningReflectLighten, liquidDefaults.reflectLighten)
+                .coerceIn(-4.8f, 7.2f),
+            cardTintAlphaLight = loaded
+                .getFloat(KeyLiquidGlassTuningCardTintLight, liquidDefaults.cardTintAlphaLight)
+                .coerceIn(0f, 1f),
+            cardTintAlphaDark = loaded
+                .getFloat(KeyLiquidGlassTuningCardTintDark, liquidDefaults.cardTintAlphaDark)
+                .coerceIn(0f, 1f),
+        )
         _softGlassBlur.value = loaded.getInt(KeySoftGlassBlur, SoftGlassBlurDefault)
             .coerceIn(WyuSoftGlassBlurMin, 100)
         val tuningDefaults = WyuSoftGlassTuning()
@@ -472,6 +544,14 @@ object WyuAppearance {
             ?.apply()
     }
 
+    fun setLiquidGlassBlur(context: Context, percent: Int) {
+        ensureLoaded(context)
+        val clamped = percent.coerceIn(WyuSoftGlassBlurMin, 100)
+        if (_liquidGlassBlur.value == clamped) return
+        _liquidGlassBlur.value = clamped
+        prefs?.edit()?.putInt(KeyLiquidGlassBlur, clamped)?.apply()
+    }
+
     fun setSoftGlassBlur(context: Context, percent: Int) {
         ensureLoaded(context)
         val clamped = percent.coerceIn(WyuSoftGlassBlurMin, 100)
@@ -494,7 +574,7 @@ object WyuAppearance {
         }
         if (_cardTheme.value == resolved) return
         _cardTheme.value = resolved
-        _softGlass.value = resolved == WyuCardTheme.SoftGlass
+        _softGlass.value = resolved != WyuCardTheme.Default
         prefs?.edit()?.putString(KeyCardTheme, resolved.name)?.apply()
     }
 
@@ -511,6 +591,38 @@ object WyuAppearance {
             context,
             if (enabled) WyuCardTheme.SoftGlass else WyuCardTheme.Default,
         )
+    }
+
+    fun setLiquidGlassTuning(context: Context, tuning: WyuLiquidGlassTuning) {
+        ensureLoaded(context)
+        val clamped = tuning.copy(
+            refractionIor = ((tuning.refractionIor.coerceIn(0.1f, 10f) * 10f).roundToInt() / 10f),
+            saturationLight = ((tuning.saturationLight.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            saturationDark = ((tuning.saturationDark.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            edgeThickness = tuning.edgeThickness.coerceIn(0f, 800f).roundToInt().toFloat(),
+            shapeEdgePx = tuning.shapeEdgePx.coerceIn(0.5f, 432f).roundToInt().toFloat(),
+            shapeEdgePow = ((tuning.shapeEdgePow.coerceIn(0.05f, 22.8f) * 20f).roundToInt() / 20f),
+            reflectOffset = ((tuning.reflectOffset.coerceIn(-3200f, 4800f) / 10f).roundToInt() * 10f),
+            reflectionStrength = ((tuning.reflectionStrength.coerceIn(0f, 2f) * 100f).roundToInt() / 100f),
+            reflectLighten = ((tuning.reflectLighten.coerceIn(-4.8f, 7.2f) * 20f).roundToInt() / 20f),
+            cardTintAlphaLight = ((tuning.cardTintAlphaLight.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
+            cardTintAlphaDark = ((tuning.cardTintAlphaDark.coerceIn(0f, 1f) * 100f).roundToInt() / 100f),
+        )
+        if (_liquidGlassTuning.value == clamped) return
+        _liquidGlassTuning.value = clamped
+        prefs?.edit()
+            ?.putFloat(KeyLiquidGlassTuningIor, clamped.refractionIor)
+            ?.putFloat(KeyLiquidGlassTuningSaturationLight, clamped.saturationLight)
+            ?.putFloat(KeyLiquidGlassTuningSaturationDark, clamped.saturationDark)
+            ?.putFloat(KeyLiquidGlassTuningEdge, clamped.edgeThickness)
+            ?.putFloat(KeyLiquidGlassTuningShapeEdgePx, clamped.shapeEdgePx)
+            ?.putFloat(KeyLiquidGlassTuningShapeEdgePow, clamped.shapeEdgePow)
+            ?.putFloat(KeyLiquidGlassTuningReflectOffset, clamped.reflectOffset)
+            ?.putFloat(KeyLiquidGlassTuningReflection, clamped.reflectionStrength)
+            ?.putFloat(KeyLiquidGlassTuningReflectLighten, clamped.reflectLighten)
+            ?.putFloat(KeyLiquidGlassTuningCardTintLight, clamped.cardTintAlphaLight)
+            ?.putFloat(KeyLiquidGlassTuningCardTintDark, clamped.cardTintAlphaDark)
+            ?.apply()
     }
 
     fun setSoftGlassTuning(context: Context, tuning: WyuSoftGlassTuning) {

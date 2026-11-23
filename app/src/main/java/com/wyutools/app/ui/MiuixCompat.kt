@@ -144,15 +144,33 @@ fun WyuOverlayDialog(
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val glassReady = LocalWyuGlassReady.current
-    val useUpstreamGlass = useSoftGlass && glassReady
+    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
+    val useLiquidGlass = useSoftGlass && isLiquid
     val cardColor = when {
         backdrop == null -> surface
-        useUpstreamGlass -> Color.Transparent
+        useUpstreamGlass || useLiquidGlass -> Color.Transparent
         else -> surface.copy(alpha = DialogCardTint)
     }
     val dialogShape = remember { WyuSquircleShape(DialogCardCorner) }
     val frostModifier = if (backdrop != null) {
-        if (useUpstreamGlass) {
+        if (useLiquidGlass) {
+            Modifier.wyuLiquidGlass(
+                backdrop = backdrop,
+                shape = dialogShape,
+                cornerRadius = DialogCardCorner,
+                tuning = liquidTuning,
+                dark = dark,
+                baseTint = surface.copy(alpha = DialogCardTint),
+                blurPercent = if (dark) {
+                    DialogSoftGlassBlurPercentDark
+                } else {
+                    DialogSoftGlassBlurPercentLight
+                },
+            )
+        } else if (useUpstreamGlass) {
             Modifier.wyuUpstreamCardGlass(
                 backdrop = backdrop,
                 cornerRadius = DialogCardCorner,

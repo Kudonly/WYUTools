@@ -184,7 +184,11 @@ internal fun WyuDropdownMenu(
     }
     // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
     // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
-    val useUpstreamGlass = glassBackdrop != null
+    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val useUpstreamGlass = glassBackdrop != null && !isLiquid
+    val useLiquidGlass = glassBackdrop != null && isLiquid && wyuSoftGlassSupported
     val strokeColor = if (dark) {
         Color.White.copy(alpha = 0.08f)
     } else {
@@ -290,7 +294,17 @@ internal fun WyuDropdownMenu(
                             .shadow(elevation = 12.dp, shape = shape, clip = false)
                             .clip(shape)
                             .then(
-                                if (useUpstreamGlass && glassBackdrop != null) {
+                                if (useLiquidGlass) {
+                                    Modifier.wyuLiquidGlass(
+                                        backdrop = sampledBackdrop ?: glassBackdrop,
+                                        shape = shape,
+                                        cornerRadius = with(density) { frame.cornerRadius.toDp() },
+                                        tuning = liquidTuning,
+                                        dark = dark,
+                                        baseTint = panelColor,
+                                        blurPercent = liquidBlur,
+                                    )
+                                } else if (useUpstreamGlass && glassBackdrop != null) {
                                     Modifier.glass(
                                         backdrop = sampledBackdrop ?: glassBackdrop,
                                         shape = GlassShape(

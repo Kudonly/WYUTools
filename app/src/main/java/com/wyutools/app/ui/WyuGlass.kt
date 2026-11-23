@@ -212,6 +212,10 @@ fun Card(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
+    val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquid = cardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
@@ -224,18 +228,58 @@ fun Card(
         dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
         else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
+    val liquidCardTint = when {
+        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            colors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
+        dark -> Color.Black.copy(alpha = liquidTuning.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = liquidTuning.cardTintAlphaLight)
+    }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     val edgePx = if (compactGlass) CompactGlassEdgePx else tuningForTheme.shapeEdgePx
     val edgePow = if (compactGlass) CompactGlassEdgePow else tuningForTheme.shapeEdgePow
     val refractionPx = if (compactGlass) CompactGlassRefractionPx else tuningForTheme.edgeThickness
     val reflectionPx = if (compactGlass) CompactGlassReflectionPx else tuningForTheme.reflectOffset
     val blurRadius = if (compactGlass) CompactGlassBlurRadius else CardBlurRadius
+    val liquidEdgePx = if (compactGlass) CompactGlassEdgePx else liquidTuning.shapeEdgePx
+    val liquidEdgePow = if (compactGlass) CompactGlassEdgePow else liquidTuning.shapeEdgePow
+    val liquidRefractionPx = if (compactGlass) CompactGlassRefractionPx else liquidTuning.edgeThickness
+    val liquidReflectionPx = if (compactGlass) CompactGlassReflectionPx else liquidTuning.reflectOffset
     // 投影挂在最外层：里面几层都会把内容裁到圆角里，放里面就看不见了。
     val shadowed = modifier.wyuCardShadow(shape, dark)
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            softGlass && wyuSoftGlassSupported && glassReady ->
+            isLiquid && softGlass && wyuSoftGlassSupported && !samplePageContent && underlay != null ->
+                shadowed.wyuLiquidGlass(
+                    backdrop = null,
+                    underlay = underlay,
+                    shape = shape,
+                    cornerRadius = cornerRadius,
+                    tuning = liquidTuning,
+                    dark = dark,
+                    baseTint = liquidCardTint,
+                    shapeEdgePx = liquidEdgePx,
+                    shapeEdgePow = liquidEdgePow,
+                    refractionThicknessPx = liquidRefractionPx,
+                    reflectionThicknessPx = liquidReflectionPx,
+                )
+            isLiquid && softGlass && wyuSoftGlassSupported ->
+                shadowed.wyuLiquidGlass(
+                    backdrop = glass,
+                    shape = shape,
+                    cornerRadius = cornerRadius,
+                    tuning = liquidTuning,
+                    dark = dark,
+                    baseTint = liquidCardTint,
+                    blurPercent = liquidBlur,
+                    blurScale = CardSoftGlassBlurScale,
+                    downscale = CardSoftGlassDownscale,
+                    shapeEdgePx = liquidEdgePx,
+                    shapeEdgePow = liquidEdgePow,
+                    refractionThicknessPx = liquidRefractionPx,
+                    reflectionThicknessPx = liquidReflectionPx,
+                )
+            softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
                     backdrop = glass,
                     cornerRadius = cornerRadius,
@@ -284,6 +328,10 @@ fun Card(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
+    val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquid = cardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     // Default containers keep the white/dark glass wash; custom containers
     // (e.g. elec card primaryContainer) carry their own tint into the shader.
@@ -296,6 +344,12 @@ fun Card(
         dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
         else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
+    val liquidCardTint = when {
+        colors.color != MiuixTheme.colorScheme.surfaceContainer ->
+            colors.color.copy(alpha = liquidTuning.cardTintAlphaLight)
+        dark -> Color.Black.copy(alpha = liquidTuning.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = liquidTuning.cardTintAlphaLight)
+    }
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
     val shadowed = modifier.wyuCardShadow(shape, dark)
     // Cards stay silent on purpose: they are large surfaces (tool tiles,
@@ -304,7 +358,27 @@ fun Card(
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            softGlass && wyuSoftGlassSupported && glassReady ->
+            isLiquid && softGlass && wyuSoftGlassSupported && underlay != null ->
+                shadowed.wyuLiquidGlass(
+                    backdrop = null,
+                    underlay = underlay,
+                    shape = shape,
+                    cornerRadius = cornerRadius,
+                    tuning = liquidTuning,
+                    dark = dark,
+                    baseTint = liquidCardTint,
+                )
+            isLiquid && softGlass && wyuSoftGlassSupported ->
+                shadowed.wyuLiquidGlass(
+                    backdrop = glass,
+                    shape = shape,
+                    cornerRadius = cornerRadius,
+                    tuning = liquidTuning,
+                    dark = dark,
+                    baseTint = liquidCardTint,
+                    blurPercent = liquidBlur,
+                )
+            softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
                     backdrop = glass,
                     cornerRadius = cornerRadius,
@@ -369,6 +443,10 @@ fun LiveGlassCard(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
+    val cardTheme by WyuAppearance.cardTheme.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquid = cardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     val useSoftGlass = softGlass && wyuSoftGlassSupported
     val shape = remember(cornerRadius) { WyuSquircleShape(cornerRadius) }
@@ -379,6 +457,21 @@ fun LiveGlassCard(
         // every appearance mode.
         modifier = when {
             backdrop == null -> shadowed
+            useSoftGlass && isLiquid -> shadowed.wyuLiquidGlass(
+                backdrop = backdrop,
+                shape = shape,
+                cornerRadius = cornerRadius,
+                tuning = liquidTuning,
+                dark = dark,
+                baseTint = if (dark) {
+                    Color.Transparent
+                } else {
+                    Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
+                },
+                blurPercent = liquidBlur,
+                refractionThicknessPx = TopBarGlassRefractionPx,
+                reflectionThicknessPx = TopBarGlassReflectionPx,
+            )
             useSoftGlass -> shadowed.wyuUpstreamCardGlass(
                 backdrop = backdrop,
                 cornerRadius = cornerRadius,
@@ -527,11 +620,24 @@ fun GlassTextField(
     val softGlassOn by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     val useUpstreamGlass = glass != null &&
-        softGlassOn && wyuSoftGlassSupported && LocalWyuGlassReady.current
+        softGlassOn && wyuSoftGlassSupported && !isLiquid && LocalWyuGlassReady.current
+    val useLiquidGlass = glass != null && softGlassOn && wyuSoftGlassSupported && isLiquid
     val glassModifier = when {
         glass == null -> modifier
+        useLiquidGlass -> modifier.wyuLiquidGlass(
+            backdrop = glass,
+            shape = shape,
+            cornerRadius = TextFieldDefaults.CornerRadius,
+            tuning = liquidTuning,
+            dark = dark,
+            baseTint = wyuGlassControlWash(),
+            blurPercent = liquidBlur,
+        )
         useUpstreamGlass -> modifier.wyuUpstreamCardGlass(
             backdrop = glass,
             cornerRadius = TextFieldDefaults.CornerRadius,
@@ -580,11 +686,24 @@ fun GlassTextField(
     val softGlassOn by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
+    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     val useUpstreamGlass = glass != null &&
-        softGlassOn && wyuSoftGlassSupported && LocalWyuGlassReady.current
+        softGlassOn && wyuSoftGlassSupported && !isLiquid && LocalWyuGlassReady.current
+    val useLiquidGlass = glass != null && softGlassOn && wyuSoftGlassSupported && isLiquid
     val glassModifier = when {
         glass == null -> modifier
+        useLiquidGlass -> modifier.wyuLiquidGlass(
+            backdrop = glass,
+            shape = shape,
+            cornerRadius = TextFieldDefaults.CornerRadius,
+            tuning = liquidTuning,
+            dark = dark,
+            baseTint = wyuGlassControlWash(),
+            blurPercent = liquidBlur,
+        )
         useUpstreamGlass -> modifier.wyuUpstreamCardGlass(
             backdrop = glass,
             cornerRadius = TextFieldDefaults.CornerRadius,
