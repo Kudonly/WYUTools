@@ -144,7 +144,7 @@ struct SVGPathShape: Shape {
             case "S":
                 guard let x2 = number(), let y2 = number(),
                       let x = number(), let y = number() else { break }
-                let c1 = lastCubic.map { CGPoint(x: 2 * current.x - C:\Users\26680\.workbuddy\binaries\PortableGit\versions\1.3.0\bin\bash.exe.x, y: 2 * current.y - C:\Users\26680\.workbuddy\binaries\PortableGit\versions\1.3.0\bin\bash.exe.y) } ?? current
+                let c1 = lastCubic.map { CGPoint(x: 2 * current.x - $0.x, y: 2 * current.y - $0.y) } ?? current
                 let c2 = relative ? offset(x2, y2) : absolute(x2, y2)
                 let end = relative ? offset(x, y) : absolute(x, y)
                 path.addCurve(to: end, control1: c1, control2: c2)
@@ -164,7 +164,7 @@ struct SVGPathShape: Shape {
 
             case "T":
                 guard let x = number(), let y = number() else { break }
-                let control = lastQuad.map { CGPoint(x: 2 * current.x - C:\Users\26680\.workbuddy\binaries\PortableGit\versions\1.3.0\bin\bash.exe.x, y: 2 * current.y - C:\Users\26680\.workbuddy\binaries\PortableGit\versions\1.3.0\bin\bash.exe.y) } ?? current
+                let control = lastQuad.map { CGPoint(x: 2 * current.x - $0.x, y: 2 * current.y - $0.y) } ?? current
                 let end = relative ? offset(x, y) : absolute(x, y)
                 path.addQuadCurve(to: end, control: control)
                 current = end
