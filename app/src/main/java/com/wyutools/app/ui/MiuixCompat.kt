@@ -144,7 +144,8 @@ fun WyuOverlayDialog(
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val glassReady = LocalWyuGlassReady.current
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid

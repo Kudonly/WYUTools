@@ -422,8 +422,11 @@ fun WyuPageScaffold(
     val softGlassEnabled by WyuAppearance.softGlass.collectAsState()
     val softGlassPercent by WyuAppearance.softGlassBlur.collectAsState()
     val liquidPercent by WyuAppearance.liquidGlassBlur.collectAsState()
-    val isLiquidTheme = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquidTheme = currentCardTheme == WyuCardTheme.Liquid
     // 烘焙底图的模糊量跟随当前主题自己的滑条（液态/柔光各自独立）。
+    // 主题必须 collectAsState：直接读 .value 在切主题时不会重组，
+    // 底图就一直留着上一个主题的 sigma（冷启动切液态时表现为滑条失效）。
     val underlayBlurPercent = if (isLiquidTheme) liquidPercent else softGlassPercent
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -459,12 +462,25 @@ fun WyuPageScaffold(
     // through it and never rebuild the glass node when the underlay is
     // regenerated (wallpaper or dim changes).
     val bakedBackdrop = remember { WyuBitmapBackdrop(rawUnderlayState) }
+    // The wallpaper bitmap loads asynchronously after the first composition,
+    // and the baked copy is rebuilt when it lands / the page bounds settle.
+    // Identity change forces the glass draw nodes to invalidate their cached
+    // backdrop sample; a stable wrapper alone renders the first empty frame
+    // forever until the user switches pages.
+    val bakedUnderlay = rawUnderlayState.value
+    val publishedBakedBackdrop = remember(bakedBackdrop, bakedUnderlay) {
+        if (bakedUnderlay != null) WyuDelegatingBackdrop(bakedBackdrop) else null
+    }
     val bounds = pageBounds.value
     val glassUnderlay = if (
         softGlassEnabled && customWallpaper != null && bounds != null
     ) {
         val current = glassUnderlayState.value
-        if (current == null || current.source !== customWallpaper) {
+        if (current == null || current.source !== customWallpaper ||
+            current.origin != bounds.topLeft ||
+            current.widthPx != bounds.width.roundToInt() ||
+            current.heightPx != bounds.height.roundToInt()
+        ) {
             // The first frame of a scaffold must already show the static
             // material; deferring it would draw live blur first and swap,
             // which reads as a blur flash. The cache makes this a cheap hit
@@ -485,7 +501,11 @@ fun WyuPageScaffold(
     }
     if (softGlassEnabled && customWallpaper != null && bounds != null) {
         val current = rawUnderlayState.value
-        if (current == null || current.source !== customWallpaper) {
+        if (current == null || current.source !== customWallpaper ||
+            current.origin != bounds.topLeft ||
+            current.widthPx != bounds.width.roundToInt() ||
+            current.heightPx != bounds.height.roundToInt()
+        ) {
             // First frame must already show the static material.
             rawUnderlayState.value = wyuGlassUnderlay(
                 image = customWallpaper,
@@ -508,7 +528,7 @@ fun WyuPageScaffold(
         val h = b.height.roundToInt()
         val sigma = wyuSoftGlassScreenBlurPx(underlayBlurPercent)
         val current = glassUnderlayState.value
-        if (current != null && current.matches(customWallpaper, customDim, sigma, w, h)) {
+        if (current != null && current.matches(customWallpaper, customDim, sigma, w, h, b.topLeft)) {
             return@LaunchedEffect
         }
         // Coalesce slider drags; the previous underlay stays on screen until
@@ -534,7 +554,7 @@ fun WyuPageScaffold(
         val h = b.height.roundToInt()
         val current = rawUnderlayState.value
         if (current != null &&
-            current.matches(customWallpaper, customDim, 0f, w, h)
+            current.matches(customWallpaper, customDim, 0f, w, h, b.topLeft)
         ) {
             return@LaunchedEffect
         }
@@ -559,7 +579,11 @@ fun WyuPageScaffold(
         !softGlassEnabled && customWallpaper != null && bounds != null
     ) {
         val current = gaussianUnderlayState.value
-        if (current == null || current.source !== customWallpaper) {
+        if (current == null || current.source !== customWallpaper ||
+            current.origin != bounds.topLeft ||
+            current.widthPx != bounds.width.roundToInt() ||
+            current.heightPx != bounds.height.roundToInt()
+        ) {
             wyuGlassUnderlay(
                 image = customWallpaper,
                 dim = customDim,
@@ -584,7 +608,7 @@ fun WyuPageScaffold(
         val h = b.height.roundToInt()
         val current = gaussianUnderlayState.value
         if (current != null &&
-            current.matches(customWallpaper, customDim, gaussianSigmaPx, w, h)
+            current.matches(customWallpaper, customDim, gaussianSigmaPx, w, h, b.topLeft)
         ) {
             return@LaunchedEffect
         }
@@ -683,7 +707,7 @@ fun WyuPageScaffold(
             LocalWyuGlassReady provides (glassLayerReady && pageLayerReady),
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
-            LocalWyuBakedBackdrop provides bakedBackdrop,
+            LocalWyuBakedBackdrop provides publishedBakedBackdrop,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
@@ -1075,7 +1099,8 @@ internal fun WyuChromeGlassSurface(
     val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
     val useSoftGlass = softGlass && wyuSoftGlassSupported && backdrop != null
     val glassReady = LocalWyuGlassReady.current
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
@@ -1407,7 +1432,8 @@ fun WyuFloatingTabs(
     val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
     val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
     val glassReady = LocalWyuGlassReady.current
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
@@ -2176,7 +2202,8 @@ fun WyuNavigatorBar(
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val lastIndex = WyuNavTabs.lastIndex
     val cellWidth = 88.dp
     val inset = 3.dp
@@ -2352,7 +2379,7 @@ fun WyuNavigatorBar(
                                 cornerRadius = WyuNavigatorBarHeight / 2,
                                 tuning = tuningForTheme,
                                 dark = dark,
-                                blurPercent = if (softGlass) softGlassBlur else 100,
+                                blurPercent = if (isLiquid) liquidBlur else if (softGlass) softGlassBlur else 100,
                                 tint = glassContainerColor,
                             )
                             .graphicsLayer {
@@ -2377,7 +2404,7 @@ fun WyuNavigatorBar(
                                 vibrancy()
                                 forceDownscaleExp(1)
                                 val blurRadius = wyuSoftGlassScreenBlurPx(
-                                    if (softGlass) softGlassBlur else 100,
+                                    if (isLiquid) liquidBlur else if (softGlass) softGlassBlur else 100,
                                 )
                                 if (blurRadius > 0.5f) blur(blurRadius, blurRadius)
                                 lens(

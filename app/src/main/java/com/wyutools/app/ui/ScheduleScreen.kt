@@ -960,7 +960,8 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
     val bakedBackdrop = LocalWyuBakedBackdrop.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val blur = when {
         // 课程块很小，液态玻璃用收窄的边缘参数，避免 rim 吃掉整块高度。
         // 烘焙底图可用时直接采样静态位图，与液态玻璃卡片的烘焙层一致。

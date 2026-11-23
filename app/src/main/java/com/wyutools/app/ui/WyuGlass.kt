@@ -654,7 +654,8 @@ fun GlassTextField(
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     val useUpstreamGlass = glass != null &&
         softGlassOn && wyuSoftGlassSupported && !isLiquid && LocalWyuGlassReady.current
@@ -720,7 +721,8 @@ fun GlassTextField(
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val dark = LocalWyuDarkTheme.current
     val useUpstreamGlass = glass != null &&
         softGlassOn && wyuSoftGlassSupported && !isLiquid && LocalWyuGlassReady.current

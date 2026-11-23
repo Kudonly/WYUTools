@@ -486,7 +486,7 @@ internal fun Modifier.wyuLiquidGlass(
 }
 // The baked wallpaper underlay samples at 1/3 of the screen; the shader upscales
 // with linear filtering and the baked blur hides the coarser lattice.
-private const val UnderlayDownscale = 3
+private const val UnderlayDownscale = 4
 // HyperLight's px geometry targets a ~3x baseline; low-density panels need it
 // scaled down so the glass rim keeps the same proportions in dp.
 private const val ReferenceDensity = 3f
@@ -897,9 +897,16 @@ internal class WyuGlassUnderlay(
     val widthPx: Int,
     val heightPx: Int,
 ) {
-    fun matches(image: ImageBitmap, dim: Float, blurSigmaPx: Float, widthPx: Int, heightPx: Int): Boolean =
+    fun matches(
+        image: ImageBitmap,
+        dim: Float,
+        blurSigmaPx: Float,
+        widthPx: Int,
+        heightPx: Int,
+        origin: Offset,
+    ): Boolean =
         source === image && this.dim == dim && this.blurSigmaPx == blurSigmaPx &&
-            this.widthPx == widthPx && this.heightPx == heightPx
+            this.widthPx == widthPx && this.heightPx == heightPx && this.origin == origin
 }
 
 internal val LocalWyuGlassUnderlay = compositionLocalOf<WyuGlassUnderlay?> { null }
@@ -909,7 +916,7 @@ internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { 
 
 /** Stable [Backdrop] over the baked soft-glass underlay; wallpaper-only cards
  *  sample this instead of the live recorded layer. */
-internal val LocalWyuBakedBackdrop = compositionLocalOf<WyuBitmapBackdrop?> { null }
+internal val LocalWyuBakedBackdrop = compositionLocalOf<Backdrop?> { null }
 
 /**
  * Screen-space blur sigma (px) behind the static card glass. The bottom bar
@@ -960,7 +967,7 @@ private object WyuGlassUnderlayCache {
         // both be requested while pages overlap, so keep a tiny LRU instead
         // of a single slot; the cap bounds half-res bitmap memory.
         val hit = entries.firstOrNull {
-            it.matches(image, dim, blurSigmaPx, widthPx, heightPx) && it.origin == origin
+            it.matches(image, dim, blurSigmaPx, widthPx, heightPx, origin)
         }
         if (hit != null) return hit
         val baked = base ?: downscaleWallpaper(image).also { base = it }
@@ -972,13 +979,13 @@ private object WyuGlassUnderlayCache {
 
     // Step-halve so a big wallpaper averages down smoothly instead of aliasing
     // when it lands in the half-resolution underlay in one bilinear pass.
-    // The ceiling must stay above half the largest screen side so the base
-    // keeps at least the underlay's resolution.
+    // The ceiling must stay above the underlay's short side so the base keeps
+    // at least as many pixels as the baked copy needs.
     private fun downscaleWallpaper(image: ImageBitmap): Bitmap {
         var current = image.asAndroidBitmap()
         var w = current.width
         var h = current.height
-        while (maxOf(w, h) > 2048) {
+        while (maxOf(w, h) > 1536) {
             val nextW = (w / 2).coerceAtLeast(1)
             val nextH = (h / 2).coerceAtLeast(1)
             current = Bitmap.createScaledBitmap(current, nextW, nextH, true)
@@ -997,7 +1004,7 @@ private object WyuGlassUnderlayCache {
         origin: Offset,
         source: ImageBitmap,
     ): WyuGlassUnderlay {
-        // The underlay samples at 1/3 resolution; the blur is baked in at this
+        // The underlay samples at 1/4 resolution; the blur is baked in at this
         // scale instead of magnifying a tiny bitmap (the old divisor of ~22
         // still showed a faint mosaic grid at high blur).
         val outW = (widthPx / UnderlayDownscale).coerceAtLeast(1)

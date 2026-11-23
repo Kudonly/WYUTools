@@ -184,7 +184,8 @@ internal fun WyuDropdownMenu(
     }
     // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
     // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
-    val isLiquid = WyuAppearance.cardTheme.value == WyuCardTheme.Liquid
+    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
+    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val useUpstreamGlass = glassBackdrop != null && !isLiquid

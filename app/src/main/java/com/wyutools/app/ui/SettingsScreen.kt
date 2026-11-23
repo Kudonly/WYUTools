@@ -271,7 +271,192 @@ fun SettingsScreen(
                     )
                 }
             }
+            // 取色方案对默认与柔光玻璃主题同样生效：壁纸种子重映射强调色。
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                pressFeedbackType = PressFeedbackType.Sink,
+                onClick = { palettePickerOpen = true },
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "取色方案",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = paletteScheme.summary,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = paletteScheme.label,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    PaletteStripe(
+                        colors = remember(paletteSeed, paletteScheme, dark) {
+                            paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
+                        },
+                        height = 10.dp,
+                    )
+                }
+            }
+            // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
             Spacer(Modifier.height(12.dp))
+            // 主题也统一成「当前值 + 弹出菜单」，和深浅色、电费范围一个形态。
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = 20.dp,
+                        end = 14.dp,
+                        top = 14.dp,
+                        bottom = 14.dp,
+                    ),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "主题",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = cardTheme.summary,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        SettingDropdown(
+                            current = cardTheme,
+                            options = WyuCardTheme.entries,
+                            optionLabel = { it.label },
+                            optionEnabled = {
+                                it == WyuCardTheme.Default || softGlassSupported
+                            },
+                            onSelect = { WyuAppearance.setCardTheme(context, it) },
+                        )
+                    }
+                    if (cardTheme != WyuCardTheme.Default && !softGlassSupported) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "玻璃主题需要 Android 13 及以上系统",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        
+            // The blur is the one knob everyone touches, so it gets its own card
+            // next to the tuning screen instead of hiding under 主题.
+            if (cardTheme != WyuCardTheme.Default && softGlassSupported) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        // One label only: the card is about a single number, so
+                        // the title says what it is and the value rides beside
+                        // it instead of repeating as a slider label.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "模糊度",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur}%",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Slider(
+                            value = (if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur)
+                                .toFloat(),
+                            onValueChange = {
+                                if (cardTheme == WyuCardTheme.Liquid) {
+                                    WyuAppearance.setLiquidGlassBlur(context, it.roundToInt())
+                                } else {
+                                    WyuAppearance.setSoftGlassBlur(context, it.roundToInt())
+                                }
+                            },
+                            valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = if (cardTheme == WyuCardTheme.Liquid) {
+                                "液态玻璃会实时采样屏幕内容，模糊度越高越可能影响流畅度，请酌情使用"
+                            } else {
+                                "柔光玻璃使用烘焙底图，模糊度越高越可能影响功耗与发热，请酌情使用"
+                            },
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            // The tuning screen only matters while the material is on.
+            if (softGlass && softGlassSupported) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    pressFeedbackType = PressFeedbackType.Sink,
+                    onClick = onOpenAdvanced,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "高级模式",
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "调整折射、反射与边缘等材质参数",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -376,188 +561,6 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // 主题也统一成「当前值 + 弹出菜单」，和深浅色、电费范围一个形态。
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(
-                        start = 20.dp,
-                        end = 14.dp,
-                        top = 14.dp,
-                        bottom = 14.dp,
-                    ),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "主题",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = cardTheme.summary,
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        SettingDropdown(
-                            current = cardTheme,
-                            options = WyuCardTheme.entries,
-                            optionLabel = { it.label },
-                            optionEnabled = {
-                                it == WyuCardTheme.Default || softGlassSupported
-                            },
-                            onSelect = { WyuAppearance.setCardTheme(context, it) },
-                        )
-                    }
-                    if (cardTheme != WyuCardTheme.Default && !softGlassSupported) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "玻璃主题需要 Android 13 及以上系统",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            // 取色方案对默认与柔光玻璃主题同样生效：壁纸种子重映射强调色。
-            
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                pressFeedbackType = PressFeedbackType.Sink,
-                onClick = { palettePickerOpen = true },
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "取色方案",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = paletteScheme.summary,
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = paletteScheme.label,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.primary,
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    PaletteStripe(
-                        colors = remember(paletteSeed, paletteScheme, dark) {
-                            paletteSeed?.let { palettePreview(it, paletteScheme, dark) }
-                        },
-                        height = 10.dp,
-                    )
-                }
-            }
-            // 间距跟着卡片走：取色方案卡只在莫奈下存在，属于可选卡。
-            Spacer(Modifier.height(12.dp))
-        
-            // The blur is the one knob everyone touches, so it gets its own card
-            // next to the tuning screen instead of hiding under 主题.
-            if (cardTheme != WyuCardTheme.Default && softGlassSupported) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        // One label only: the card is about a single number, so
-                        // the title says what it is and the value rides beside
-                        // it instead of repeating as a slider label.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "模糊度",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                text = "${if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur}%",
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Slider(
-                            value = (if (cardTheme == WyuCardTheme.Liquid) liquidGlassBlur else softGlassBlur)
-                                .toFloat(),
-                            onValueChange = {
-                                if (cardTheme == WyuCardTheme.Liquid) {
-                                    WyuAppearance.setLiquidGlassBlur(context, it.roundToInt())
-                                } else {
-                                    WyuAppearance.setSoftGlassBlur(context, it.roundToInt())
-                                }
-                            },
-                            valueRange = WyuSoftGlassBlurMin.toFloat()..100f,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            text = "柔光玻璃可能导致功耗增加、卡顿发热，请酌情使用",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-            // The tuning screen only matters while the material is on.
-            if (softGlass && softGlassSupported) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    pressFeedbackType = PressFeedbackType.Sink,
-                    onClick = onOpenAdvanced,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "高级模式",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = "调整折射、反射与边缘等材质参数",
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
             }
             SmallTitle(
                 text = "关于",
