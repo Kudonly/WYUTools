@@ -729,7 +729,6 @@ fun WyuPageScaffold(
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
             LocalWyuBakedBackdrop provides publishedBakedBackdrop,
-            LocalWyuBakedUnderlayState provides rawUnderlayState,
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
@@ -2239,10 +2238,12 @@ fun WyuNavigatorBar(
     }
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
     val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
-    val glassContainerColor = if (dark) {
-        Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
-    } else {
-        Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
+    val glassContainerColor = when {
+        // Default theme cards use surfaceContainer @ CardGlassAlpha; keep the
+        // bottom bar on exactly the same wash instead of the soft-glass tint.
+        !softGlass && !isLiquid -> wyuGlassControlWash()
+        dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
     }
     val glassBackdrop = backdrop
     val barBackdrop = rememberLayerBackdrop()

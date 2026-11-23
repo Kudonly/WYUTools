@@ -958,7 +958,6 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
     val bakedBackdrop = LocalWyuBakedBackdrop.current
-    val bakedUnderlayState = LocalWyuBakedUnderlayState.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
     val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
@@ -993,17 +992,6 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
                 shapeEdgePow = 2.2f,
                 refractionThicknessPx = 56f,
                 reflectionThicknessPx = 800f,
-            )
-        softGlass && !isLiquid && wyuSoftGlassSupported &&
-            bakedBackdrop != null && bakedUnderlayState != null ->
-            wyuUpstreamStaticCardGlass(
-                backdrop = bakedBackdrop,
-                underlayState = bakedUnderlayState,
-                cornerRadius = 11.dp,
-                tuning = tuning.resolvedFor(dark),
-                dark = dark,
-                blurPercent = softGlassBlur,
-                tint = Color.Transparent,
             )
         softGlass && !isLiquid && wyuSoftGlassSupported && bakedBackdrop != null ->
             wyuUpstreamCardGlass(

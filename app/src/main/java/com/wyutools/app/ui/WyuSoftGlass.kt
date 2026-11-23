@@ -8,7 +8,6 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -919,11 +918,6 @@ internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { 
  *  sample this instead of the live recorded layer. */
 internal val LocalWyuBakedBackdrop = compositionLocalOf<Backdrop?> { null }
 
-/** The unblurred wallpaper copy backing [LocalWyuBakedBackdrop]. Static soft
- *  glass reads its identity so a regenerated underlay invalidates the baked
- *  glass layer instead of replaying a stale bitmap. */
-internal val LocalWyuBakedUnderlayState = compositionLocalOf<State<WyuGlassUnderlay?>?> { null }
-
 /**
  * Screen-space blur sigma (px) behind the static card glass. The bottom bar
  * reuses it so both surfaces blur by the same amount at every slider value.
@@ -1239,6 +1233,19 @@ internal fun wyuGlassUnderlay(
     WyuGlassUnderlayCache.obtain(image, dim, blurSigmaPx, widthPx, heightPx, origin)
 
 /**
+ * One compiled RuntimeShader is shared by every static liquid-glass surface.
+ * Compiling the AGSL source is expensive; the advanced tuning screen has many
+ * tall glass cards and compiling it once per card stalls the first frames.
+ * Uniforms are instance state, so they are reapplied immediately before each
+ * cached layer record (draws happen on the main thread, one card at a time).
+ */
+private object WyuStaticShaderPool {
+    val shader: android.graphics.RuntimeShader by lazy {
+        android.graphics.RuntimeShader(WyuStaticGlassShader)
+    }
+}
+
+/**
  * Static variant of [wyuSoftGlass]: the same shader draws straight onto the
  * shape path and samples [underlay] (a cached, pre-blurred wallpaper) instead
  * of a live backdrop layer. One shader pass per surface, no recording, no
@@ -1271,7 +1278,9 @@ internal fun Modifier.wyuWallpaperGlass(
             runCatching { WyuGlassColorCache.obtain(underlay, bgSaturation) }.getOrNull()
         }
     }.value
-    val runtimeShader = remember(
+    // A new configure lambda (keyed by every uniform input) invalidates the
+    // draw cache and forces exactly one re-record when a slider changes.
+    val configureShader = remember(
         underlay,
         glassShape,
         cornerRadius,
@@ -1292,7 +1301,8 @@ internal fun Modifier.wyuWallpaperGlass(
         val edgePow = shapeEdgePow.coerceAtLeast(0.05f)
         val refractionPx = (refractionThicknessPx * densityScale).coerceAtLeast(0f)
         val reflectionPx = (reflectionThicknessPx * densityScale).coerceAtLeast(0f)
-        android.graphics.RuntimeShader(WyuStaticGlassShader).apply {
+        val configure: (android.graphics.RuntimeShader) -> Unit = { shader ->
+        shader.apply {
             val sampleScale = underlay.scale / GlassDrawScale
             setFloatUniform("uRot_Scale", 1f, 0f, sampleScale, sampleScale)
             setFloatUniform("uBgScale", sampleScale, sampleScale, 1f, 1f)
@@ -1355,8 +1365,11 @@ internal fun Modifier.wyuWallpaperGlass(
                 },
             )
         }
+        }
+        configure
     }
-    val paint = remember(runtimeShader) {
+    val runtimeShader = WyuStaticShaderPool.shader
+    val paint = remember {
         android.graphics.Paint().apply {
             isAntiAlias = true
             shader = runtimeShader
@@ -1364,7 +1377,7 @@ internal fun Modifier.wyuWallpaperGlass(
     }
     val originState = remember { mutableStateOf(Offset.Zero) }
     val layer = rememberGraphicsLayer()
-    val drawGlass = remember(runtimeShader, paint, shape, glassShape, underlay, layer) {
+    val drawGlass = remember(runtimeShader, paint, shape, glassShape, underlay, layer, configureShader) {
         // The recorded layer is pixel-identical while geometry and uniforms are
         // unchanged. Re-recording it on every frame runs the whole RuntimeShader
         // into an offscreen layer again — on a page of tall glass cards (the
@@ -1402,6 +1415,7 @@ internal fun Modifier.wyuWallpaperGlass(
                         layoutDirection = layoutDirection,
                         size = IntSize(layerW, layerH),
                     ) {
+                    configureShader(runtimeShader)
                     runtimeShader.setFloatUniform(
                             "uGeoPx_pos_size",
                             shiftX,
