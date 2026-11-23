@@ -1,35 +1,26 @@
 import SwiftUI
 
-/// 工具图标块：连续圆角方块 + 渐变底，比例向 iOS 图标看齐。
+/// 工具图标方块，与 Android 更多页的图标 1:1：
+/// 66pt 方块、圆角为边长的 22.37%、左上到右下的同色渐变、白色字形占一半宽。
 struct ToolBadge: View {
     let tool: WKTool
     var size: CGFloat = 40
 
+    private var radius: CGFloat { size * WK.iconCornerRatio }
+
     var body: some View {
-        Image(systemName: tool.symbol)
-            .font(.system(size: size * 0.44, weight: .medium))
-            .foregroundStyle(.white)
+        MaterialGlyph(glyph: tool.glyph, size: size * 0.5)
             .frame(width: size, height: size)
             .background(
-                tool.tint.gradient,
-                in: RoundedRectangle(cornerRadius: size * 0.265, style: .continuous)
+                tool.iconGradient,
+                in: RoundedRectangle(cornerRadius: radius, style: .continuous)
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: size * 0.265, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [Color.white.opacity(0.45), Color.white.opacity(0.04)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.8
-                    )
-            }
-            .shadow(color: tool.tint.opacity(0.28), radius: size * 0.12, x: 0, y: size * 0.06)
+            .accessibilityElement()
+            .accessibilityLabel(tool.title)
     }
 }
 
-/// 列表行里的小图标：不铺底色，直接吃强调色，和 Android 卡片行一致。
+/// 卡片行里的裸图标：不铺底色，直接吃强调色，和 Android 的 ToolEntry 一致。
 struct ToolGlyph: View {
     let tool: WKTool
     var size: CGFloat = 26
@@ -37,11 +28,9 @@ struct ToolGlyph: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
-        Image(systemName: tool.symbol)
-            .font(.system(size: size * 0.92, weight: .regular))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(settings.accentColor)
-            .frame(width: size + 2, height: size + 2)
+        MaterialGlyph(glyph: tool.glyph, size: size, color: settings.accentColor)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 

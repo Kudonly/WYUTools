@@ -13,8 +13,11 @@ enum WK {
     static let moreColumns = 4
     static let morePagePadding: CGFloat = 22
     static let moreIconSize: CGFloat = 66
-    static let moreIconLabelSpacing: CGFloat = 6
-    static let moreRowSpacing: CGFloat = 22
+    /// 工具图标方块圆角比例。安卓里是 0.2237 * 0.8，更多页单独放大 25%，
+    /// 两者相乘正好回到 0.2237 —— 和 iOS 主屏图标同一套连续圆角。
+    static let iconCornerRatio: CGFloat = 0.2237
+    static let moreIconLabelSpacing: CGFloat = 5
+    static let moreRowSpacing: CGFloat = 17
 }
 
 extension Color {
@@ -29,17 +32,17 @@ extension Color {
     }
 }
 
-/// 工具色板。强调色跟着设置走，工具色保持固定。
-enum WKPalette {
-    static let today = Color(hex: 0x3F7BF6)
-    static let schedule = Color(hex: 0x6B5FE0)
-    static let lxt = Color(hex: 0x2E9CA8)
-    static let elec = Color(hex: 0xE29A2D)
-    static let gym = Color(hex: 0x34985C)
-    static let exam = Color(hex: 0xD9574F)
-    static let grades = Color(hex: 0x5B6BD0)
-    static let eval = Color(hex: 0xB461B0)
-    static let physical = Color(hex: 0x4C8C63)
+extension UInt32 {
+    /// 往白色方向抬 [amount]（0...1），算出图标底色的高光端。
+    func lightened(_ amount: Double) -> UInt32 {
+        var result: UInt32 = 0
+        for shift in stride(from: 16, through: 0, by: -8) {
+            let channel = Double((self >> UInt32(shift)) & 0xFF)
+            let mixed = (channel + (255 - channel) * amount).rounded()
+            result |= UInt32(mixed) << UInt32(shift)
+        }
+        return result
+    }
 }
 
 /// 壁纸层：渐变或自定义照片，铺满整屏，所有页面共用。

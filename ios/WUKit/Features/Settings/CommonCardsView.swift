@@ -56,7 +56,9 @@ struct CommonCardsView: View {
 
     private func row(_ tool: WKTool, inCommon: Bool) -> some View {
         HStack(spacing: 12) {
-            ToolBadge(tool: tool, size: 32)
+            // 与安卓一致：卡片本身就是底色，图标只画一层裸字形。
+            ToolGlyph(tool: tool, size: 22)
+                .frame(width: 38, height: 38)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(tool.title)

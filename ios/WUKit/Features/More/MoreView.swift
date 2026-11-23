@@ -11,21 +11,25 @@ struct MoreView: View {
     @State private var dragging: WKTool?
     @State private var dragTranslation: CGSize = .zero
     @State private var baseShift: CGSize = .zero
+    /// 编辑态的抖动开关：iOS 主屏那一套微幅摇摆。
+    @State private var jiggle = false
 
-    private let columnSpacing: CGFloat = 8
+    /// 安卓的网格是 4 等分列：图标 66 居中在每列里，列间距由留白自然生成。
+    private let columnSpacing: CGFloat = 0
     private let rowSpacing = WK.moreRowSpacing
-    private let tileHeight: CGFloat = 92
+    /// 66（图标）+ 5（间距）+ 14（文字行高），与安卓的 102pt 行距一致。
+    private let tileHeight: CGFloat = WK.moreIconSize + 5 + 14
 
     var body: some View {
         GeometryReader { proxy in
             let available = proxy.size.width - WK.morePagePadding * 2
-            let cellWidth = max(56, (available - columnSpacing * 3) / 4)
+            let cellWidth = max(56, available / 4)
 
             ScrollView {
                 VStack(spacing: 16) {
                     LazyVGrid(
                         columns: Array(
-                            repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing),
+                            repeating: GridItem(.fixed(cellWidth), spacing: 0),
                             count: 4
                         ),
                         spacing: rowSpacing
@@ -34,6 +38,9 @@ struct MoreView: View {
                             tile(tool, cellWidth: cellWidth)
                         }
                     }
+                    // 坐标系挂在网格自己身上，拖动的落点直接就是格子编号，
+                    // 不用再减掉页边距。
+                    .coordinateSpace(name: "moreGrid")
 
                     if settings.moreTools.isEmpty {
                         Text("所有工具都在常用页了。")
@@ -52,7 +59,6 @@ struct MoreView: View {
                 .padding(.horizontal, WK.morePagePadding)
                 .padding(.top, 10)
                 .padding(.bottom, 28)
-                .coordinateSpace(name: "moreGrid")
             }
             .scrollDisabled(dragging != nil)
             .background(WKWallpaperBackground())
@@ -67,6 +73,7 @@ struct MoreView: View {
                         editing.toggle()
                         endDrag(animated: true)
                     }
+                    jiggle = editing
                 }
                 .font(.system(size: 16, weight: .semibold))
             }
@@ -92,6 +99,11 @@ struct MoreView: View {
                     radius: dragging == tool ? 14 : 0,
                     y: dragging == tool ? 8 : 0
                 )
+                .rotationEffect(.degrees(wobble(tool)))
+                .animation(
+                    .easeInOut(duration: wobbleDuration(tool)).repeatForever(autoreverses: true),
+                    value: jiggle
+                )
                 .animation(dragging == tool ? nil : .snappy(duration: 0.2), value: settings.moreTools)
                 .gesture(dragGesture(tool, cellWidth: cellWidth))
         } else {
@@ -111,13 +123,24 @@ struct MoreView: View {
         VStack(spacing: WK.moreIconLabelSpacing) {
             ToolBadge(tool: tool, size: WK.moreIconSize)
             Text(tool.title)
-                .font(.system(size: 12.5))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+    }
+
+    /// 拖动中的图标不摇，其余按各自周期轻摇，避免整屏像节拍器。
+    private func wobble(_ tool: WKTool) -> Double {
+        guard editing, jiggle, dragging != tool else { return 0 }
+        return 1.2
+    }
+
+    private func wobbleDuration(_ tool: WKTool) -> Double {
+        let index = settings.moreTools.firstIndex(of: tool) ?? 0
+        return 0.13 + Double(index % 4) * 0.009
     }
 
     // MARK: - 拖动
