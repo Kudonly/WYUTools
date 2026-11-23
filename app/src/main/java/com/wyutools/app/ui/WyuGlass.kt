@@ -245,44 +245,21 @@ fun Card(
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            // Wallpaper cards sample the cached underlay instead of a live
-            // backdrop; the week header keeps sampling the page content.
-            !samplePageContent && underlay != null && softGlass && wyuSoftGlassSupported ->
-                shadowed.wyuWallpaperGlass(
-                    underlay = underlay,
-                    shape = shape,
-                    glassShape = WyuSoftGlassShape.RoundedRect,
-                    cornerRadius = cornerRadius,
-                    baseTint = softGlassCardTint,
-                    shapeEdgePx = edgePx,
-                    shapeEdgePow = edgePow,
-                    refractionThicknessPx = refractionPx,
-                    reflectionThicknessPx = reflectionPx,
-                    reflectionLighten = tuning.reflectLighten,
-                    bgSaturation = tuning.saturation(dark),
-                    reflectionStrength = tuning.reflectionStrength,
-                    refractionIor = tuning.refractionIor,
-                )
-            softGlass && wyuSoftGlassSupported -> shadowed.wyuSoftGlass(
+            softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
                 backdrop = glass,
-                shape = shape,
-                glassShape = WyuSoftGlassShape.RoundedRect,
                 cornerRadius = cornerRadius,
-                blurScale = CardSoftGlassBlurScale,
+                dark = dark,
                 blurPercent = softGlassBlur,
-                downscale = CardSoftGlassDownscale,
-                baseTint = softGlassCardTint,
-                shapeEdgePx = edgePx,
-                shapeEdgePow = edgePow,
-                refractionThicknessPx = refractionPx,
-                reflectionThicknessPx = reflectionPx,
+                tint = softGlassCardTint,
+                edgePx = edgePx,
+                edgePow = edgePow,
+                refractionPx = refractionPx,
+                reflectionPx = reflectionPx,
                 reflectionLighten = tuning.reflectLighten,
-                bgSaturation = tuning.saturation(dark),
                 reflectionStrength = tuning.reflectionStrength,
                 refractionIor = tuning.refractionIor,
+                bgSaturation = tuning.saturation(dark),
             )
-            // Soft glass off: sample the pre-blurred wallpaper instead of
-            // replaying a live Gaussian for every card, every frame.
             !samplePageContent && gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
             else -> shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = blurRadius)
@@ -349,43 +326,24 @@ fun Card(
     MiuixCard(
         modifier = when {
             glass == null -> shadowed
-            underlay != null && softGlass && wyuSoftGlassSupported ->
-                shadowed.wyuWallpaperGlass(
-                    underlay = underlay,
-                    shape = shape,
-                    glassShape = WyuSoftGlassShape.RoundedRect,
-                    cornerRadius = cornerRadius,
-                    baseTint = softGlassCardTint,
-                    shapeEdgePx = tuning.shapeEdgePx,
-                    shapeEdgePow = tuning.shapeEdgePow,
-                    refractionThicknessPx = tuning.edgeThickness,
-                    reflectionThicknessPx = tuning.reflectOffset,
-                    reflectionLighten = tuning.reflectLighten,
-                    bgSaturation = tuning.saturation(dark),
-                    reflectionStrength = tuning.reflectionStrength,
-                    refractionIor = tuning.refractionIor,
-                )
-            softGlass && wyuSoftGlassSupported -> shadowed.wyuSoftGlass(
+            softGlass && wyuSoftGlassSupported -> shadowed.wyuUpstreamCardGlass(
                 backdrop = glass,
-                shape = shape,
-                glassShape = WyuSoftGlassShape.RoundedRect,
                 cornerRadius = cornerRadius,
-                blurScale = CardSoftGlassBlurScale,
+                dark = dark,
                 blurPercent = softGlassBlur,
-                downscale = CardSoftGlassDownscale,
-                baseTint = softGlassCardTint,
-                shapeEdgePx = tuning.shapeEdgePx,
-                shapeEdgePow = tuning.shapeEdgePow,
-                refractionThicknessPx = tuning.edgeThickness,
-                reflectionThicknessPx = tuning.reflectOffset,
+                tint = softGlassCardTint,
+                edgePx = tuning.shapeEdgePx,
+                edgePow = tuning.shapeEdgePow,
+                refractionPx = tuning.edgeThickness,
+                reflectionPx = tuning.reflectOffset,
                 reflectionLighten = tuning.reflectLighten,
-                bgSaturation = tuning.saturation(dark),
                 reflectionStrength = tuning.reflectionStrength,
                 refractionIor = tuning.refractionIor,
+                bgSaturation = tuning.saturation(dark),
             )
             gaussianUnderlay != null ->
                 shadowed.wyuWallpaperBlur(underlay = gaussianUnderlay, shape = shape)
-            else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
+            else -> shadowed.textureBlur(backdrop = glass, shape = shape, blurRadius = CardBlurRadius)
         },
         cornerRadius = cornerRadius,
         insideMargin = insideMargin,
@@ -456,25 +414,24 @@ fun LiveGlassCard(
         // every appearance mode.
         modifier = when {
             backdrop == null -> shadowed
-            useSoftGlass -> shadowed.wyuSoftGlass(
+            useSoftGlass -> shadowed.wyuUpstreamCardGlass(
                 backdrop = backdrop,
-                shape = shape,
-                glassShape = WyuSoftGlassShape.RoundedRect,
                 cornerRadius = cornerRadius,
+                dark = dark,
                 blurPercent = softGlassBlur,
-                baseTint = if (dark) {
+                tint = if (dark) {
                     Color.Transparent
                 } else {
                     Color.White.copy(alpha = SoftGlassWhiteTintAlpha)
                 },
-                refractionThicknessPx = TopBarGlassRefractionPx,
-                reflectionThicknessPx = TopBarGlassReflectionPx,
-                shapeEdgePx = tuning.shapeEdgePx,
-                shapeEdgePow = tuning.shapeEdgePow,
+                edgePx = tuning.shapeEdgePx,
+                edgePow = tuning.shapeEdgePow,
+                refractionPx = TopBarGlassRefractionPx,
+                reflectionPx = TopBarGlassReflectionPx,
                 reflectionLighten = tuning.reflectLighten,
-                bgSaturation = tuning.saturation(dark),
                 reflectionStrength = tuning.reflectionStrength,
                 refractionIor = tuning.refractionIor,
+                bgSaturation = tuning.saturation(dark),
             )
             else -> shadowed.textureBlur(
                 backdrop = backdrop,
