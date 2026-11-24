@@ -267,6 +267,7 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
             label = "密码",
             secure = !passwordVisible,
             modifier = Modifier.fillMaxWidth(),
+            onValueChange = vm::setPassword,
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
