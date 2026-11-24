@@ -1,6 +1,7 @@
 package com.wyutools.app.ui
 
 import android.graphics.Rect
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -84,6 +85,8 @@ fun HomeScreen(
     val authUi by authVm.ui.collectAsState()
     val layout by WyuToolLayoutStore.state.collectAsState()
     var moreEditing by remember { mutableStateOf(false) }
+    // 编辑模式下返回键只退出编辑，不离开应用。
+    BackHandler(enabled = moreEditing) { moreEditing = false }
     val now = rememberCurrentMinute()
     val today = now.toLocalDate()
     // 今日卡片上的「待办 n 项」要开屏就对，所以首页也负责按天装载一次清单；

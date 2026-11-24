@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -121,6 +122,25 @@ private const val MoreSettleFlingGain = 0.45f
 private const val MoreSettleFlingCap = 1600f
 
 /**
+ * 长按进入编辑时的放大倍数，也是拖动时的持握尺寸。
+ *
+ * 值跑在 [Animatable] 上、只在图标的 layer 块里读取，所以放大与缩回每帧
+ * 只失效那一层，不会重组整个网格。长按到达编辑阈值时从原尺寸弹到放大
+ * 尺寸并保持在那里——拖动期间不回缩；松手开始归位时才用欠阻尼弹簧缩回
+ * 1，同时抖动已经开始，网格从这一刻起就在呼吸。
+ */
+private const val MoreIconEditPopScale = 1.14f
+
+private val MoreIconPopSpring = spring<Float>(
+    dampingRatio = 0.52f,
+    stiffness = Spring.StiffnessMedium,
+)
+private val MoreIconReleaseSpring = spring<Float>(
+    dampingRatio = 0.38f,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+/**
  * The 更多 page: one icon per tool, laid out like a phone home screen. Reordering
  * is only possible in edit mode, and the model reflows on every move so the grid
  * never shows a hole.
@@ -149,9 +169,6 @@ fun MoreContent(
     // finger is gone, the icon is still moving on its own momentum.
     var settling by remember { mutableStateOf(false) }
     val settleOffset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
-    // 1 while the icon is held, then eased down to 0 on release; it drives the
-    // lift, so the tile settles back to its resting size as it lands.
-    val dropProgress = remember { Animatable(1f) }
     val stickySlop = with(LocalDensity.current) { MoreStickySlop.toPx() }
     // Guards the drop animation: a grab that starts while a previous drop is
     // still easing must not be cancelled by that drop's tail.
@@ -174,7 +191,6 @@ fun MoreContent(
         // whatever pixels are on screen.
         scope.launch {
             settleOffset.snapTo(Offset.Zero)
-            dropProgress.snapTo(1f)
         }
     }
 
@@ -213,15 +229,6 @@ fun MoreContent(
                             visibilityThreshold = Offset(0.5f, 0.5f),
                         ),
                         initialVelocity = kick,
-                    )
-                }
-                launch {
-                    dropProgress.animateTo(
-                        targetValue = 0f,
-                        animationSpec = spring(
-                            dampingRatio = 0.9f,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
                     )
                 }
             }
@@ -320,6 +327,9 @@ fun MoreContent(
             key = { _, tool -> tool.id },
         ) { index, tool ->
             val dragging = draggingId == tool.id
+            // 松手归位期间（手指已离开、图标还在滑回槽位）抖动就该开始，
+            // 而不是等它彻底落回槽位才开始。
+            val coasting = dragging && settling
             MoreToolCell(
                 tool = tool,
                 editing = editing,
@@ -336,7 +346,7 @@ fun MoreContent(
                         else -> dragOffset
                     }
                 },
-                dragScale = { 1f + 0.08f * dropProgress.value },
+                settling = coasting,
                 onOpen = { snapshot -> onOpen(tool, snapshot) },
                 onLongPress = onEnterEdit,
                 onDragStart = { startDrag(tool.id, index) },
@@ -361,8 +371,10 @@ private fun MoreToolCell(
     tool: WyuTool,
     editing: Boolean,
     dragging: Boolean,
+    /** [dragging] only, but the finger has already lifted and the icon is
+     *  coasting into its slot — the jiggle may start here. */
+    settling: Boolean,
     dragOffset: () -> Offset,
-    dragScale: () -> Float,
     onOpen: (SharedCardSnapshot?) -> Unit,
     onLongPress: () -> Unit,
     onDragStart: () -> Unit,
@@ -376,6 +388,12 @@ private fun MoreToolCell(
     val density = LocalDensity.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
+    // 图标自身的放大倍数：长按进入编辑后保持放大，拖动与滑回槽位期间都不回缩，
+    // 松手那一刻才用弹簧缩回；只被图标的 layer 读取。
+    val lift = remember { Animatable(1f) }
+    fun liftToward(target: Float, spec: SpringSpec<Float>) {
+        scope.launch { lift.animateTo(target, spec) }
+    }
     val radiusPx = with(density) { MoreIconRadius.toPx() }
     val tileShape = rememberWyuSquircle(MoreIconRadius)
     val bounds = remember { Rect() }
@@ -413,7 +431,7 @@ private fun MoreToolCell(
             }
         }
     }
-    val jiggle = rememberJiggle(tool.id, editing && !dragging)
+    val jiggle = rememberJiggle(tool.id, editing && (!dragging || settling))
 
     Column(
         modifier = modifier
@@ -434,8 +452,6 @@ private fun MoreToolCell(
                 // Full assignment every time: a layer block mutates a persistent
                 // layer, so omitting a value would freeze it at its last one.
                 rotationZ = jiggle.rotation()
-                scaleX = if (dragging) dragScale() else 1f
-                scaleY = if (dragging) dragScale() else 1f
             }
             .pointerInput(tool.id) {
                 awaitEachGesture {
@@ -463,7 +479,13 @@ private fun MoreToolCell(
                             return@awaitEachGesture
                         }
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        // 到达编辑阈值：图标放大并保持住，接着拖也不回缩。
+                        liftToward(MoreIconEditPopScale, MoreIconPopSpring)
                         onLongPress()
+                    } else {
+                        // 编辑态里按住就放大、随时可以拖，而不是等移动超过
+                        // 阈值才放大。
+                        liftToward(MoreIconEditPopScale, MoreIconPopSpring)
                     }
                     // The gesture belongs to the icon from here on: every
                     // change is consumed, so the pager can never claim the drag
@@ -505,6 +527,8 @@ private fun MoreToolCell(
                         change.consume()
                     }
                     if (started) onDragEnd(flingVelocity)
+                    // 松手：图标开始缩回原尺寸；滑回槽位的同一刻，抖动已经接手。
+                    liftToward(1f, MoreIconReleaseSpring)
                 }
             },
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -519,6 +543,10 @@ private fun MoreToolCell(
                     // Full assignment: a layer block mutates a persistent layer,
                     // so leaving the value out would freeze it at zero.
                     alpha = if (WyuMorphPageState.flyingRoute == tool.route) 0f else 1f
+                    // 长按/拖动时保持放大，松手才缩回；放大只作用在图标本身，
+                    // 下面的标签保持原尺寸。
+                    scaleX = lift.value
+                    scaleY = lift.value
                 }
                 .size(MoreIconSize)
                 // The tile alone is the morph source: the label under it stays
