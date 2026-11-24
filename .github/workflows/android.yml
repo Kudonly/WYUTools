@@ -51,8 +51,10 @@ jobs:
           set -euo pipefail
           SDKROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
           echo "sdkmanager=$SDKROOT/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$SDKROOT/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" > /dev/null
+          # AGP 9.5 的 compileSdk 37 / minorApiLevel 2 对应包名是
+          # platforms;android-37.2（本机也是这么装的），不是 platforms;android-37。
+          yes | "$SDKROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$SDKROOT/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.2" > /dev/null
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
