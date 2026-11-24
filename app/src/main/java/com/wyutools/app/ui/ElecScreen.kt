@@ -31,8 +31,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -180,7 +180,9 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
     val morphSettled = WyuMorphPageState.morphSettled
     // 有缓存就不再占一块「输入宿舍信息」：楼栋与房间已经落盘，日常只需要看余额，
     // 想改的时候从顶栏的编辑按钮进弹窗。
-    val hasDorm = ui.building.isNotBlank() && ui.room.isNotBlank()
+    // 输入卡只在「宿舍已确认」时隐藏：实时输入内容不再影响显隐，
+    // 两个框都填了也不会中途消失，必须手动点查询且成功落地才收起。
+    val hasDorm = ui.dormConfirmed
     var dormEditorOpen by remember { mutableStateOf(false) }
     // 充值记录的范围菜单是页面内容之上的弹出层，展开状态留在这里，
     // 方便页面在需要时对菜单做出反应。
@@ -363,7 +365,6 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done,
                 ),
-                onKeyboardAction = KeyboardActionHandler { vm.query() },
                 onValueChange = vm::setRoom,
                 modifier = Modifier.weight(1.4f),
             )
@@ -419,6 +420,12 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "查询成功后可随时在页面右上角修改宿舍信息",
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
     }
 }
 

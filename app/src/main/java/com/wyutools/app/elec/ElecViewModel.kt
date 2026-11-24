@@ -28,6 +28,9 @@ private const val MinQueryIndicatorMillis = 900L
 data class ElecUiState(
     val building: String = "",
     val room: String = "",
+    // 宿舍是否已确认（进页时有落盘值，或手动查询已成功落地）。
+    // 输入卡以它为准：实时输入内容不影响卡片显隐。
+    val dormConfirmed: Boolean = false,
     val loading: Boolean = false,
     val result: ElecInfo? = null,
     val error: String? = null,
@@ -72,19 +75,26 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
         ElecUiState(
             building = prefs.getString("building", "").orEmpty(),
             room = prefs.getString("room", "").orEmpty(),
+            dormConfirmed = prefs.getString("building", "").orEmpty().isNotBlank() &&
+                prefs.getString("room", "").orEmpty().isNotBlank(),
             period = runCatching {
-                ElecPeriod.valueOf(prefs.getString("period", ElecPeriod.ALL.name).orEmpty())
-            }.getOrDefault(ElecPeriod.ALL),
+                ElecPeriod.valueOf(prefs.getString("period", ElecPeriod.THREE_MONTHS.name).orEmpty())
+            }.getOrDefault(ElecPeriod.THREE_MONTHS),
         )
     )
     val ui: StateFlow<ElecUiState> = _ui.asStateFlow()
 
     fun onEntered() {
+        // 自动刷新只在输入框内容与已保存宿舍完全一致时触发：
+        // 首次输入、或正在改号（内容与落盘值有出入）都不抢跑。
+        if (autoQueried) return
         val state = _ui.value
-        if (!autoQueried && state.building.isNotBlank() && state.room.isNotBlank()) {
-            autoQueried = true
-            query()
-        }
+        val savedBuilding = prefs.getString("building", "").orEmpty()
+        val savedRoom = prefs.getString("room", "").orEmpty()
+        if (savedBuilding.isBlank() || savedRoom.isBlank()) return
+        if (state.building != savedBuilding || state.room != savedRoom) return
+        autoQueried = true
+        query(persistDorm = false)
     }
 
     fun setBuilding(value: String) {
@@ -145,7 +155,7 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun query() {
+    fun query(persistDorm: Boolean = true) {
         val state = _ui.value
         if (state.loading) return
         val building = state.building.trim()
@@ -158,7 +168,11 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(error = "请填写房间号") }
             return
         }
-        prefs.edit().putString("building", building).putString("room", room).apply()
+        // 只有手动查询（按钮 / 键盘完成键 / 编辑弹窗）才保存宿舍；
+        // 自动刷新走 persistDorm = false，绝不改写落盘值。
+        if (persistDorm) {
+            prefs.edit().putString("building", building).putString("room", room).apply()
+        }
         val startedAt = SystemClock.elapsedRealtime()
         // Seed the card with this room's last reading before the network is even
         // touched. Without it a slow campus network leaves the page empty for
@@ -207,6 +221,7 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                         stats = stats,
                         stale = false,
                         staleAt = 0L,
+                        dormConfirmed = true,
                     )
                 }
                 holdQueryIndicator(startedAt)
@@ -224,6 +239,7 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
                             loading = false,
                             error = friendlyMessage(e),
                             result = fallback.info,
+                            dormConfirmed = true,
                             history = stored.ifEmpty { it.history },
                             stats = computeStats(
                                 stored.ifEmpty { it.history },

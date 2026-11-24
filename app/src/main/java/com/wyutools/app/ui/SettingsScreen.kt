@@ -596,6 +596,40 @@ fun SettingsScreen(
                     }
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                pressFeedbackType = PressFeedbackType.Sink,
+                onClick = { openLink(GitHubUrl) },
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "GitHub 项目",
+                            style = MiuixTheme.textStyles.headline2,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "Kudonly/WYUTools · 查看源码与发布版本",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
             Text(
                 text = "部分接口实现来源于 shiyi，在此感谢。",
                 style = MiuixTheme.textStyles.footnote1,
@@ -849,6 +883,7 @@ private fun PaletteStripe(colors: List<Color>?, height: Dp) {
 }
 
 private const val ShiyiUrl = "https://github.com/aglorice/shiyi"
+private const val GitHubUrl = "https://github.com/Kudonly/WYUTools"
 
 private fun appVersionName(context: Context): String = runCatching {
     context.packageManager.getPackageInfo(context.packageName, 0).versionName

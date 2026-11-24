@@ -109,8 +109,8 @@ internal fun WyuDropdownMenu(
     onDismissRequest: () -> Unit,
     anchor: Rect,
     modifier: Modifier = Modifier,
-    minWidth: Dp = 112.dp,
-    maxWidth: Dp = 232.dp,
+    minWidth: Dp = 140.dp,
+    maxWidth: Dp = 320.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // 收起动画播完之前不能把 Popup 拆掉，否则会「啪」地消失。
@@ -204,7 +204,10 @@ internal fun WyuDropdownMenu(
     val panelWidth = if (widths.widest <= 0) {
         minWidth
     } else {
-        with(density) { widths.widest.toDp() + itemChrome }.coerceIn(minWidth, maxWidth)
+        // 量宽之外再垫一点余量：测量与渲染的字体度量偶有出入，
+        // 贴着下限收窄时最后一个字可能被省略号吞掉。
+        with(density) { widths.widest.toDp() + itemChrome + WidthMeasureSlack }
+            .coerceIn(minWidth, maxWidth)
     }
     val scrimInteraction = remember { MutableInteractionSource() }
     val panelInteraction = remember { MutableInteractionSource() }
@@ -549,6 +552,9 @@ private val LocalDropdownWidths = staticCompositionLocalOf<DropdownWidths?> { nu
 
 /** 一行的固定开销：左右各 7dp 外边距 + 13dp 内边距 + 勾选图标的 8dp + 24dp。 */
 private val DropdownItemChrome = 72.dp
+
+/** 测量宽与渲染宽之间的安全余量。 */
+private val WidthMeasureSlack = 8.dp
 
 /**
  * [WyuDropdownMenu] 的触发控件：当前值 + 右侧上下双箭头。
