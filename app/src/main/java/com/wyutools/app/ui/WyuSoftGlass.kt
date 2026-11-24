@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -911,6 +912,27 @@ internal class WyuGlassUnderlay(
 
 internal val LocalWyuGlassUnderlay = compositionLocalOf<WyuGlassUnderlay?> { null }
 
+/**
+ * Coordinates of the page's content root (the full-screen surface the
+ * wallpaper underlay is baked for). Glass draws sample in page-local space so
+ * a NavHost slide, which only translates the page through a graphics layer,
+ * does not invalidate every cached shader layer on every frame.
+ */
+internal val LocalWyuPageCoordinates = compositionLocalOf<() -> LayoutCoordinates?> { { null } }
+
+/**
+ * Position of [this] inside the page content. Falls back to root coordinates
+ * for surfaces hosted in a different composition (dialogs, popups) or before
+ * the page content has been laid out.
+ */
+internal fun LayoutCoordinates.pageLocalPosition(
+    page: LayoutCoordinates?,
+): Offset {
+    if (page == null || !page.isAttached || !isAttached) return positionInRoot()
+    return runCatching { page.localPositionOf(this, Offset.Zero) }
+        .getOrElse { positionInRoot() }
+}
+
 /** Cached Gaussian-blurred wallpaper for the non-soft-glass card path. */
 internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { null }
 
@@ -1143,9 +1165,13 @@ private object WyuGlassColorCache {
     private val entries = ArrayDeque<Entry>()
 
     @Synchronized
-    fun obtain(underlay: WyuGlassUnderlay, saturation: Float): Bitmap {
+    fun peek(underlay: WyuGlassUnderlay, saturation: Float): Bitmap? =
         entries.firstOrNull { it.source === underlay.bitmap && it.saturation == saturation }
-            ?.let { return it.baked }
+            ?.baked
+
+    @Synchronized
+    fun obtain(underlay: WyuGlassUnderlay, saturation: Float): Bitmap {
+        peek(underlay, saturation)?.let { return it }
         val baked = bake(underlay.bitmap, saturation)
         entries.addFirst(Entry(underlay.bitmap, saturation, baked))
         // Bitmaps are left to the GC on eviction; shaders may still hold them
@@ -1269,11 +1295,15 @@ internal fun Modifier.wyuWallpaperGlass(
 ): Modifier {
     if (underlay == null || !wyuSoftGlassSupported) return this
     val density = LocalDensity.current
+    val pageCoordinates = LocalWyuPageCoordinates.current
     // Interior pixels get the whole colour pipeline baked into a copy of the
-    // underlay. Until the background bake lands the shader runs the full
-    // pipeline, which is pixel-identical bar 8-bit rounding.
-    val bakedInterior = produceState<Bitmap?>(null, underlay, bgSaturation) {
-        value = null
+    // underlay. Seed from the cache so re-entering a page never switches every
+    // card from the full shader to the baked texture a frame later, which
+    // re-records every cached glass layer at once.
+    val cachedInterior = remember(underlay, bgSaturation) {
+        WyuGlassColorCache.peek(underlay, bgSaturation)
+    }
+    val bakedInterior = produceState<Bitmap?>(cachedInterior, underlay, bgSaturation) {
         value = withContext(Dispatchers.Default) {
             runCatching { WyuGlassColorCache.obtain(underlay, bgSaturation) }.getOrNull()
         }
@@ -1446,7 +1476,9 @@ internal fun Modifier.wyuWallpaperGlass(
         }
     }
     return this
-        .onGloballyPositioned { originState.value = it.positionInRoot() }
+        .onGloballyPositioned {
+            originState.value = it.pageLocalPosition(pageCoordinates())
+        }
         .then(drawGlass)
 }
 
@@ -1459,8 +1491,19 @@ internal fun Modifier.wyuWallpaperGlass(
 internal fun Modifier.wyuWallpaperBlur(
     underlay: WyuGlassUnderlay?,
     shape: Shape,
+    /**
+     * Sample in page space, which is where the underlay is baked. A surface
+     * hosted in its own window — the dropdown popup — passes false: its
+     * underlay origin was rebased into that window, so only coordinates of the
+     * popup itself line up. Asking for page coordinates there finds no common
+     * ancestor and comes back zero, so the panel samples the corner of the bake
+     * instead of what sits behind it — on a preset gradient that reads as a flat
+     * plate with no blur at all.
+     */
+    pageSpace: Boolean = true,
 ): Modifier {
     if (underlay == null) return this
+    val pageCoordinates = if (pageSpace) LocalWyuPageCoordinates.current else null
     val originState = remember { mutableStateOf(Offset.Zero) }
     val paint = remember(underlay) {
         android.graphics.Paint(
@@ -1497,6 +1540,8 @@ internal fun Modifier.wyuWallpaperBlur(
         }
     }
     return this
-        .onGloballyPositioned { originState.value = it.positionInRoot() }
+        .onGloballyPositioned {
+            originState.value = it.pageLocalPosition(pageCoordinates?.invoke())
+        }
         .then(drawBlur)
 }

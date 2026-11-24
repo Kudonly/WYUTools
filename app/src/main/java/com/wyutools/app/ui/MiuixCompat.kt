@@ -73,18 +73,13 @@ private val DialogCardCorner = 32.dp
 /** M3 Expressive extra-large corner: dialogs, sheets and cards. */
 private val DialogScreenMargin = 16.dp
 private const val DialogCardTint = 0.62f
-// Dialogs keep their own fixed blur instead of following the soft-glass slider;
-// the dark sheet can carry 50%, while light mode stays at 20% to keep the
-// white-tinted card readable.
-private const val DialogSoftGlassBlurPercentLight = 20
-private const val DialogSoftGlassBlurPercentDark = 50
 
 /**
  * Every dialog goes through here. The card itself is frosted glass: it samples
  * the current page's backdrop and draws it blurred under a translucent tint.
  * With soft glass enabled the blur becomes the same glass material as cards,
- * at a fixed radius that is lower in light mode. The page behind stays sharp;
- * only the standard window dim applies.
+ * at the same radius and the same tint. The page behind stays sharp; only the
+ * standard window dim applies.
  */
 @Composable
 fun WyuOverlayDialog(
@@ -148,6 +143,7 @@ fun WyuOverlayDialog(
     val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
     val useLiquidGlass = useSoftGlass && isLiquid
     val cardColor = when {
@@ -165,11 +161,7 @@ fun WyuOverlayDialog(
                 tuning = liquidTuning,
                 dark = dark,
                 baseTint = wyuLiquidControlTint(),
-                blurPercent = if (dark) {
-                    DialogSoftGlassBlurPercentDark
-                } else {
-                    DialogSoftGlassBlurPercentLight
-                },
+                blurPercent = liquidBlur,
             )
         } else if (useUpstreamGlass) {
             Modifier.wyuUpstreamCardGlass(
@@ -177,12 +169,9 @@ fun WyuOverlayDialog(
                 cornerRadius = DialogCardCorner,
                 tuning = tuningForTheme,
                 dark = dark,
-                blurPercent = if (dark) {
-                    DialogSoftGlassBlurPercentDark
-                } else {
-                    DialogSoftGlassBlurPercentLight
-                },
-                tint = surface.copy(alpha = DialogCardTint),
+                // Same material as the cards: one blur setting, one tint source.
+                blurPercent = softGlassBlur,
+                tint = wyuSoftGlassSurfaceTint(),
             )
         } else {
             Modifier.textureBlur(

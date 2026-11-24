@@ -452,6 +452,10 @@ fun WyuPageScaffold(
     // only the bars, tiny buttons and the week header keep live backdrops.
     var glassLayerReady by remember { mutableStateOf(false) }
     var pageLayerReady by remember { mutableStateOf(false) }
+    // Page-local glass sampling origin: a NavHost slide translates the page
+    // with a graphics layer, which must not change the underlay key or the
+    // per-card sampling offset (that re-records every glass layer each frame).
+    val contentCoordinates = remember { mutableStateOf<LayoutCoordinates?>(null) }
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
     // Sharp (unblurred) copy for the upstream glass baked path: the miuix
     // pipeline applies the blur itself, so a pre-blurred source would double
@@ -461,7 +465,9 @@ fun WyuPageScaffold(
     // One stable backdrop per scaffold: cards sample the baked wallpaper
     // through it and never rebuild the glass node when the underlay is
     // regenerated (wallpaper or dim changes).
-    val bakedBackdrop = remember { WyuBitmapBackdrop(rawUnderlayState) }
+    val bakedBackdrop = remember {
+        WyuBitmapBackdrop(rawUnderlayState) { contentCoordinates.value }
+    }
     // The wallpaper bitmap loads asynchronously after the first composition,
     // and the baked copy is rebuilt when it lands / the page bounds settle.
     // Identity change forces the glass draw nodes to invalidate their cached
@@ -691,8 +697,12 @@ fun WyuPageScaffold(
         Modifier
             .fillMaxSize()
             .onGloballyPositioned { coordinates ->
+                // Origin stays at zero: underlays are baked in page space and
+                // cards sample relative to the page content. Tracking the
+                // animated root position here would rebuild the wallpaper and
+                // re-record every glass layer on every slide frame.
                 val next = Rect(
-                    coordinates.positionInRoot(),
+                    Offset.Zero,
                     Size(
                         coordinates.size.width.toFloat(),
                         coordinates.size.height.toFloat(),
@@ -729,6 +739,7 @@ fun WyuPageScaffold(
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
             LocalWyuBakedBackdrop provides publishedBakedBackdrop,
+            LocalWyuPageCoordinates provides { contentCoordinates.value },
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
             SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
@@ -746,7 +757,10 @@ fun WyuPageScaffold(
                                 if (backdrop != null) {
                                     Modifier
                                         .layerBackdrop(backdrop)
-                                        .onGloballyPositioned { pageLayerReady = true }
+                                        .onGloballyPositioned {
+                                            pageLayerReady = true
+                                            contentCoordinates.value = it
+                                        }
                                 } else {
                                     Modifier
                                 },
@@ -1155,7 +1169,7 @@ internal fun WyuChromeGlassSurface(
                             tuning = glassTuningForTheme,
                             dark = dark,
                             blurPercent = softGlassBlur,
-                            tint = wyuGlassControlWash(),
+                            tint = wyuSoftGlassSurfaceTint(),
                         )
 
                         else -> Modifier.textureBlur(
@@ -1512,7 +1526,7 @@ fun WyuFloatingTabs(
                         tuning = glassTuningForTheme,
                         dark = dark,
                         blurPercent = softGlassBlur,
-                        tint = wyuGlassControlWash(),
+                        tint = wyuSoftGlassSurfaceTint(),
                     )
 
                     else -> Modifier.textureBlur(

@@ -75,6 +75,24 @@ internal fun wyuGlassControlWash(): Color =
     MiuixTheme.colorScheme.surfaceContainer.copy(alpha = CardGlassAlpha)
 
 /**
+ * 柔光玻璃件的 tint：与卡片同一公式——浅色纯白、深色纯黑，alpha 取调参里的
+ * 卡片底色档。
+ *
+ * 每一块柔光玻璃都要用这一份：tint 决定玻璃的洗色强度，任何一处另起一套
+ * 颜色或 alpha（比如 `surfaceContainer @ 0.55`），那块玻璃看上去就跟卡片
+ * 不是同一种材质。
+ */
+@Composable
+internal fun wyuSoftGlassSurfaceTint(): Color {
+    val tuning by WyuAppearance.softGlassTuning.collectAsState()
+    return if (LocalWyuDarkTheme.current) {
+        Color.Black.copy(alpha = tuning.cardTintAlphaDark)
+    } else {
+        Color.White.copy(alpha = tuning.cardTintAlphaLight)
+    }
+}
+
+/**
  * 液态玻璃控件（顶栏面、胶囊、分段、输入框、底栏、菜单）的底色：
  * 与液态卡片同一公式——浅色白、深色黑，alpha 取液态调参里的
  * 卡片底色档——保证所有玻璃组件的取色跟卡片完全一致。
@@ -201,6 +219,16 @@ private const val CompactGlassReflectionPx = 800f
 private const val CompactGlassBlurRadius = 30f
 
 /**
+ * Base colour for a soft-glass surface that must not read the wallpaper.
+ *
+ * The material grades its own sample — the result lands roughly half as bright
+ * as the colour handed in — so white stays a white plate on light, while on dark
+ * a mid grey settles into the same range as the cards beside it.
+ */
+private fun neutralGlassBase(dark: Boolean): Color =
+    if (dark) Color(0xFF6E6E73) else Color.White
+
+/**
  * Frosted-glass variants of Miuix's card and button. They stay identical to the
  * originals unless a wallpaper-only backdrop is published, which only happens
  * while a custom wallpaper is active.
@@ -214,6 +242,13 @@ fun Card(
     samplePageContent: Boolean = false,
     /** Short surface (a 40dp band): keep the rim inside the shape. */
     compactGlass: Boolean = false,
+    /**
+     * Soft glass fills the surface with one neutral colour instead of reading
+     * the wallpaper through it. For surfaces that are tall and thin — the
+     * timetable's period column — the wallpaper underneath would otherwise show
+     * up as a colour ramp down the strip.
+     */
+    fixedGlassBase: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glassReady = LocalWyuGlassReady.current
@@ -224,7 +259,6 @@ fun Card(
     }
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
-    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
@@ -304,14 +338,14 @@ fun Card(
                     refractionThicknessPx = liquidRefractionPx,
                     reflectionThicknessPx = liquidReflectionPx,
                 )
-            softGlass && wyuSoftGlassSupported && !isLiquid && !samplePageContent && bakedBackdrop != null ->
-                shadowed.wyuUpstreamCardGlass(
-                    backdrop = bakedBackdrop,
+            softGlass && wyuSoftGlassSupported && !isLiquid && !samplePageContent && underlay != null ->
+                shadowed.wyuCardGlass(
+                    underlay = underlay,
+                    shape = shape,
                     cornerRadius = cornerRadius,
-                    tuning = tuningForTheme,
-                    dark = dark,
-                    blurPercent = softGlassBlur,
-                    tint = softGlassCardTint
+                    style = wyuUpstreamGlassStyle(tuningForTheme, dark, softGlassBlur),
+                    tint = softGlassCardTint,
+                    fixedBase = if (fixedGlassBase) neutralGlassBase(dark) else null,
                 )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
@@ -358,7 +392,6 @@ fun Card(
     val glassReady = LocalWyuGlassReady.current
     val underlay = LocalWyuGlassUnderlay.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
-    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val softGlass by WyuAppearance.softGlass.collectAsState()
     val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
     val tuning by WyuAppearance.softGlassTuning.collectAsState()
@@ -421,14 +454,13 @@ fun Card(
                     baseTint = liquidCardTint,
                     blurPercent = liquidBlur,
                 )
-            softGlass && wyuSoftGlassSupported && !isLiquid && bakedBackdrop != null ->
-                shadowed.wyuUpstreamCardGlass(
-                    backdrop = bakedBackdrop,
+            softGlass && wyuSoftGlassSupported && !isLiquid && underlay != null ->
+                shadowed.wyuCardGlass(
+                    underlay = underlay,
+                    shape = shape,
                     cornerRadius = cornerRadius,
-                    tuning = tuningForTheme,
-                    dark = dark,
-                    blurPercent = softGlassBlur,
-                    tint = softGlassCardTint
+                    style = wyuUpstreamGlassStyle(tuningForTheme, dark, softGlassBlur),
+                    tint = softGlassCardTint,
                 )
             softGlass && wyuSoftGlassSupported && glassReady && !isLiquid ->
                 shadowed.wyuUpstreamCardGlass(
@@ -693,7 +725,7 @@ fun GlassTextField(
             tuning = tuning.resolvedFor(dark),
             dark = dark,
             blurPercent = softGlassBlur,
-            tint = wyuGlassControlWash(),
+            tint = wyuSoftGlassSurfaceTint(),
         )
 
         else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)
@@ -760,7 +792,7 @@ fun GlassTextField(
             tuning = tuning.resolvedFor(dark),
             dark = dark,
             blurPercent = softGlassBlur,
-            tint = wyuGlassControlWash(),
+            tint = wyuSoftGlassSurfaceTint(),
         )
 
         else -> modifier.textureBlur(backdrop = glass, shape = shape, blurRadius = InputBlurRadius)

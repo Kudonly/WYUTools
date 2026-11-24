@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import top.yukonga.miuix.kmp.blur.Backdrop
@@ -30,6 +29,30 @@ import top.yukonga.miuix.kmp.material.GlassShape
 import top.yukonga.miuix.kmp.material.GlassStyle
 import top.yukonga.miuix.kmp.material.GlassStyles
 import kotlin.math.roundToInt
+
+/**
+ * Radius, in the pipeline's source-density units, that produces [sigmaPx] on
+ * screen.
+ *
+ * The pipeline turns a style radius into a blur sigma with
+ * `radius / SourceDensity * density * 0.45`. The card path does not go through
+ * it at all — it bakes the sigma straight into its underlay — so the pipeline
+ * has to be handed the inverse of that conversion, or every other glass
+ * surface ends up at a different frost level than the cards.
+ */
+private fun upstreamBlurRadius(sigmaPx: Float, density: Float): Float =
+    (sigmaPx * GlassDefaults.SourceDensity / (density * 0.45f)).coerceIn(0f, 160f)
+
+/**
+ * The tint the pipeline should lay down for [tint], in the form the card shader
+ * would use it.
+ *
+ * The shader multiplies the colour's alpha by the style's `tintStrength`; the
+ * pipeline uses the alpha as given. Handing it the product keeps one wash
+ * strength across surfaces that render through either path.
+ */
+internal fun wyuUpstreamGlassTint(tint: Color, style: GlassStyle): Color =
+    tint.copy(alpha = (tint.alpha * style.inner.tintStrength).coerceIn(0f, 1f))
 
 /** Cards and the dropdown popup share one style so the two materials match. */
 @Composable
@@ -78,10 +101,10 @@ internal fun wyuUpstreamGlassStyle(
             brightness = t.backgroundBrightness,
         ),
         blur = base.blur.copy(
-            // 0% 必须真的是 0 模糊；下限只做数值保护，不再抬高实际半径。
-            // 烘焙底图路径也用同一半径，观感与实时路径保持一致。
-            small = (wyuSoftGlassScreenBlurPx(blurPercent) * 4f * scale)
-                .coerceIn(0f, 160f),
+            // The card path bakes this same sigma into its underlay. Feeding the
+            // pipeline the matching radius keeps cards, bars, buttons, menus and
+            // dialogs at one frost level; 0% still means no blur at all.
+            small = upstreamBlurRadius(wyuSoftGlassScreenBlurPx(blurPercent), density),
         ),
     )
 }
@@ -94,14 +117,17 @@ internal fun Modifier.wyuUpstreamCardGlass(
     dark: Boolean,
     blurPercent: Int,
     tint: Color,
-): Modifier = glass(
-    backdrop = backdrop,
-    shape = GlassShape(cornerRadius),
-    style = wyuUpstreamGlassStyle(tuning, dark, blurPercent),
-    tint = tint,
-    noiseCoefficient = tuning.noiseCoefficient,
-    shading = true,
-)
+): Modifier {
+    val style = wyuUpstreamGlassStyle(tuning, dark, blurPercent)
+    return glass(
+        backdrop = backdrop,
+        shape = GlassShape(cornerRadius),
+        style = style,
+        tint = wyuUpstreamGlassTint(tint, style),
+        noiseCoefficient = tuning.noiseCoefficient,
+        shading = true,
+    )
+}
 
 /**
  * A [Backdrop] sampling a static wallpaper copy ([WyuGlassUnderlay], unblurred
@@ -116,6 +142,7 @@ internal fun Modifier.wyuUpstreamCardGlass(
  */
 internal class WyuBitmapBackdrop(
     private val underlayState: State<WyuGlassUnderlay?>,
+    private val pageCoordinates: () -> LayoutCoordinates?,
 ) : Backdrop {
     // Sampling is positioned in root coordinates, so a moved surface must be
     // redrawn even without other draw invalidation.
@@ -144,7 +171,7 @@ internal class WyuBitmapBackdrop(
         // Offset of this surface relative to the baked wallpaper's top-left,
         // mirroring LayerBackdrop's layer-space alignment math.
         val node = try {
-            coords.positionInRoot()
+            coords.pageLocalPosition(pageCoordinates())
         } catch (_: Exception) {
             return
         }

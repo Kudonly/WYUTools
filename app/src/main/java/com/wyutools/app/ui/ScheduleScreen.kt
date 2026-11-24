@@ -732,7 +732,14 @@ private fun WeeklyTab(
 }
 
 /** The frozen time column: a card, so it carries the same material as every
- *  other card instead of a tint of its own. */
+ *  other card instead of a tint of its own, and it takes the same container
+ *  wash as the date capsule above it so the two rails read as one element.
+ *
+ *  It cannot use `samplePageContent` the way that capsule does: this card sits
+ *  inside the very `wyu-content` layer the page backdrop records, so sampling
+ *  the page would make the layer contain a copy of itself and the glass would
+ *  recurse until the app dies. Sampling the wallpaper instead is the same
+ *  material and the same tint, just a static source. */
 @Composable
 private fun ScheduleAxisCard(
     sections: List<ScheduleSection>,
@@ -957,7 +964,6 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
     val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
-    val bakedBackdrop = LocalWyuBakedBackdrop.current
     val wallpaper = LocalWyuGlassBackdrop.current
     val dark = LocalWyuDarkTheme.current
     val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
@@ -993,14 +999,13 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
                 refractionThicknessPx = 56f,
                 reflectionThicknessPx = 800f,
             )
-        softGlass && !isLiquid && wyuSoftGlassSupported && bakedBackdrop != null ->
-            wyuUpstreamCardGlass(
-                backdrop = bakedBackdrop,
+        softGlass && !isLiquid && wyuSoftGlassSupported && underlay != null ->
+            wyuCardGlass(
+                underlay = underlay,
+                shape = shape,
                 cornerRadius = 11.dp,
-                tuning = tuning.resolvedFor(dark),
-                dark = dark,
-                blurPercent = softGlassBlur,
-                tint = Color.Transparent
+                style = wyuUpstreamGlassStyle(tuning.resolvedFor(dark), dark, softGlassBlur),
+                tint = Color.Transparent,
             )
         softGlass && !isLiquid && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
             wyuUpstreamCardGlass(

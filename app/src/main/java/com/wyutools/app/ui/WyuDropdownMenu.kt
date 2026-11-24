@@ -287,6 +287,9 @@ internal fun WyuDropdownMenu(
                     val frame = arcFrame(placement, anchorInPopup, end, expanded, size, position, density)
 
                     val shape = RoundedCornerShape(with(density) { frame.cornerRadius.toDp() })
+                    // 与卡片同一份参数：样式只建一次，tint 按卡片 shader 的口径
+                    // 预先乘上 tintStrength，管路那边照旧用颜色自身 alpha。
+                    val panelGlassStyle = wyuUpstreamGlassStyle(tuning, dark, softGlassBlur)
                     // 内容按 0.69 → 1 等比缩放，缩放中心就是面板中心，所以永远严丝合缝。
                     val contentScale = ArcStartWidth + (1f - ArcStartWidth) * size.coerceAtLeast(0f)
                     // 尺寸还没过 10% 时整块不可见：出现在眼前的是个清晰的小胶囊，
@@ -332,6 +335,9 @@ internal fun WyuDropdownMenu(
                                     Modifier.wyuWallpaperBlur(
                                         underlay = popupGaussian,
                                         shape = shape,
+                                        // 面板在弹出窗口里，底图原点已按窗口位移重定，
+                                        // 只有窗口坐标能对上。
+                                        pageSpace = false,
                                     )
                                 } else if (useUpstreamGlass && glassBackdrop != null) {
                                     Modifier.glass(
@@ -339,8 +345,11 @@ internal fun WyuDropdownMenu(
                                         shape = GlassShape(
                                             with(density) { frame.cornerRadius.toDp() },
                                         ),
-                                        style = wyuUpstreamGlassStyle(tuning, dark, softGlassBlur),
-                                        tint = panelColor,
+                                        style = panelGlassStyle,
+                                        tint = wyuUpstreamGlassTint(
+                                            wyuSoftGlassSurfaceTint(),
+                                            panelGlassStyle,
+                                        ),
                                         shading = true,
                                     )
                                 } else {
