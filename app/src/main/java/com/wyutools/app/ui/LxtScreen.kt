@@ -137,10 +137,6 @@ fun LxtScreen(
                     onOpenValve = { showValveDialog = true },
                     onRefreshValve = vm::refreshValve,
                 )
-                ui.valveUsing?.takeIf { ui.valveUsingActive }?.let { using ->
-                    Spacer(Modifier.height(12.dp))
-                    ValveUsingCard(using = using, onRefreshValve = vm::refreshValve)
-                }
                 Spacer(Modifier.height(12.dp))
                 // 宿舍修改不是每天要看的数字，只是偶尔进出的设置，压到页尾。
                 DormCard(ui = ui, onEditHot = onBindValve, onEditCold = onBind)
@@ -646,7 +642,13 @@ private fun ValveCard(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
     ) {
-        Text("开热水", style = MiuixTheme.textStyles.title3)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("开热水", style = MiuixTheme.textStyles.title3)
+            ui.valveUsing?.takeIf { ui.valveUsingActive }?.let { using ->
+                Spacer(Modifier.width(10.dp))
+                ValveUsingCapsule(using = using)
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             text = when {
@@ -711,31 +713,36 @@ private fun ValveCard(
     }
 }
 
-/** 「热水阀使用中」独立成页级卡片：与其它卡片同样的 16dp 页边距，不再被外层卡的内边距挤短。 */
+/** 「使用中」玻璃胶囊：盖在「开热水」标题旁边，只显示状态与已用时长；
+ *  刷新走卡片里原本的「刷新状态」按钮。 */
 @Composable
-private fun ValveUsingCard(
-    using: ValveUsing,
-    onRefreshValve: () -> Unit,
-) {
+private fun ValveUsingCapsule(using: ValveUsing) {
+    val minutes = ((System.currentTimeMillis() - using.openTime) / 60000L)
+        .coerceAtLeast(0)
     Card(
+        cornerRadius = 12.dp,
+        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+        compactGlass = true,
         colors = CardDefaults.defaultColors(
-            color = MiuixTheme.colorScheme.tertiaryContainer,
+            color = MiuixTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
             contentColor = MiuixTheme.colorScheme.onTertiaryContainer,
         ),
-        insideMargin = PaddingValues(16.dp),
     ) {
-        Text(
-            text = "热水阀使用中",
-            style = MiuixTheme.textStyles.title4,
-            color = MiuixTheme.colorScheme.onTertiaryContainer,
-        )
-        val minutes = ((System.currentTimeMillis() - using.openTime) / 60000L)
-            .coerceAtLeast(0)
-        Text(
-            text = "已使用约 $minutes 分钟 · 请在洗澡机上结束用水",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onTertiaryContainer,
-        )
-        TextButton(text = "刷新状态", onClick = onRefreshValve)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(MiuixTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "使用中 · 已约 $minutes 分钟",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onTertiaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
