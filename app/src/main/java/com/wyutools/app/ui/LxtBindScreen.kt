@@ -1,6 +1,5 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,12 +53,7 @@ fun LxtBindScreen(
     val collapseFraction = rememberWyuCollapseFraction(bindListState)
 
     LaunchedEffect(Unit) { vm.startBind(forValve) }
-    LaunchedEffect(ui.message) {
-        ui.message?.let { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-            vm.consumeMessage()
-        }
-    }
+    WyuNoticeToast(ui.message) { vm.consumeMessage() }
 
     WyuPageScaffold(
         progress = { collapseFraction.value },

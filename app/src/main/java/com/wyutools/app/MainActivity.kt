@@ -21,8 +21,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,14 +38,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.NavHost
@@ -209,6 +218,12 @@ fun WyuApp(
     // the content on top of it. Captured once per open and reused by the return.
     val homeLayers = remember { mutableMapOf<String, SharedHomeLayers>() }
     var cardMorph by remember { mutableStateOf<CardMorph?>(null) }
+    // Activity-level ghost: the tapped card's own pixels, drawn OUTSIDE the
+    // wyu-content capture layer. It covers the source slot from the tap
+    // frame on, so hiding the live card for the capture can never leave a
+    // visible hole: every frame until the morph window lands has card
+    // pixels exactly where the user tapped.
+    var ghostSnapshot by remember { mutableStateOf<SharedCardSnapshot?>(null) }
     var returnMorph by remember { mutableStateOf<CardReturn?>(null) }
     // Windows left behind by a rapid switch while the parallel slot was already
     // taken. Each keeps its own Animatable and plays its close to the end; none
@@ -308,9 +323,16 @@ fun WyuApp(
      * with its own wallpaper switched off, so the content comes out on a
      * transparent background. The backdrop keeps painting that same wallpaper
      * underneath the suppressed page, so the frame looks unchanged on screen.
+     *
+     * [hideRoute] blanks one card only for the frame that is actually recorded.
+     * Keeping it hidden for the whole await used to make the tapped card vanish
+     * for a few frames before the morph window appeared — the "flash" on open.
      */
-    suspend fun recordHomeLayers(): SharedHomeLayers? {
+    suspend fun recordHomeLayers(hideRoute: String? = null): SharedHomeLayers? {
         withFrameNanos { }
+        val previousFlying = WyuMorphPageState.flyingRoute
+        var hiding = hideRoute != null
+        if (hideRoute != null) WyuMorphPageState.flyingRoute = hideRoute
         WyuMorphPageState.suppressPageBackground = true
         pageCaptureRequested = true
         wallpaperCaptureRequested = true
@@ -321,6 +343,13 @@ fun WyuApp(
         try {
             var frames = 0
             while ((!pageCaptureDone[0] || !wallpaperCaptureDone[0]) && frames < 100) {
+                // The page layer owns the card pixels. As soon as it has been
+                // recorded the live card can come back; the wallpaper layer
+                // does not contain it and can keep recording without it.
+                if (hiding && pageCaptureDone[0]) {
+                    WyuMorphPageState.flyingRoute = previousFlying
+                    hiding = false
+                }
                 withFrameNanos { }
                 frames++
             }
@@ -338,6 +367,7 @@ fun WyuApp(
             // A second tap may cancel this capture mid-frame. Leaving the
             // request flags set would freeze the next capture or strip the
             // wallpaper off the live home page for good.
+            if (hiding) WyuMorphPageState.flyingRoute = previousFlying
             WyuMorphPageState.suppressPageBackground = false
             pageCaptureRequested = false
             wallpaperCaptureRequested = false
@@ -459,6 +489,7 @@ fun WyuApp(
         pageCaptureDone[0] = false
         wallpaperCaptureDone[0] = false
         WyuMorphPageState.suppressPageBackground = false
+        ghostSnapshot = null
         val opening = cardMorph
         val returning = returnMorph
         if (opening == null && returning == null) return false
@@ -525,8 +556,19 @@ fun WyuApp(
         // No "cardMorph == null" / "openPending" guard any more: a tap that
         // arrives while a snapshot is being recorded supersedes that job
         // instead of being silently dropped.
-        if (!SharedViewTransition.launchTool(activity, toolRoute, card)) {
-            if (card != null && activity != null) {
+        val ghost = card?.takeIf { !it.bounds.isEmpty && !it.bitmap.isRecycled }
+        ghostSnapshot = ghost
+        if (SharedViewTransition.launchTool(activity, toolRoute, card)) {
+            // The vendor transition owns the pixels from here; drop the ghost
+            // once the new activity has drawn its first frames.
+            if (ghost != null) {
+                scope.launch {
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    if (ghostSnapshot === ghost) ghostSnapshot = null
+                }
+            }
+        } else if (card != null && activity != null) {
                 // Whether a live morph was on screen when this tap arrived.
                 // Read *before* cancelling anything, so the new window knows
                 // it must not sink and shrink the page a second time.
@@ -536,6 +578,9 @@ fun WyuApp(
                 openJob?.cancel()
                 openPending.value = false
                 val preempted = preemptForInput()
+                // preemptForInput cleared the ghost of the open it superseded;
+                // this tap owns the screen now, so put its own ghost back.
+                ghostSnapshot = ghost
                 openPending.value = true
                 openJob = scope.launch {
                     // Only layout frames when a window was handed over,
@@ -546,13 +591,14 @@ fun WyuApp(
                         withFrameNanos { }
                     }
                     if (openGen[0] != gen) return@launch
-                    // The source slot empties *before* the capture: the home
-                    // layers become the morph's backdrop for the whole flight,
-                    // and a card baked into them would sit there frozen under
+                    // Blank the source card for the capture frame only: the
+                    // home layers become the morph's backdrop for the whole
+                    // flight, and a card baked into them would sit frozen under
                     // the window — and, with the close's landing rebound,
                     // visibly doubled beside the copy that is still moving.
-                    WyuMorphPageState.flyingRoute = toolRoute
-                    val layers = recordHomeLayers()
+                    // recordHomeLayers restores it the moment the page layer
+                    // has been read, so the live card never blinks out.
+                    val layers = recordHomeLayers(hideRoute = toolRoute)
                     if (openGen[0] != gen) return@launch
                     openPending.value = false
                     cardSnapshots[toolRoute] = card
@@ -591,16 +637,21 @@ fun WyuApp(
                         // false until onFinished, so the whole secondary page
                         // looked empty for the entire animation.
                         WyuMorphPageState.morphSettled = true
+                        // The morph window now covers the ghost; release it
+                        // once the overlay has drawn.
+                        withFrameNanos { }
+                        withFrameNanos { }
+                        if (ghostSnapshot === ghost) ghostSnapshot = null
                     } else {
                         // No capture, no morph: hand the slot back at once.
                         WyuMorphPageState.flyingRoute = null
                         WyuMorphPageState.morphSettled = true
+                        if (ghostSnapshot === ghost) ghostSnapshot = null
                         nav.navigate(toolRoute)
                     }
                 }
-            } else {
-                nav.navigate(toolRoute)
-            }
+        } else {
+            nav.navigate(toolRoute)
         }
     }
 
@@ -1064,6 +1115,7 @@ fun WyuApp(
                     openJob = null
                     openPending.value = false
                     WyuMorphPageState.flyingRoute = null
+                    ghostSnapshot = null
                     WyuMorphPageState.openingOnly = false
                     WyuMorphPageState.morphSettled = true
                     settleMorphState()
@@ -1091,6 +1143,28 @@ fun WyuApp(
                         nav.popBackStack()
                     }
                 }
+            }
+        }
+        ghostSnapshot?.let { ghost ->
+            val density = LocalDensity.current
+            Box(
+                Modifier
+                    .zIndex(MorphOpenZ - 1f)
+                    .offset { IntOffset(ghost.bounds.left, ghost.bounds.top) }
+                    .size(
+                        with(density) { ghost.bounds.width().toFloat().toDp() },
+                        with(density) { ghost.bounds.height().toFloat().toDp() },
+                    )
+                    .clip(
+                        RoundedCornerShape(with(density) { ghost.radiusPx.toDp() })
+                    ),
+            ) {
+                Image(
+                    bitmap = ghost.bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
         cardMorph?.let { morph ->

@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.auth.SsoException
+import com.wyutools.app.core.friendlyAccessMessage
 import com.wyutools.app.ui.WyuMorphPageState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,9 +17,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.time.LocalDate
 
 class ScheduleViewModel(
@@ -199,12 +197,7 @@ class ScheduleViewModel(
 
     private fun friendlyMessage(error: Throwable): String = when (error) {
         is ScheduleParseException -> error.message ?: "课表数据解析失败。"
-        is SsoException -> error.message ?: "教务系统访问失败。"
-        is UnknownHostException -> "网络连接失败，请检查网络后重试。"
-        is SocketTimeoutException -> "网络连接超时，请稍后重试。"
-        is ConnectException -> "无法连接服务器，请稍后重试。"
-        is IOException -> "网络连接失败，请稍后重试。"
-        else -> error.message ?: "课表加载失败，请稍后重试。"
+        else -> friendlyAccessMessage(error) ?: error.message ?: "课表加载失败，请稍后重试。"
     }
 
     private fun restoreCache() {

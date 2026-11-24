@@ -19,9 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -390,28 +388,28 @@ private fun MoreToolCell(
         // Let the tap interrupt an exit that is still playing instead of
         // waiting for it; the short settle below keeps the capture clean.
         WyuMorphPageState.interruptMorph()
-        if (launching) {
-            Unit
-        } else if (bounds.isEmpty) {
-            onOpen(null)
-        } else {
-            launching = true
-            scope.launch {
-                // The press already handed the screen to this tap; no need to
-                // wait for the parallel close to finish.
-                val bitmap = runCatching {
-                    graphicsLayer.toImageBitmap().asAndroidBitmap()
-                }.getOrNull()
-                launching = false
-                onOpen(
-                    bitmap?.let {
-                        SharedCardSnapshot(
-                            bitmap = it,
-                            bounds = Rect(bounds),
-                            radiusPx = radiusPx,
-                        )
-                    },
-                )
+        if (!launching) {
+            if (bounds.isEmpty) {
+                onOpen(null)
+            } else {
+                launching = true
+                scope.launch {
+                    // The press already handed the screen to this tap; no need to
+                    // wait for the parallel close to finish.
+                    val bitmap = runCatching {
+                        graphicsLayer.toImageBitmap().asAndroidBitmap()
+                    }.getOrNull()
+                    launching = false
+                    onOpen(
+                        bitmap?.let {
+                            SharedCardSnapshot(
+                                bitmap = it,
+                                bounds = Rect(bounds),
+                                radiusPx = radiusPx,
+                            )
+                        },
+                    )
+                }
             }
         }
     }

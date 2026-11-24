@@ -17,8 +17,6 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -485,7 +483,7 @@ internal fun Modifier.wyuLiquidGlass(
         )
     }
 }
-// The baked wallpaper underlay samples at 1/3 of the screen; the shader upscales
+// The baked wallpaper underlay samples at 1/4 of the screen; the shader upscales
 // with linear filtering and the baked blur hides the coarser lattice.
 private const val UnderlayDownscale = 4
 // HyperLight's px geometry targets a ~3x baseline; low-density panels need it
@@ -935,10 +933,6 @@ internal fun LayoutCoordinates.pageLocalPosition(
 
 /** Cached Gaussian-blurred wallpaper for the non-soft-glass card path. */
 internal val LocalWyuGaussianUnderlay = compositionLocalOf<WyuGlassUnderlay?> { null }
-
-/** Stable [Backdrop] over the baked soft-glass underlay; wallpaper-only cards
- *  sample this instead of the live recorded layer. */
-internal val LocalWyuBakedBackdrop = compositionLocalOf<Backdrop?> { null }
 
 /**
  * Screen-space blur sigma (px) behind the static card glass. The bottom bar
@@ -1418,13 +1412,7 @@ internal fun Modifier.wyuWallpaperGlass(
         var recordedX = Float.NaN
         var recordedY = Float.NaN
         Modifier.drawWithCache {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            val path = Path()
-            when (outline) {
-                is Outline.Generic -> path.addPath(outline.path)
-                is Outline.Rounded -> path.addRoundRect(outline.roundRect)
-                is Outline.Rectangle -> path.addRect(outline.rect)
-            }
+            val path = shape.wyuOutlinePath(size, layoutDirection, this)
             val scaledPath = android.graphics.Path(path.asAndroidPath()).apply {
                 transform(android.graphics.Matrix().apply { setScale(GlassDrawScale, GlassDrawScale) })
             }
@@ -1518,13 +1506,7 @@ internal fun Modifier.wyuWallpaperBlur(
     val matrix = remember { android.graphics.Matrix() }
     val drawBlur = remember(underlay, shape, paint, matrix) {
         Modifier.drawWithCache {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            val path = Path()
-            when (outline) {
-                is Outline.Generic -> path.addPath(outline.path)
-                is Outline.Rounded -> path.addRoundRect(outline.roundRect)
-                is Outline.Rectangle -> path.addRect(outline.rect)
-            }
+            val path = shape.wyuOutlinePath(size, layoutDirection, this)
             val androidPath = path.asAndroidPath()
             onDrawBehind {
                 // The bitmap spans the whole page; shift it so its top-left

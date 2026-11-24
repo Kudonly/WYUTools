@@ -1,8 +1,6 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,12 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,8 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,8 +39,6 @@ import com.wyutools.app.exam.ExamUiState
 import com.wyutools.app.exam.ExamViewModel
 // Shared Button from WyuGlass.kt keeps the haptic tick and glass styling.
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -69,17 +61,12 @@ fun ExamScreen(
 ) {
     val ui by vm.ui.collectAsState()
     val authUi by authVm.ui.collectAsState()
-    val context = LocalContext.current
 
     LaunchedEffect(Unit) { vm.onEnter() }
     LaunchedEffect(authUi.loggedIn, authUi.restoring) {
         if (!authUi.restoring && authUi.loggedIn) vm.onAuthReady()
     }
-    LaunchedEffect(ui.notice) {
-        val notice = ui.notice ?: return@LaunchedEffect
-        Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
-        vm.consumeNotice()
-    }
+    WyuNoticeToast(ui.notice) { vm.consumeNotice() }
 
     val data = ui.data
     when {
@@ -92,51 +79,27 @@ fun ExamScreen(
         )
 
         authUi.restoring || authUi.autoLoggingIn || authUi.loggingOut ->
-            ExamStatePage(onBack = onBack) { CircularProgressIndicator() }
+            AcademicLoadingPage("考试", onBack)
 
-        !authUi.loggedIn -> ExamStatePage(onBack = onBack) {
-            StateIcon(Icons.Outlined.CalendarMonth, primary = true)
-            Spacer(Modifier.height(20.dp))
-            StateTitle("登录后查看考试")
-            Spacer(Modifier.height(8.dp))
-            StateBody("登录校园统一身份认证后，会从教务系统读取本学期的考试时间、考场与座位。")
-            ui.error?.let {
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    text = it,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Spacer(Modifier.height(28.dp))
-            Button(
-                onClick = onLogin,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColorsPrimary(),
-            ) {
-                Text(text = "登录统一身份认证", fontWeight = FontWeight.SemiBold)
-            }
+        !authUi.loggedIn -> AcademicStatePage("考试", onBack) {
+            AcademicLoginPrompt(
+                icon = Icons.Outlined.CalendarMonth,
+                title = "登录后查看考试",
+                body = "登录校园统一身份认证后，会从教务系统读取本学期的考试时间、考场与座位。",
+                error = ui.error,
+                onLogin = onLogin,
+            )
         }
 
-        ui.loading || ui.error == null ->
-            ExamStatePage(onBack = onBack) { CircularProgressIndicator() }
+        ui.loading || ui.error == null -> AcademicLoadingPage("考试", onBack)
 
-        else -> ExamStatePage(onBack = onBack) {
-            StateIcon(Icons.Outlined.CloudOff, primary = false)
-            Spacer(Modifier.height(20.dp))
-            StateTitle("考试安排加载失败")
-            Spacer(Modifier.height(8.dp))
-            StateBody(ui.error ?: "考试安排加载失败，请稍后重试。")
-            Spacer(Modifier.height(28.dp))
-            Button(
-                onClick = { vm.refresh(showNotice = true) },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColorsPrimary(),
-            ) {
-                Text(text = "重试", fontWeight = FontWeight.SemiBold)
-            }
-        }
+        else -> AcademicErrorPage(
+            title = "考试",
+            heading = "考试安排加载失败",
+            message = ui.error ?: "考试安排加载失败，请稍后重试。",
+            onBack = onBack,
+            onRetry = { vm.refresh(showNotice = true) },
+        )
     }
 }
 
@@ -170,9 +133,9 @@ private fun ExamContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = onRefresh,
                         enabled = !ui.refreshing,
                     )
@@ -221,7 +184,7 @@ private fun ExamContent(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = buildString {
-                        if (data.fetchedAt > 0) append(updatedLabel(data.fetchedAt))
+                        if (data.fetchedAt > 0) append(updatedStampLabel(data.fetchedAt))
                         append("数据来自教务系统，考试安排以教务系统为准。")
                     },
                     style = MiuixTheme.textStyles.footnote2,
@@ -493,102 +456,9 @@ private fun ExamEmptyCard(onRefresh: () -> Unit) {
     }
 }
 
-@Composable
-private fun StateIcon(icon: ImageVector, primary: Boolean) {
-    Box(
-        modifier = Modifier
-            .size(72.dp)
-            .clip(CircleShape)
-            .background(
-                if (primary) {
-                    MiuixTheme.colorScheme.primaryContainer
-                } else {
-                    MiuixTheme.colorScheme.errorContainer
-                },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (primary) {
-                MiuixTheme.colorScheme.onPrimaryContainer
-            } else {
-                MiuixTheme.colorScheme.onErrorContainer
-            },
-            modifier = Modifier.size(34.dp),
-        )
-    }
-}
-
-@Composable
-private fun StateTitle(text: String) {
-    Text(
-        text = text,
-        style = MiuixTheme.textStyles.title2,
-        fontWeight = FontWeight.SemiBold,
-        textAlign = TextAlign.Center,
-    )
-}
-
-@Composable
-private fun StateBody(text: String) {
-    Text(
-        text = text,
-        style = MiuixTheme.textStyles.body2,
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        textAlign = TextAlign.Center,
-    )
-}
-
-@Composable
-private fun ExamStatePage(
-    onBack: () -> Unit,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    WyuPageScaffold(
-        progress = { 0f },
-        maskCollapseHeight = WyuLargeTitleHeight,
-        topBar = {
-            WyuActionBar(
-                title = "考试",
-                collapsedFraction = { 0f },
-                navigationIcon = {
-                    WyuTopBarIconButton(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
-                        onClick = onBack,
-                    )
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
-                .padding(horizontal = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            content = content,
-        )
-    }
-}
-
 private val DayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("M 月 d 日", Locale.CHINA)
-private val ClockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.CHINA)
 
 private fun dayLabel(date: LocalDate): String = date.format(DayFormat).replace(" ", "")
-
-private fun weekdayLabel(date: LocalDate): String = when (date.dayOfWeek.value) {
-    1 -> "周一"
-    2 -> "周二"
-    3 -> "周三"
-    4 -> "周四"
-    5 -> "周五"
-    6 -> "周六"
-    else -> "周日"
-}
 
 private fun countdownLabel(date: LocalDate?, today: LocalDate): String {
     if (date == null) return "待定"
@@ -601,13 +471,4 @@ private fun countdownLabel(date: LocalDate?, today: LocalDate): String {
         days <= 7L -> "$days 天后"
         else -> "${days / 7} 周后"
     }
-}
-
-private fun updatedLabel(fetchedAt: Long): String {
-    val time = runCatching {
-        java.time.Instant.ofEpochMilli(fetchedAt)
-            .atZone(java.time.ZoneId.systemDefault())
-            .format(ClockFormat)
-    }.getOrNull() ?: return ""
-    return "更新于 $time · "
 }

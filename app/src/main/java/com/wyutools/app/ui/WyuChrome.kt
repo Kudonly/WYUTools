@@ -3,7 +3,6 @@ package com.wyutools.app.ui
 import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
-import android.view.RoundedCorner
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -101,7 +100,6 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -332,11 +330,6 @@ internal object WyuMorphPageState {
      *  composition: a capture sets it and records in the very same frame. */
     var flyingRoute by mutableStateOf<String?>(null)
 
-    /** Suspends until the return has landed and its 50ms margin has elapsed. */
-    suspend fun awaitReturnSettled() {
-        if (returnSettling) snapshotFlow { returnSettling }.first { !it }
-    }
-
     /** Returns once no open morph is running, so refreshes never land mid-animation. */
     suspend fun awaitSettled() {
         if (!morphSettled) snapshotFlow { morphSettled }.first { it }
@@ -457,26 +450,6 @@ fun WyuPageScaffold(
     // per-card sampling offset (that re-records every glass layer each frame).
     val contentCoordinates = remember { mutableStateOf<LayoutCoordinates?>(null) }
     val glassUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
-    // Sharp (unblurred) copy for the upstream glass baked path: the miuix
-    // pipeline applies the blur itself, so a pre-blurred source would double
-    // up. Baking blur into this one would also force the pipeline radius past
-    // its downsampling floor and peg the GPU.
-    val rawUnderlayState = remember { mutableStateOf<WyuGlassUnderlay?>(null) }
-    // One stable backdrop per scaffold: cards sample the baked wallpaper
-    // through it and never rebuild the glass node when the underlay is
-    // regenerated (wallpaper or dim changes).
-    val bakedBackdrop = remember {
-        WyuBitmapBackdrop(rawUnderlayState) { contentCoordinates.value }
-    }
-    // The wallpaper bitmap loads asynchronously after the first composition,
-    // and the baked copy is rebuilt when it lands / the page bounds settle.
-    // Identity change forces the glass draw nodes to invalidate their cached
-    // backdrop sample; a stable wrapper alone renders the first empty frame
-    // forever until the user switches pages.
-    val bakedUnderlay = rawUnderlayState.value
-    val publishedBakedBackdrop = remember(bakedBackdrop, bakedUnderlay) {
-        if (bakedUnderlay != null) WyuDelegatingBackdrop(bakedBackdrop) else null
-    }
     val bounds = pageBounds.value
     val presetWallpaperSource = remember(
         wallpaper, dark, surface, bounds?.width, bounds?.height,
@@ -521,28 +494,9 @@ fun WyuPageScaffold(
     } else {
         null
     }
-    if (softGlassEnabled && customWallpaper != null && bounds != null) {
-        val current = rawUnderlayState.value
-        if (current == null || current.source !== customWallpaper ||
-            current.origin != bounds.topLeft ||
-            current.widthPx != bounds.width.roundToInt() ||
-            current.heightPx != bounds.height.roundToInt()
-        ) {
-            // First frame must already show the static material.
-            rawUnderlayState.value = wyuGlassUnderlay(
-                image = customWallpaper,
-                dim = customDim,
-                blurSigmaPx = 0f,
-                widthPx = bounds.width.roundToInt(),
-                heightPx = bounds.height.roundToInt(),
-                origin = bounds.topLeft,
-            )
-        }
-    }
     LaunchedEffect(customWallpaper, customDim, softGlassEnabled, underlayBlurPercent, bounds) {
         if (!softGlassEnabled || customWallpaper == null) {
             glassUnderlayState.value = null
-            rawUnderlayState.value = null
             return@LaunchedEffect
         }
         val b = bounds ?: return@LaunchedEffect
@@ -561,31 +515,6 @@ fun WyuPageScaffold(
                 image = customWallpaper,
                 dim = customDim,
                 blurSigmaPx = sigma,
-                widthPx = w,
-                heightPx = h,
-                origin = b.topLeft,
-            )
-        }
-    }
-    // Sharp copy only follows wallpaper/dim/bounds; the blur slider must not
-    // rebuild it (the pipeline owns the blur for this source).
-    LaunchedEffect(customWallpaper, customDim, softGlassEnabled, bounds) {
-        if (!softGlassEnabled || customWallpaper == null) return@LaunchedEffect
-        val b = bounds ?: return@LaunchedEffect
-        val w = b.width.roundToInt()
-        val h = b.height.roundToInt()
-        val current = rawUnderlayState.value
-        if (current != null &&
-            current.matches(customWallpaper, customDim, 0f, w, h, b.topLeft)
-        ) {
-            return@LaunchedEffect
-        }
-        delay(120)
-        rawUnderlayState.value = withContext(Dispatchers.Default) {
-            wyuGlassUnderlay(
-                image = customWallpaper,
-                dim = customDim,
-                blurSigmaPx = 0f,
                 widthPx = w,
                 heightPx = h,
                 origin = b.topLeft,
@@ -738,7 +667,6 @@ fun WyuPageScaffold(
             LocalWyuGlassReady provides (glassLayerReady && pageLayerReady),
             LocalWyuGlassUnderlay provides glassUnderlay,
             LocalWyuGaussianUnderlay provides gaussianUnderlay,
-            LocalWyuBakedBackdrop provides publishedBakedBackdrop,
             LocalWyuPageCoordinates provides { contentCoordinates.value },
             LocalWyuCollapseBoost provides { pull.collapseBoost },
         ) {
@@ -1106,11 +1034,75 @@ private fun WyuSwitchingTitle(
 internal const val TopBarGlassRefractionPx = 56f
 internal const val TopBarGlassReflectionPx = 96f
 
-// The tab pill is only 38dp tall, so card-sized edge and refraction values
-// exceed its 114px capture padding and leave the top rim looking unfilled.
-private const val TabsGlassEdgePx = 40f
-private const val TabsGlassEdgePow = 2.2f
-private const val TabsGlassRefractionPx = 56f
+/**
+ * 一块控件玻璃底：投影、材质、裁剪，以及「要不要再叠容器色」。
+ *
+ * [onGlass] 为 true 表示材质已经交给着色器（自研液态或上游柔光），调用方
+ * **不要**再叠 `wyuGlassControlWash()`：shader 自带 tint，叠一层实底色会双重
+ * 取色，控件就比卡片深一截。
+ */
+internal class WyuControlGlass(
+    val modifier: Modifier,
+    val onGlass: Boolean,
+    val dark: Boolean,
+)
+
+/**
+ * 顶栏圆钮、文字胶囊、分段控件、底栏共用的一块玻璃底。
+ *
+ * 这几处原来各写一遍「液态 / 柔光 / 纯模糊」三选一的 `when`，参数还各读一次。
+ * [wash] 是不走着色器时要压的底色（各控件深浅色不一样，由调用方给）。
+ */
+@Composable
+internal fun rememberWyuControlGlass(
+    backdrop: Backdrop?,
+    shape: Shape,
+    cornerRadius: Dp,
+    blurRadius: Float,
+    wash: Color,
+    elevation: Dp = 3.dp,
+): WyuControlGlass {
+    val style = rememberWyuGlassStyle()
+    val glassReady = LocalWyuGlassReady.current
+    val liquidActive = backdrop != null && style.liquidGlass
+    val useUpstreamGlass = backdrop != null && style.softGlass && glassReady && !style.liquid
+    val glassModifier = when {
+        backdrop == null -> Modifier
+        liquidActive -> Modifier.wyuLiquidGlass(
+            backdrop = backdrop,
+            shape = shape,
+            cornerRadius = cornerRadius,
+            tuning = style.liquidTuning,
+            dark = style.dark,
+            baseTint = wyuLiquidControlTint(),
+            blurPercent = style.liquidBlur,
+            refractionThicknessPx = TopBarGlassRefractionPx,
+            reflectionThicknessPx = TopBarGlassReflectionPx,
+        )
+        useUpstreamGlass -> Modifier.wyuUpstreamCardGlass(
+            backdrop = backdrop,
+            cornerRadius = cornerRadius,
+            tuning = style.tuning,
+            dark = style.dark,
+            blurPercent = style.blur,
+            tint = wyuSoftGlassSurfaceTint(),
+        )
+        else -> Modifier.textureBlur(backdrop = backdrop, shape = shape, blurRadius = blurRadius)
+    }
+    val onGlass = liquidActive || useUpstreamGlass
+    val modifier = Modifier
+        .shadow(
+            elevation = elevation,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.10f),
+            spotColor = Color.Black.copy(alpha = 0.16f),
+        )
+        .then(glassModifier)
+        .clip(shape)
+        .background(if (onGlass) Color.Transparent else wash)
+    return WyuControlGlass(modifier = modifier, onGlass = onGlass, dark = style.dark)
+}
 
 /**
  * The frosted surface shared by the top-bar buttons and the small text pills.
@@ -1122,86 +1114,31 @@ private const val TabsGlassRefractionPx = 56f
 internal fun WyuChromeGlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
-    glassShape: WyuSoftGlassShape = WyuSoftGlassShape.Circle,
     cornerRadius: Dp = 0.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val dark = LocalWyuDarkTheme.current
-    val backdrop = LocalWyuPageBackdrop.current
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
-    val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
-    val useSoftGlass = softGlass && wyuSoftGlassSupported && backdrop != null
-    val glassReady = LocalWyuGlassReady.current
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
+    val glass = rememberWyuControlGlass(
+        backdrop = LocalWyuPageBackdrop.current,
+        shape = shape,
+        cornerRadius = cornerRadius,
+        blurRadius = 24f,
+        // 卡片同色，而不是写死的白：深色模式下白色会让这些玻璃钮比卡片亮
+        // 出一截，看着就是"白块"。
+        wash = wyuGlassControlWash(),
+    )
+    val dark = glass.dark
     Box(
-        modifier = modifier.then(
-            Modifier
-                .shadow(
-                    elevation = 3.dp,
-                    shape = shape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.10f),
-                    spotColor = Color.Black.copy(alpha = 0.16f),
-                )
-                .then(
-                    when {
-                        backdrop == null -> Modifier
-                        useSoftGlass && isLiquid -> Modifier.wyuLiquidGlass(
-                            backdrop = backdrop,
-                            shape = shape,
-                            cornerRadius = cornerRadius,
-                            tuning = liquidTuning,
-                            dark = dark,
-                            baseTint = wyuLiquidControlTint(),
-                            blurPercent = liquidBlur,
-                            refractionThicknessPx = TopBarGlassRefractionPx,
-                            reflectionThicknessPx = TopBarGlassReflectionPx,
-                        )
-                        useUpstreamGlass -> Modifier.wyuUpstreamCardGlass(
-                            backdrop = backdrop,
-                            cornerRadius = cornerRadius,
-                            tuning = glassTuningForTheme,
-                            dark = dark,
-                            blurPercent = softGlassBlur,
-                            tint = wyuSoftGlassSurfaceTint(),
-                        )
-
-                        else -> Modifier.textureBlur(
-                            backdrop = backdrop,
-                            shape = shape,
-                            blurRadius = 24f,
-                        )
-                    },
-                )
-                .clip(shape)
-                .then(
-                    if (useUpstreamGlass || (useSoftGlass && isLiquid)) {
-                        // shader 自带 tint，再叠实底色会双重取色，
-                        // 导致控件比卡片深一截。
-                        Modifier
-                    } else {
-                        // 卡片同色，而不是写死的白：深色模式下白色会让
-                        // 这些玻璃钮比卡片亮出一截，看着就是"白块"。
-                        Modifier.background(wyuGlassControlWash())
-                    },
-                )
-                .border(
-                    width = 0.5.dp,
-                    color = if (dark) {
-                        Color.White.copy(alpha = 0.14f)
-                    } else {
-                        Color.Black.copy(alpha = 0.06f)
-                    },
-                    shape = shape,
-                )
-        ,
-        ),
+        modifier = modifier
+            .then(glass.modifier)
+            .border(
+                width = 0.5.dp,
+                color = if (dark) {
+                    Color.White.copy(alpha = 0.14f)
+                } else {
+                    Color.Black.copy(alpha = 0.06f)
+                },
+                shape = shape,
+            ),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -1223,7 +1160,6 @@ internal fun WyuGlassCapsule(
     WyuChromeGlassSurface(
         modifier = modifier,
         shape = shape,
-        glassShape = WyuSoftGlassShape.RoundedRect,
         cornerRadius = cornerRadius,
         content = content,
     )
@@ -1349,7 +1285,6 @@ fun WyuGlassPillButton(
         WyuChromeGlassSurface(
             modifier = if (width != null) Modifier.fillMaxSize() else Modifier.fillMaxHeight(),
             shape = shape,
-            glassShape = WyuSoftGlassShape.RoundedRect,
             cornerRadius = WyuGlassPillCorner,
         ) {
             Text(
@@ -1364,6 +1299,7 @@ fun WyuGlassPillButton(
     }
 }
 
+/** Icon-only top bar action; [contentDescription] is the accessibility label. */
 @Composable
 fun WyuTopBarIconButton(
     icon: ImageVector,
@@ -1375,24 +1311,6 @@ fun WyuTopBarIconButton(
     WyuTopBarGlassButton(
         icon = icon,
         contentDescription = contentDescription,
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-    )
-}
-
-/** Icon-only top bar action; [label] is kept as the accessibility description. */
-@Composable
-fun WyuTopBarAction(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    WyuTopBarGlassButton(
-        icon = icon,
-        contentDescription = label,
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
@@ -1461,17 +1379,6 @@ fun WyuFloatingTabs(
 
     val shape = RoundedCornerShape(percent = 50)
     val glass = backdrop != null
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val softGlassTuning by WyuAppearance.softGlassTuning.collectAsState()
-    val glassTuningForTheme = softGlassTuning.resolvedFor(LocalWyuDarkTheme.current)
-    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
-    val glassReady = LocalWyuGlassReady.current
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
     val scheme = MiuixTheme.colorScheme
     val containerColor = when {
         // 与卡片同源取色：深色下原来的 #2C2C2C 比卡片亮，看着发白。
@@ -1479,6 +1386,14 @@ fun WyuFloatingTabs(
         dark -> Color(0xFF2C2C2C)
         else -> Color.White
     }
+    val controlGlass = rememberWyuControlGlass(
+        backdrop = backdrop,
+        shape = shape,
+        cornerRadius = 19.dp,
+        blurRadius = 30f,
+        wash = containerColor,
+        elevation = 10.dp,
+    )
     val indicatorColor = when {
         lightThumb && dark -> Color.White.copy(alpha = 0.22f)
         lightThumb -> Color.White
@@ -1499,51 +1414,7 @@ fun WyuFloatingTabs(
         modifier = modifier
             .fillMaxWidth()
             .height(38.dp)
-            .shadow(
-                elevation = 10.dp,
-                shape = shape,
-                clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.10f),
-                spotColor = Color.Black.copy(alpha = 0.16f),
-            )
-            .then(
-                when {
-                    backdrop == null -> Modifier
-                    useSoftGlass && isLiquid -> Modifier.wyuLiquidGlass(
-                        backdrop = backdrop,
-                        shape = RoundedCornerShape(19.dp),
-                        cornerRadius = 19.dp,
-                        tuning = liquidTuning,
-                        dark = dark,
-                        baseTint = wyuLiquidControlTint(),
-                        blurPercent = liquidBlur,
-                        refractionThicknessPx = TopBarGlassRefractionPx,
-                        reflectionThicknessPx = TopBarGlassReflectionPx,
-                    )
-                    useUpstreamGlass -> Modifier.wyuUpstreamCardGlass(
-                        backdrop = backdrop,
-                        cornerRadius = 19.dp,
-                        tuning = glassTuningForTheme,
-                        dark = dark,
-                        blurPercent = softGlassBlur,
-                        tint = wyuSoftGlassSurfaceTint(),
-                    )
-
-                    else -> Modifier.textureBlur(
-                        backdrop = backdrop,
-                        shape = shape,
-                        blurRadius = 30f,
-                    )
-                },
-            )
-            .clip(shape)
-            .background(
-                if (useUpstreamGlass || (useSoftGlass && isLiquid)) {
-                    Color.Transparent
-                } else {
-                    containerColor
-                },
-            )
+            .then(controlGlass.modifier)
             .border(0.5.dp, borderColor, shape)
             .padding(3.dp)
             .pointerInput(options.size, lastIndex) {
@@ -2228,36 +2099,30 @@ fun WyuNavigatorBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val dark = LocalWyuDarkTheme.current
+    val glassStyle = rememberWyuGlassStyle()
+    val dark = glassStyle.dark
     val bottomMargin = rememberWyuNavigatorBottomMargin()
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val backdrop = LocalWyuPageBackdrop.current
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
     val lastIndex = WyuNavTabs.lastIndex
     val cellWidth = 88.dp
     val inset = 3.dp
     val pillWidth = cellWidth * WyuNavTabs.size + inset * 2
     val pillShape = RoundedCornerShape(percent = 50)
-    val contentColor = if (dark) Color.White else Color.Black
+    // 与顶栏标题同一取色：当前页强调不再是写死的纯白/纯黑。
+    val contentColor = MiuixTheme.colorScheme.onSurface
     val indicatorColor = if (dark) {
         Color.White.copy(alpha = 0.16f)
     } else {
         Color.Black.copy(alpha = 0.10f)
     }
-    val tuning by WyuAppearance.softGlassTuning.collectAsState()
-    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
     val glassContainerColor = when {
         // Default theme cards use surfaceContainer @ CardGlassAlpha; keep the
         // bottom bar on exactly the same wash instead of the soft-glass tint.
-        !softGlass && !isLiquid -> wyuGlassControlWash()
-        dark -> Color.Black.copy(alpha = tuningForTheme.cardTintAlphaDark)
-        else -> Color.White.copy(alpha = tuningForTheme.cardTintAlphaLight)
+        !glassStyle.softGlassOn && !glassStyle.liquid -> wyuGlassControlWash()
+        dark -> Color.Black.copy(alpha = glassStyle.tuning.cardTintAlphaDark)
+        else -> Color.White.copy(alpha = glassStyle.tuning.cardTintAlphaLight)
     }
     val glassBackdrop = backdrop
     val barBackdrop = rememberLayerBackdrop()
@@ -2268,8 +2133,7 @@ fun WyuNavigatorBar(
     }
     // One fixed rim for every glass surface: the highlight belongs to the
     // material, not to the way the phone happens to be held.
-    val pillSpecular = if (glassBackdrop != null) WyuGlassSpecular else null
-    val thumbSpecular = if (glassBackdrop != null) WyuGlassSpecular else null
+    val glassSpecular = if (glassBackdrop != null) WyuGlassSpecular else null
 
     val initialFraction = selectionFraction().coerceIn(0f, lastIndex.toFloat())
     val damped = remember {
@@ -2384,15 +2248,15 @@ fun WyuNavigatorBar(
                         glassBackdrop == null -> Modifier
                         // 底栏玻璃背景：液态玻璃主题用本地 shader，参数独立；
                         // 悬浮液态按钮（thumb）仍走原来的 lens 液态玻璃路径。
-                        wyuSoftGlassSupported && isLiquid -> Modifier
+                        glassStyle.liquidGlass -> Modifier
                             .wyuLiquidGlass(
                                 backdrop = glassBackdrop,
                                 shape = pillShape,
                                 cornerRadius = WyuNavigatorBarHeight / 2,
-                                tuning = liquidTuning,
+                                tuning = glassStyle.liquidTuning,
                                 dark = dark,
                                 baseTint = wyuLiquidControlTint(),
-                                blurPercent = liquidBlur,
+                                blurPercent = glassStyle.liquidBlur,
                             )
                             .graphicsLayer {
                                 val width = size.width.coerceAtLeast(1f)
@@ -2410,13 +2274,13 @@ fun WyuNavigatorBar(
 
                         // 底栏玻璃背景与卡片同一套上游材质；悬浮液态按钮（thumb）
                         // 仍走原来的 lens 液态玻璃路径。
-                        wyuSoftGlassSupported -> Modifier
+                        glassStyle.softGlass -> Modifier
                             .wyuUpstreamCardGlass(
                                 backdrop = glassBackdrop,
                                 cornerRadius = WyuNavigatorBarHeight / 2,
-                                tuning = tuningForTheme,
+                                tuning = glassStyle.tuning,
                                 dark = dark,
-                                blurPercent = if (isLiquid) liquidBlur else if (softGlass) softGlassBlur else 100,
+                                blurPercent = if (glassStyle.softGlassOn) glassStyle.blur else 100,
                                 tint = glassContainerColor,
                             )
                             .graphicsLayer {
@@ -2441,7 +2305,11 @@ fun WyuNavigatorBar(
                                 vibrancy()
                                 forceDownscaleExp(1)
                                 val blurRadius = wyuSoftGlassScreenBlurPx(
-                                    if (isLiquid) liquidBlur else if (softGlass) softGlassBlur else 100,
+                                    when {
+                                        glassStyle.liquid -> glassStyle.liquidBlur
+                                        glassStyle.softGlassOn -> glassStyle.blur
+                                        else -> 100
+                                    },
                                 )
                                 if (blurRadius > 0.5f) blur(blurRadius, blurRadius)
                                 lens(
@@ -2450,7 +2318,7 @@ fun WyuNavigatorBar(
                                 )
                             },
                             onDrawFront = {
-                                drawWyuSpecular(pillSpecular ?: WyuGlassSpecular, 0.75f)
+                                drawWyuSpecular(glassSpecular ?: WyuGlassSpecular, 0.75f)
                             },
                             onDrawSurface = {
                                 drawRect(glassContainerColor)
@@ -2628,7 +2496,7 @@ fun WyuNavigatorBar(
                 }
             }
         }
-        if (thumbBackdrop != null && thumbSpecular != null) {
+        if (thumbBackdrop != null && glassSpecular != null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -2651,7 +2519,7 @@ fun WyuNavigatorBar(
                             )
                         },
                         onDrawFront = {
-                            drawWyuSpecular(thumbSpecular, damped.pressProgress)
+                            drawWyuSpecular(glassSpecular, damped.pressProgress)
                         },
                         layerBlock = {
                             val velocity = damped.velocity / 10f

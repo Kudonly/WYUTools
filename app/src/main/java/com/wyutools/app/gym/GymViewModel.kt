@@ -6,6 +6,7 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wyutools.app.auth.sanitizeWyuText
+import com.wyutools.app.core.friendlyAccessMessage
 import com.wyutools.app.ui.WyuMorphPageState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,10 +15,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.time.LocalDate
 
 data class GymNotice(
@@ -425,11 +422,7 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun friendlyMessage(e: Exception): String = when (e) {
         is GymException -> e.message ?: "操作失败"
-        is UnknownHostException -> "无法连接学校服务器，请连接校园网后重试"
-        is ConnectException -> "无法连接学校服务器，请确认已连接校园网"
-        is SocketTimeoutException -> "连接学校服务器超时，请稍后重试"
-        is IOException -> "网络请求失败，请检查校园网连接"
-        else -> "操作失败，请稍后重试"
+        else -> friendlyAccessMessage(e, campusOnly = true) ?: "操作失败，请稍后重试"
     }
 
     companion object {

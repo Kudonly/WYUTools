@@ -25,14 +25,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +37,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -133,19 +129,11 @@ fun WyuOverlayDialog(
     }
     val backdrop = WyuPageBackdrops.current
     val surface = MiuixTheme.colorScheme.background
-    val dark = LocalWyuDarkTheme.current
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val tuning by WyuAppearance.softGlassTuning.collectAsState()
-    val tuningForTheme = tuning.resolvedFor(LocalWyuDarkTheme.current)
-    val useSoftGlass = backdrop != null && softGlass && wyuSoftGlassSupported
+    val glassStyle = rememberWyuGlassStyle()
+    val dark = glassStyle.dark
     val glassReady = LocalWyuGlassReady.current
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val useUpstreamGlass = useSoftGlass && glassReady && !isLiquid
-    val useLiquidGlass = useSoftGlass && isLiquid
+    val useUpstreamGlass = backdrop != null && glassStyle.softGlass && glassReady && !glassStyle.liquid
+    val useLiquidGlass = backdrop != null && glassStyle.liquidGlass
     val cardColor = when {
         backdrop == null -> surface
         useUpstreamGlass || useLiquidGlass -> Color.Transparent
@@ -158,19 +146,19 @@ fun WyuOverlayDialog(
                 backdrop = backdrop,
                 shape = dialogShape,
                 cornerRadius = DialogCardCorner,
-                tuning = liquidTuning,
+                tuning = glassStyle.liquidTuning,
                 dark = dark,
                 baseTint = wyuLiquidControlTint(),
-                blurPercent = liquidBlur,
+                blurPercent = PopupGlassBlurPercent,
             )
         } else if (useUpstreamGlass) {
             Modifier.wyuUpstreamCardGlass(
                 backdrop = backdrop,
                 cornerRadius = DialogCardCorner,
-                tuning = tuningForTheme,
+                tuning = glassStyle.tuning,
                 dark = dark,
-                // Same material as the cards: one blur setting, one tint source.
-                blurPercent = softGlassBlur,
+                // 模糊固定在 40% 档：弹窗要保证背后文字不透出来，不随设置变化。
+                blurPercent = PopupGlassBlurPercent,
                 tint = wyuSoftGlassSurfaceTint(),
             )
         } else {
@@ -300,7 +288,6 @@ fun WyuOverlayDialog(
 
 enum class WyuDialogButtonStyle {
     Primary,
-    Secondary,
     Destructive,
     Cancel,
 }
@@ -323,13 +310,6 @@ fun WyuDialogButton(
     }
     val colors = when (style) {
         WyuDialogButtonStyle.Primary -> ButtonDefaults.buttonColorsPrimary()
-        WyuDialogButtonStyle.Secondary -> ButtonDefaults.buttonColors(
-            color = neutralFill,
-            disabledColor = neutralFill.copy(alpha = neutralFill.alpha * 0.5f),
-            contentColor = MiuixTheme.colorScheme.onBackground,
-            disabledContentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                .copy(alpha = 0.5f),
-        )
         WyuDialogButtonStyle.Destructive -> ButtonDefaults.buttonColors(
             color = MiuixTheme.colorScheme.error,
             disabledColor = MiuixTheme.colorScheme.error.copy(alpha = 0.35f),

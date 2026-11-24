@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,7 +37,6 @@ import com.wyutools.app.academics.PhysicalData
 import com.wyutools.app.academics.PhysicalTest
 import com.wyutools.app.academics.PhysicalUiState
 import com.wyutools.app.auth.AuthViewModel
-import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -75,8 +73,7 @@ fun PhysicalScreen(
             onOpen = { onOpenDetail(it.termName) },
         )
 
-        authUi.restoring || authUi.autoLoggingIn ->
-            AcademicStatePage("体测", onBack) { CircularProgressIndicator() }
+        authUi.restoring || authUi.autoLoggingIn -> AcademicLoadingPage("体测", onBack)
 
         !authUi.loggedIn -> AcademicStatePage("体测", onBack) {
             AcademicLoginPrompt(
@@ -88,21 +85,15 @@ fun PhysicalScreen(
             )
         }
 
-        ui.loading || ui.error == null ->
-            AcademicStatePage("体测", onBack) { CircularProgressIndicator() }
+        ui.loading || ui.error == null -> AcademicLoadingPage("体测", onBack)
 
-        else -> AcademicStatePage(
+        else -> AcademicErrorPage(
             title = "体测",
+            heading = "体测成绩加载失败",
+            message = ui.error ?: "体测成绩加载失败，请稍后重试。",
             onBack = onBack,
-            showRefresh = true,
             onRefresh = { vm.refreshPhysical() },
-        ) {
-            AcademicGlyph(Icons.Outlined.CloudOff, primary = false)
-            Spacer(Modifier.height(20.dp))
-            AcademicTitle("体测成绩加载失败")
-            Spacer(Modifier.height(8.dp))
-            AcademicBody(ui.error ?: "体测成绩加载失败，请稍后重试。", error = true)
-        }
+        )
     }
 }
 
@@ -132,9 +123,9 @@ private fun PhysicalContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = onRefresh,
                         enabled = !ui.refreshing,
                     )

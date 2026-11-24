@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.wyutools.app.core.friendlyAccessMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -521,17 +522,8 @@ class ElecViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun friendlyMessage(e: Exception): String = when (e) {
         is ElecException -> e.message ?: "查询失败"
-        is UnknownHostException -> "无法连接服务器，请连接校园网后重试"
-        is ConnectException -> "无法连接电费服务器，请确认已连接校园网"
-        is SocketTimeoutException -> "连接超时，请检查校园网后重试"
-        is IOException -> {
-            if (e.message.orEmpty().contains("CLEARTEXT", ignoreCase = true)) {
-                "系统阻止了明文 HTTP 请求，请更新 App 后重试"
-            } else {
-                "网络请求失败，请检查是否连接校园网"
-            }
-        }
-        else -> "查询失败，请稍后重试"
+        else -> friendlyAccessMessage(e, campusOnly = true, serverLabel = "电费服务器")
+            ?: "查询失败，请稍后重试"
     }
 }
 

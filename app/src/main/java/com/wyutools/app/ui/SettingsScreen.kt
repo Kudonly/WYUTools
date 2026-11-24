@@ -52,7 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -67,7 +66,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.wyutools.app.auth.AuthViewModel
-import com.wyutools.app.update.ReleaseInfo
 import com.wyutools.app.update.UpdateChecker
 import com.wyutools.app.update.UpdateResult
 import kotlinx.coroutines.launch
@@ -848,44 +846,6 @@ private fun PaletteStripe(colors: List<Color>?, height: Dp) {
             )
         }
     }
-}
-
-/** 44dp preview tile: frosted wash or liquid-glass highlight. */
-@Composable
-private fun ThemeSwatch(theme: WyuCardTheme) {
-    val scheme = MiuixTheme.colorScheme
-    val shape = RoundedCornerShape(14.dp)
-    val brush = when (theme) {
-        WyuCardTheme.Default -> Brush.linearGradient(
-            listOf(
-                scheme.primary.copy(alpha = 0.28f),
-                scheme.surfaceContainerHigh.copy(alpha = 0.9f),
-            ),
-        )
-
-        WyuCardTheme.SoftGlass -> Brush.linearGradient(
-            listOf(
-                Color.White.copy(alpha = 0.92f),
-                scheme.primary.copy(alpha = 0.32f),
-            ),
-        )
-
-        WyuCardTheme.Liquid -> Brush.linearGradient(
-            listOf(
-                scheme.primary.copy(alpha = 0.5f),
-                Color.White.copy(alpha = 0.85f),
-                scheme.primary.copy(alpha = 0.24f),
-            ),
-        )
-
-    }
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .clip(shape)
-            .background(brush)
-            .border(0.5.dp, scheme.outline.copy(alpha = 0.3f), shape),
-    )
 }
 
 private const val ShiyiUrl = "https://github.com/aglorice/shiyi"

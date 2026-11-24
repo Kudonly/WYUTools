@@ -3,7 +3,7 @@ package com.wyutools.app.ui
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.FitnessCenter
@@ -70,7 +70,7 @@ enum class WyuTool(
             Lxt -> Icons.Outlined.WaterDrop
             Elec -> Icons.Outlined.Bolt
             Gym -> Icons.Outlined.SportsBasketball
-            Exam -> Icons.Outlined.Assignment
+            Exam -> Icons.AutoMirrored.Outlined.Assignment
             Grades -> Icons.Outlined.School
             Eval -> Icons.Outlined.RateReview
             Physical -> Icons.Outlined.FitnessCenter

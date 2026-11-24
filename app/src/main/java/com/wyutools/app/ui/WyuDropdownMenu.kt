@@ -33,7 +33,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,8 +91,8 @@ import kotlin.math.roundToInt
  * - 面板从 **69% 宽、高宽比 0.2** 的扁胶囊长开——尺寸和中心各跑一条弹簧，
  *   进场时中心比尺寸快、出场对调，所以轨迹是弧线而不是直线拉伸；
  * - 圆角 4dp → 24dp，内容按 0.69 → 1 等比缩放；
- * - 进场 50ms 淡入，尺寸过 10% 之前整块不可见；出场 260ms 淡出，
- *   同时把整块面板（含底色）按 30dp 高斯模糊——收起是「缩回按钮、糊掉、消失」；
+ * - 进场 50ms 淡入，尺寸过 10% 之前整块不可见；出场 220ms 淡出，
+ *   同时把整块面板（含底色）按 18dp 高斯模糊——收起是「缩回按钮、糊掉、消失」；
  * - 右边缘贴住触发控件右边缘，下方放不下时翻到上方，离屏幕边缘至少 12dp。
  *
  * @param expanded 是否展开。
@@ -141,7 +140,7 @@ internal fun WyuDropdownMenu(
         },
         label = "wyuDropdownPosition",
     ) { if (it) 1f else 0f }
-    // 淡入 50ms、淡出 260ms，都是线性。淡出比参考实现的 200ms 长一点，
+    // 淡入 50ms 线性、淡出 220ms 先快后慢。淡出比参考实现的 200ms 长一点，
     // 因为面板要先缩回按钮再消失，太短会在半路上没影。
     val fade by transition.animateFloat(
         transitionSpec = {
@@ -152,7 +151,7 @@ internal fun WyuDropdownMenu(
         },
         label = "wyuDropdownFade",
     ) { if (it) 1f else 0f }
-    // 模糊是单向的：进场直接吸附到清晰，只有出场才线性涨到 30dp（与淡出同窗）。
+    // 模糊是单向的：进场直接吸附到清晰，只有出场才线性涨到 18dp（240ms 窗口）。
     val sharpness by transition.animateFloat(
         transitionSpec = {
             if (targetState) snap() else tween(durationMillis = 240, easing = LinearEasing)
@@ -175,9 +174,8 @@ internal fun WyuDropdownMenu(
     var popupOrigin by remember { mutableStateOf<Offset?>(null) }
     val hostView = LocalView.current
     LaunchedEffect(hostView) { hostOrigin = hostView.rootView.screenOrigin() }
-    val dark = LocalWyuDarkTheme.current
-    val tuning by WyuAppearance.softGlassTuning.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
+    val glassStyle = rememberWyuGlassStyle()
+    val dark = glassStyle.dark
     // 玻璃面板：模糊身后的页面内容，再压一层卡片同档的容器色。
     val glassBackdrop = LocalWyuPageBackdrop.current
     val gaussianUnderlay = LocalWyuGaussianUnderlay.current
@@ -185,17 +183,15 @@ internal fun WyuDropdownMenu(
         // 没有可模糊的底时（不支持模糊的机器）退回不透明容器色，
         // 否则半透明面板会直接透出下面的页面。
         glassBackdrop == null -> MiuixTheme.colorScheme.surfaceContainer
-        else -> MiuixTheme.colorScheme.surfaceContainer.copy(alpha = tuning.cardTintAlpha(dark))
+        else -> MiuixTheme.colorScheme.surfaceContainer.copy(
+            alpha = glassStyle.tuning.cardTintAlpha(dark),
+        )
     }
     // 接入 miuix-glass：面板改为官方 GlassStyle 渲染，保留同样的容器色
     // 作为 tint，视觉上仍是原来的菜单，只是边缘折射与高光交给上游着色器。
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
-    val useUpstreamGlass = glassBackdrop != null && !isLiquid &&
-        currentCardTheme == WyuCardTheme.SoftGlass
-    val useLiquidGlass = glassBackdrop != null && isLiquid && wyuSoftGlassSupported
+    val useUpstreamGlass = glassBackdrop != null && !glassStyle.liquid &&
+        glassStyle.cardTheme == WyuCardTheme.SoftGlass
+    val useLiquidGlass = glassBackdrop != null && glassStyle.liquid && wyuSoftGlassSupported
     val strokeColor = if (dark) {
         Color.White.copy(alpha = 0.08f)
     } else {
@@ -287,9 +283,9 @@ internal fun WyuDropdownMenu(
                     val frame = arcFrame(placement, anchorInPopup, end, expanded, size, position, density)
 
                     val shape = RoundedCornerShape(with(density) { frame.cornerRadius.toDp() })
-                    // 与卡片同一份参数：样式只建一次，tint 按卡片 shader 的口径
-                    // 预先乘上 tintStrength，管路那边照旧用颜色自身 alpha。
-                    val panelGlassStyle = wyuUpstreamGlassStyle(tuning, dark, softGlassBlur)
+                    // 与卡片同一份 tint 参数，但模糊固定在 40% 档：
+                    // 菜单盖在内容上，太透会看不清字，不随设置变化。
+                    val panelGlassStyle = wyuUpstreamGlassStyle(glassStyle.tuning, dark, PopupGlassBlurPercent)
                     // 内容按 0.69 → 1 等比缩放，缩放中心就是面板中心，所以永远严丝合缝。
                     val contentScale = ArcStartWidth + (1f - ArcStartWidth) * size.coerceAtLeast(0f)
                     // 尺寸还没过 10% 时整块不可见：出现在眼前的是个清晰的小胶囊，
@@ -326,10 +322,10 @@ internal fun WyuDropdownMenu(
                                         backdrop = sampledBackdrop ?: glassBackdrop,
                                         shape = shape,
                                         cornerRadius = with(density) { frame.cornerRadius.toDp() },
-                                        tuning = liquidTuning,
+                                        tuning = glassStyle.liquidTuning,
                                         dark = dark,
                                         baseTint = wyuLiquidControlTint(),
-                                        blurPercent = liquidBlur,
+                                        blurPercent = PopupGlassBlurPercent,
                                     )
                                 } else if (popupGaussian != null) {
                                     Modifier.wyuWallpaperBlur(
@@ -339,7 +335,7 @@ internal fun WyuDropdownMenu(
                                         // 只有窗口坐标能对上。
                                         pageSpace = false,
                                     )
-                                } else if (useUpstreamGlass && glassBackdrop != null) {
+                                } else if (useUpstreamGlass) {
                                     Modifier.glass(
                                         backdrop = sampledBackdrop ?: glassBackdrop,
                                         shape = GlassShape(
@@ -553,10 +549,6 @@ private val LocalDropdownWidths = staticCompositionLocalOf<DropdownWidths?> { nu
 
 /** 一行的固定开销：左右各 7dp 外边距 + 13dp 内边距 + 勾选图标的 8dp + 24dp。 */
 private val DropdownItemChrome = 72.dp
-
-/** 面板玻璃的模糊半径与容器色不透明度（与卡片同一档）。 */
-private const val DropdownGlassBlur = 30f
-private const val DropdownGlassTint = 0.62f
 
 /**
  * [WyuDropdownMenu] 的触发控件：当前值 + 右侧上下双箭头。

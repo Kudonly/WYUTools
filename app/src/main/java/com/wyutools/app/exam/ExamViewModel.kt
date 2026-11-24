@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.auth.SsoException
+import com.wyutools.app.core.friendlyAccessMessage
 import com.wyutools.app.schedule.ScheduleTerm
 import com.wyutools.app.ui.WyuMorphPageState
 import kotlinx.coroutines.Dispatchers
@@ -16,10 +17,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 
 /**
  * 教务考试安排。与课表共用同一个教务会话（[AuthViewModel] 里的 jxgl JSESSIONID），
@@ -133,12 +130,7 @@ class ExamViewModel(
 
     private fun friendlyMessage(error: Throwable): String = when (error) {
         is ExamException -> error.message ?: "考试安排解析失败。"
-        is SsoException -> error.message ?: "教务系统访问失败。"
-        is UnknownHostException -> "网络连接失败，请检查网络后重试。"
-        is SocketTimeoutException -> "网络连接超时，请稍后重试。"
-        is ConnectException -> "无法连接服务器，请稍后重试。"
-        is IOException -> "网络连接失败，请稍后重试。"
-        else -> error.message ?: "考试安排加载失败，请稍后重试。"
+        else -> friendlyAccessMessage(error) ?: error.message ?: "考试安排加载失败，请稍后重试。"
     }
 
     private fun restoreCache() {

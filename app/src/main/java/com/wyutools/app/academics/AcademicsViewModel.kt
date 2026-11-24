@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.auth.SsoException
+import com.wyutools.app.core.friendlyAccessMessage
 import com.wyutools.app.schedule.ScheduleTerm
 import com.wyutools.app.ui.WyuMorphPageState
 import kotlinx.coroutines.Dispatchers
@@ -20,10 +21,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 
 /** 单科分析单的加载状态。 */
 data class GradeDetailState(
@@ -428,14 +425,8 @@ class AcademicsViewModel(
         }
     }
 
-    private fun friendlyMessage(error: Throwable): String = when (error) {
-        is SsoException -> error.message ?: "教务系统访问失败。"
-        is UnknownHostException -> "网络连接失败，请检查网络后重试。"
-        is SocketTimeoutException -> "网络连接超时，请稍后重试。"
-        is ConnectException -> "无法连接服务器，请稍后重试。"
-        is IOException -> "网络连接失败，请稍后重试。"
-        else -> error.message ?: "加载失败，请稍后重试。"
-    }
+    private fun friendlyMessage(error: Throwable): String =
+        friendlyAccessMessage(error) ?: error.message ?: "加载失败，请稍后重试。"
 
     private fun restoreCache() {
         prefs.getString(KEY_GRADES, null)?.let { raw ->

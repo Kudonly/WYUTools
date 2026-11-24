@@ -90,9 +90,9 @@ fun PhysicalDetailScreen(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = { vm.refreshPhysical() },
                         enabled = !ui.refreshing,
                     )

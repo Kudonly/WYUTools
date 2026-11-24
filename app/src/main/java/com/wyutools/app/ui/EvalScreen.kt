@@ -26,7 +26,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -109,8 +108,7 @@ fun EvalScreen(
             },
         )
 
-        authUi.restoring || authUi.autoLoggingIn ->
-            AcademicStatePage("教评", onBack) { CircularProgressIndicator() }
+        authUi.restoring || authUi.autoLoggingIn -> AcademicLoadingPage("教评", onBack)
 
         !authUi.loggedIn -> AcademicStatePage("教评", onBack) {
             AcademicLoginPrompt(
@@ -122,21 +120,15 @@ fun EvalScreen(
             )
         }
 
-        ui.loading || ui.error == null ->
-            AcademicStatePage("教评", onBack) { CircularProgressIndicator() }
+        ui.loading || ui.error == null -> AcademicLoadingPage("教评", onBack)
 
-        else -> AcademicStatePage(
+        else -> AcademicErrorPage(
             title = "教评",
+            heading = "教评加载失败",
+            message = ui.error ?: "结课评价加载失败，请稍后重试。",
             onBack = onBack,
-            showRefresh = true,
             onRefresh = { vm.refreshEval() },
-        ) {
-            AcademicGlyph(Icons.Outlined.CloudOff, primary = false)
-            Spacer(Modifier.height(20.dp))
-            AcademicTitle("教评加载失败")
-            Spacer(Modifier.height(8.dp))
-            AcademicBody(ui.error ?: "结课评价加载失败，请稍后重试。", error = true)
-        }
+        )
     }
 }
 
@@ -258,9 +250,9 @@ private fun EvalContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = onRefresh,
                         enabled = !ui.refreshing,
                     )

@@ -1,6 +1,5 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +22,6 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -60,14 +57,9 @@ fun MeContent(
 ) {
     val ui by vm.ui.collectAsState()
     val demoMode by vm.demoMode.collectAsState()
-    val context = LocalContext.current
     var showLogout by remember { mutableStateOf(false) }
 
-    LaunchedEffect(ui.notice) {
-        val notice = ui.notice ?: return@LaunchedEffect
-        Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
-        vm.consumeNotice()
-    }
+    WyuNoticeToast(ui.notice) { vm.consumeNotice() }
 
     Box(modifier = modifier.fillMaxSize()) {
         when {

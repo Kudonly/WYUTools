@@ -27,8 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -283,9 +283,9 @@ private fun SettingsEntry(onOpen: (SharedCardSnapshot?) -> Unit) {
         onOpen = onOpen,
     )
     Box(entry.modifier) {
-        WyuTopBarAction(
+        WyuTopBarIconButton(
             icon = Icons.Outlined.Settings,
-            label = "设置",
+            contentDescription = "设置",
             onClick = entry.launch,
         )
     }

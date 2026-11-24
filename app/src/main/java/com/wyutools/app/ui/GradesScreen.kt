@@ -1,6 +1,5 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +89,6 @@ fun GradesScreen(
     val gpaUi by vm.gpa.collectAsState()
     val authUi by authVm.ui.collectAsState()
     val detail by vm.gradeDetail.collectAsState()
-    val context = LocalContext.current
     // 分析单弹窗从底部滑入/滑出，关闭时先收起再清数据。
     var detailShow by remember { mutableStateOf(false) }
 
@@ -107,11 +104,7 @@ fun GradesScreen(
             vm.onGpaEnter()
         }
     }
-    LaunchedEffect(ui.notice) {
-        val notice = ui.notice ?: return@LaunchedEffect
-        Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
-        vm.consumeGradesNotice()
-    }
+    WyuNoticeToast(ui.notice) { vm.consumeGradesNotice() }
 
     if (detail.cjdm != null) {
         GradeDetailDialog(
@@ -138,7 +131,7 @@ fun GradesScreen(
         )
 
         authUi.restoring || authUi.autoLoggingIn || authUi.loggingOut ->
-            AcademicStatePage("成绩", onBack) { CircularProgressIndicator() }
+            AcademicLoadingPage("成绩", onBack)
 
         !authUi.loggedIn -> AcademicStatePage("成绩", onBack) {
             AcademicLoginPrompt(
@@ -150,23 +143,16 @@ fun GradesScreen(
             )
         }
 
-        ui.loading || ui.error == null ->
-            AcademicStatePage("成绩", onBack) { CircularProgressIndicator() }
+        ui.loading || ui.error == null -> AcademicLoadingPage("成绩", onBack)
 
-        else -> AcademicStatePage(
+        else -> AcademicErrorPage(
             title = "成绩",
+            heading = "成绩加载失败",
+            message = ui.error ?: "成绩加载失败，请稍后重试。",
             onBack = onBack,
-            showRefresh = true,
             onRefresh = { vm.refreshGrades() },
-        ) {
-            AcademicGlyph(Icons.Outlined.CloudOff, primary = false)
-            Spacer(Modifier.height(20.dp))
-            AcademicTitle("成绩加载失败")
-            Spacer(Modifier.height(8.dp))
-            AcademicBody(ui.error ?: "成绩加载失败，请稍后重试。", error = true)
-            Spacer(Modifier.height(20.dp))
-            ActionChip(text = "重试", onClick = { vm.refreshGrades() }, primary = true)
-        }
+            onRetry = { vm.refreshGrades() },
+        )
     }
 }
 
@@ -221,9 +207,9 @@ private fun GradesContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = if (page == 0) onRefreshGrades else onRefreshGpa,
                         enabled = if (page == 0) !ui.refreshing else !gpaUi.refreshing,
                     )
@@ -318,7 +304,7 @@ private fun GradesTab(
         item(key = "footer") {
             Text(
                 text = buildString {
-                    if (data.fetchedAt > 0) append(updatedAt(data.fetchedAt))
+                    if (data.fetchedAt > 0) append(updatedStampLabel(data.fetchedAt))
                     append("共 ${data.terms.size} 个学期 · ${data.all.size} 门课程")
                 },
                 style = MiuixTheme.textStyles.footnote2,
@@ -548,7 +534,7 @@ private fun GradeList(entries: List<GradeEntry>, onOpenEntry: (GradeEntry) -> Un
         entries.forEachIndexed { index, entry ->
             GradeRow(entry = entry, onClick = { onOpenEntry(entry) })
             if (index != entries.lastIndex) {
-                HorizontalDivider(modifier = Modifier.padding(start = 18.dp))
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
     }
@@ -705,7 +691,7 @@ private fun GpaTermList(rows: List<GpaRow>, best: String?) {
                 )
             }
             if (index != rows.lastIndex) {
-                HorizontalDivider(modifier = Modifier.padding(start = 18.dp))
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
     }
@@ -935,9 +921,9 @@ private fun GpaContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = onRefresh,
                         enabled = !ui.refreshing,
                     )
@@ -1079,12 +1065,3 @@ private fun trimNumber(value: Double): String =
     } else {
         String.format(Locale.US, "%.1f", value)
     }
-
-private fun updatedAt(fetchedAt: Long): String {
-    val time = runCatching {
-        java.time.Instant.ofEpochMilli(fetchedAt)
-            .atZone(java.time.ZoneId.systemDefault())
-            .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.CHINA))
-    }.getOrNull() ?: return ""
-    return "更新于 $time · "
-}

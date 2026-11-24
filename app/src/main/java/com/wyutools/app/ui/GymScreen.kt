@@ -37,6 +37,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -280,14 +282,14 @@ private fun GymContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新",
+                        contentDescription = "刷新",
                         onClick = vm::refreshAll,
                     )
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.AutoMirrored.Filled.Logout,
-                        label = "退出",
+                        contentDescription = "退出",
                         onClick = { showLogout = true },
                     )
                 },
@@ -1285,16 +1287,13 @@ private fun BookingDialog(
         Spacer(Modifier.height(12.dp))
         // 用页面同款玻璃输入框：miuix 原生 TextField 是实心 secondaryContainer
         // 色块，弹窗里显得跟别处的输入框不是一套东西。
+        val phoneState = rememberTextFieldState(phone)
         GlassTextField(
-            value = phone,
-            onValueChange = { value ->
-                if (value.length <= 11 && value.all { it.isDigit() }) {
-                    phone = value
-                    phoneError = null
-                }
-            },
+            state = phoneState,
             label = "手机号",
             enabled = !booking,
+            inputTransformation = GymPhoneFilter,
+            onValueChange = { phone = it; phoneError = null },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Phone,
@@ -1495,14 +1494,11 @@ private fun datePrimaryLabel(date: LocalDate): String {
     return when (date) {
         today -> "今天"
         today.plusDays(1) -> "明天"
-        else -> when (date.dayOfWeek.value) {
-            1 -> "周一"
-            2 -> "周二"
-            3 -> "周三"
-            4 -> "周四"
-            5 -> "周五"
-            6 -> "周六"
-            else -> "周日"
-        }
+        else -> weekdayLabel(date)
     }
+}
+
+/** 手机号：11 位以内纯数字，越界或非数字的输入整次回退。 */
+private val GymPhoneFilter = InputTransformation {
+    if (length > 11 || asCharSequence().any { !it.isDigit() }) revertAllChanges()
 }

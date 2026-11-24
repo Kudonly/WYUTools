@@ -2,15 +2,10 @@ package com.wyutools.app.ui
 
 import android.os.Build
 import android.view.HapticFeedbackConstants
-import android.widget.Toast
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,11 +38,9 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,7 +50,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -70,32 +61,24 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.schedule.ScheduleCourse
 import com.wyutools.app.schedule.ScheduleData
-import com.wyutools.app.schedule.ScheduleNotice
 import com.wyutools.app.schedule.ScheduleSection
 import com.wyutools.app.schedule.ScheduleSections
 import com.wyutools.app.schedule.ScheduleUiState
 import com.wyutools.app.schedule.ScheduleViewModel
-import com.wyutools.app.schedule.WeekAnchor
 import com.wyutools.app.schedule.scheduleWeekdayLabels
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.Canvas
@@ -104,12 +87,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -211,14 +189,7 @@ fun ScheduleScreen(
     LaunchedEffect(authUi.loggedIn, authUi.restoring) {
         if (!authUi.restoring && authUi.loggedIn) vm.onAuthReady()
     }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.syncCurrentWeek()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    OnResumeEffect { vm.syncCurrentWeek() }
 
     val data = ui.data
     when {
@@ -247,7 +218,7 @@ fun ScheduleScreen(
         ui.loading || ui.error == null -> ScheduleLoadingScreen(onBack = onBack)
 
         else -> ScheduleErrorScreen(
-            message = ui.error ?: "课表数据加载失败，请稍后重试。",
+            message = ui.error.orEmpty(),
             onRetry = { vm.refresh(showNotice = true) },
             onBack = onBack,
         )
@@ -264,7 +235,6 @@ private fun ScheduleContent(
     onLogin: () -> Unit,
 ) {
     val weeklyScrollState = rememberScrollState()
-    val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var selectedCourse by remember { mutableStateOf<SelectedCourse?>(null) }
     var showCourseDetail by remember { mutableStateOf(false) }
@@ -292,11 +262,7 @@ private fun ScheduleContent(
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
     }
 
-    LaunchedEffect(ui.notice) {
-        val notice: ScheduleNotice = ui.notice ?: return@LaunchedEffect
-        Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
-        vm.consumeNotice()
-    }
+    WyuNoticeToast(ui.notice?.message) { vm.consumeNotice() }
 
     WyuPageScaffold(
         // Collapsed bar, no large title and no progressive blur: the timetable
@@ -326,17 +292,17 @@ private fun ScheduleContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新课表",
+                        contentDescription = "刷新课表",
                         onClick = {
                             if (authLoggedIn) vm.refresh(showNotice = true) else onLogin()
                         },
                         enabled = !ui.refreshing,
                     )
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Outlined.Settings,
-                        label = "课表设置",
+                        contentDescription = "课表设置",
                         onClick = { showSettings = true },
                     )
                 },
@@ -592,8 +558,6 @@ private fun ScheduleWeekSlider(
     val view = LocalView.current
     val lastHapticWeek = remember { mutableIntStateOf(selectedWeek) }
     LaunchedEffect(selectedWeek) { lastHapticWeek.intValue = selectedWeek }
-    val live = (pagerState.currentPage + pagerState.currentPageOffsetFraction + 1f)
-        .coerceIn(1f, maxWeek.toFloat())
     // The track sits on a live glass strip: the grid keeps scrolling underneath,
     // so the band has to sample the page content instead of the wallpaper.
     // 玻璃条左右铺满、上下各收一点，滑条铺满并盖在上面。
@@ -957,27 +921,21 @@ private fun WeekTimeAxis(
  */
 @Composable
 private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
-    val softGlass by WyuAppearance.softGlass.collectAsState()
-    val softGlassBlur by WyuAppearance.softGlassBlur.collectAsState()
-    val tuning by WyuAppearance.softGlassTuning.collectAsState()
-    val liquidTuning by WyuAppearance.liquidGlassTuning.collectAsState()
-    val liquidBlur by WyuAppearance.liquidGlassBlur.collectAsState()
+    val glassStyle = rememberWyuGlassStyle()
     val underlay = LocalWyuGlassUnderlay.current
     val gaussian = LocalWyuGaussianUnderlay.current
     val wallpaper = LocalWyuGlassBackdrop.current
-    val dark = LocalWyuDarkTheme.current
-    val currentCardTheme by WyuAppearance.cardTheme.collectAsState()
-    val isLiquid = currentCardTheme == WyuCardTheme.Liquid
+    val dark = glassStyle.dark
     val blur = when {
         // 课程块很小，液态玻璃用收窄的边缘参数，避免 rim 吃掉整块高度。
         // 烘焙底图可用时直接采样静态位图，与液态玻璃卡片的烘焙层一致。
-        isLiquid && softGlass && wyuSoftGlassSupported && underlay != null ->
+        glassStyle.liquidGlass && underlay != null ->
             wyuLiquidGlass(
                 backdrop = null,
                 underlay = underlay,
                 shape = shape,
                 cornerRadius = 11.dp,
-                tuning = liquidTuning,
+                tuning = glassStyle.liquidTuning,
                 dark = dark,
                 baseTint = Color.Transparent,
                 shapeEdgePx = 40f,
@@ -985,39 +943,40 @@ private fun Modifier.courseGlass(shape: Shape, tint: Color): Modifier {
                 refractionThicknessPx = 56f,
                 reflectionThicknessPx = 800f,
             )
-        isLiquid && softGlass && wyuSoftGlassSupported && wallpaper != null ->
+        glassStyle.liquidGlass && wallpaper != null ->
             wyuLiquidGlass(
                 backdrop = wallpaper,
                 shape = shape,
                 cornerRadius = 11.dp,
-                tuning = liquidTuning,
+                tuning = glassStyle.liquidTuning,
                 dark = dark,
                 baseTint = Color.Transparent,
-                blurPercent = liquidBlur,
+                blurPercent = glassStyle.liquidBlur,
                 shapeEdgePx = 40f,
                 shapeEdgePow = 2.2f,
                 refractionThicknessPx = 56f,
                 reflectionThicknessPx = 800f,
             )
-        softGlass && !isLiquid && wyuSoftGlassSupported && underlay != null ->
+        glassStyle.softGlass && !glassStyle.liquid && underlay != null ->
             wyuCardGlass(
                 underlay = underlay,
                 shape = shape,
                 cornerRadius = 11.dp,
-                style = wyuUpstreamGlassStyle(tuning.resolvedFor(dark), dark, softGlassBlur),
+                style = wyuUpstreamGlassStyle(glassStyle.tuning, dark, glassStyle.blur),
                 tint = Color.Transparent,
             )
-        softGlass && !isLiquid && wyuSoftGlassSupported && wallpaper != null && LocalWyuGlassReady.current ->
+        glassStyle.softGlass && !glassStyle.liquid && wallpaper != null && LocalWyuGlassReady.current ->
             wyuUpstreamCardGlass(
                 backdrop = wallpaper,
                 cornerRadius = 11.dp,
-                tuning = tuning.resolvedFor(dark),
+                tuning = glassStyle.tuning,
                 dark = dark,
-                blurPercent = softGlassBlur,
+                blurPercent = glassStyle.blur,
                 tint = Color.Transparent,
             )
-        softGlass && underlay != null -> wyuWallpaperBlur(underlay, shape)
-        !softGlass && gaussian != null -> wyuWallpaperBlur(gaussian, shape)
+        // 兜底两档不判设备支持：开关打开且只有底图时，能模糊就先模糊。
+        glassStyle.softGlassOn && underlay != null -> wyuWallpaperBlur(underlay, shape)
+        !glassStyle.softGlassOn && gaussian != null -> wyuWallpaperBlur(gaussian, shape)
         wallpaper != null ->
             textureBlur(backdrop = wallpaper, shape = shape, blurRadius = CourseBlurRadius)
         else -> this
@@ -1087,7 +1046,7 @@ internal fun ScheduleCourseDialog(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${weekdayName(selection.date)} · " +
+                text = "${weekdayLabel(selection.date, short = false)} · " +
                     "${selection.date.monthValue}月${selection.date.dayOfMonth}日 · " +
                     "第 ${selection.week} 周",
                 style = MiuixTheme.textStyles.footnote1,
@@ -1295,7 +1254,7 @@ private fun ScheduleSettingsDialog(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         Text(
-            text = "更新于 ${formatUpdatedAt(data.fetchedAt)}",
+            text = "更新于 ${formatClockStamp(data.fetchedAt)}",
             style = MiuixTheme.textStyles.footnote2,
             color = MiuixTheme.colorScheme.outline,
         )
@@ -1492,21 +1451,3 @@ internal fun ScheduleStatePage(
     }
 }
 
-internal fun weekdayName(date: LocalDate): String = when (date.dayOfWeek.value) {
-    1 -> "星期一"
-    2 -> "星期二"
-    3 -> "星期三"
-    4 -> "星期四"
-    5 -> "星期五"
-    6 -> "星期六"
-    else -> "星期日"
-}
-
-private fun formatUpdatedAt(timestamp: Long): String {
-    if (timestamp <= 0L) return "—"
-    return runCatching {
-        Instant.ofEpochMilli(timestamp)
-            .atZone(ZoneId.systemDefault())
-            .format(DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.CHINA))
-    }.getOrDefault("—")
-}

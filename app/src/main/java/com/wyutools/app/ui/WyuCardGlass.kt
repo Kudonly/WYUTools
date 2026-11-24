@@ -9,13 +9,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -72,13 +69,6 @@ internal fun Modifier.wyuCardGlass(
     cornerRadius: Dp,
     style: GlassStyle,
     tint: Color,
-    /**
-     * Fill the surface with [fixedBase] instead of the wallpaper under it, keeping
-     * the rim, refraction and rim light. A tall, narrow surface such as the
-     * timetable's period column otherwise reads the whole wallpaper top to
-     * bottom and turns into a colour ramp.
-     */
-    fixedBase: Color? = null,
 ): Modifier {
     if (underlay == null || !wyuSoftGlassSupported) return this
     val density = LocalDensity.current
@@ -102,18 +92,11 @@ internal fun Modifier.wyuCardGlass(
         probe,
         style,
         tint,
-        fixedBase,
         density,
         cornerRadius,
     ) {
         Modifier.drawWithCache {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            val path = Path()
-            when (outline) {
-                is Outline.Generic -> path.addPath(outline.path)
-                is Outline.Rounded -> path.addRoundRect(outline.roundRect)
-                is Outline.Rectangle -> path.addRect(outline.rect)
-            }
+            val path = shape.wyuOutlinePath(size, layoutDirection, this)
             val nativePath = path.asAndroidPath()
             val cornerPx = with(density) { cornerRadius.toPx() }
             // Upstream expresses every rim constant in pixels at a 3x reference
@@ -126,12 +109,6 @@ internal fun Modifier.wyuCardGlass(
             val widePx = style.blur.big * densityScale
             val overspillPx = GlassDefaults.Overspill * density.density
             val bitmap = underlay.bitmap
-            // One texel: every tap clamps onto it, so the material shades a flat
-            // fill as if the surface sat on a uniform backdrop.
-            val flatBitmap = fixedBase?.let { color ->
-                android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
-                    .apply { eraseColor(color.toArgb()) }
-            }
             // Wallpaper pixels per display pixel: the underlay is a downscaled
             // bake, so the sampling matrix has to undo that.
             val toBitmap = 1f / underlay.scale
@@ -154,15 +131,11 @@ internal fun Modifier.wyuCardGlass(
                 // The wide disc, expressed in wallpaper pixels: centre of the
                 // surface, radius capped at half its smaller side exactly like
                 // the shader caps `wideX`/`wideY`.
-                val wideColor = if (fixedBase != null && flatBitmap != null) {
-                    floatArrayOf(fixedBase.red, fixedBase.green, fixedBase.blue, 1f)
-                } else {
-                    probe?.average(
-                        cx = shiftX + width * underlay.scale * 0.5f,
-                        cy = shiftY + height * underlay.scale * 0.5f,
-                        radius = min(wideX, wideY) * underlay.scale,
-                    ) ?: WyuGlassColorProbe.Unavailable
-                }
+                val wideColor = probe?.average(
+                    cx = shiftX + width * underlay.scale * 0.5f,
+                    cy = shiftY + height * underlay.scale * 0.5f,
+                    radius = min(wideX, wideY) * underlay.scale,
+                ) ?: WyuGlassColorProbe.Unavailable
                 val shader = runtimeShader
                 shader.setFloatUniform("in_pad", 0f, 0f)
                 shader.setFloatUniform("in_maxCoord", 1.0e5f, 1.0e5f)
@@ -248,30 +221,25 @@ internal fun Modifier.wyuCardGlass(
                 )
                 shader.setInputShader(
                     "child",
-                    if (flatBitmap != null) {
-                        BitmapShader(flatBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-                            .apply { filterMode = BitmapShader.FILTER_MODE_LINEAR }
-                    } else {
-                        BitmapShader(
-                            bitmap,
-                            Shader.TileMode.CLAMP,
-                            Shader.TileMode.CLAMP,
-                        ).apply {
-                            filterMode = BitmapShader.FILTER_MODE_LINEAR
-                            setLocalMatrix(
-                                android.graphics.Matrix().apply {
-                                    // Skia reads a shader's local matrix as
-                                    // texture -> draw space and inverts it before
-                                    // sampling, so this maps the surface back onto
-                                    // the wallpaper, not the other way round. With
-                                    // the forward mapping the taps land outside the
-                                    // bitmap and every card comes out a flat clamp
-                                    // of its edge pixels.
-                                    setScale(toBitmap, toBitmap)
-                                    postTranslate(-shiftX * toBitmap, -shiftY * toBitmap)
-                                },
-                            )
-                        }
+                    BitmapShader(
+                        bitmap,
+                        Shader.TileMode.CLAMP,
+                        Shader.TileMode.CLAMP,
+                    ).apply {
+                        filterMode = BitmapShader.FILTER_MODE_LINEAR
+                        setLocalMatrix(
+                            android.graphics.Matrix().apply {
+                                // Skia reads a shader's local matrix as
+                                // texture -> draw space and inverts it before
+                                // sampling, so this maps the surface back onto
+                                // the wallpaper, not the other way round. With
+                                // the forward mapping the taps land outside the
+                                // bitmap and every card comes out a flat clamp
+                                // of its edge pixels.
+                                setScale(toBitmap, toBitmap)
+                                postTranslate(-shiftX * toBitmap, -shiftY * toBitmap)
+                            },
+                        )
                     },
                 )
                 drawIntoCanvas { it.nativeCanvas.drawPath(nativePath, paint) }

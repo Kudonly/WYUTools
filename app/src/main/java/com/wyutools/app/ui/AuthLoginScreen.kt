@@ -15,8 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,8 +41,6 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.wyutools.app.auth.AuthViewModel
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -49,7 +48,6 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -57,8 +55,10 @@ fun AuthLoginScreen(vm: AuthViewModel, onBack: () -> Unit) {
     val ui by vm.ui.collectAsState()
     val scrollState = rememberScrollState()
     val collapseFraction = rememberWyuCollapseFraction(scrollState)
-    var username by rememberSaveable { mutableStateOf(vm.savedUsername) }
-    var password by rememberSaveable { mutableStateOf(vm.savedPassword) }
+    var username by remember { mutableStateOf(vm.savedUsername) }
+    var password by remember { mutableStateOf(vm.savedPassword) }
+    val usernameState = rememberTextFieldState(vm.savedUsername)
+    val passwordState = rememberTextFieldState(vm.savedPassword)
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var rememberPassword by rememberSaveable {
         mutableStateOf(vm.savedPassword.isNotEmpty())
@@ -145,22 +145,22 @@ fun AuthLoginScreen(vm: AuthViewModel, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(28.dp))
 
-            TextField(
-                value = username,
-                onValueChange = { username = it.trim() },
+            GlassTextField(
+                state = usernameState,
                 label = "学号",
-                singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Next,
                 ),
+                onValueChange = { username = it.trim() },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(12.dp))
-            TextField(
-                value = password,
-                onValueChange = { password = it },
+            GlassTextField(
+                state = passwordState,
                 label = "密码",
+                secure = !passwordVisible,
+                onValueChange = { password = it },
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(
@@ -174,23 +174,13 @@ fun AuthLoginScreen(vm: AuthViewModel, onBack: () -> Unit) {
                         )
                     }
                 },
-                singleLine = true,
-                visualTransformation = if (passwordVisible) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done,
                 ),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        if (canSubmit) {
-                            vm.login(username, password, rememberPassword)
-                        }
-                    },
-                ),
+                onKeyboardAction = KeyboardActionHandler {
+                    if (canSubmit) vm.login(username, password, rememberPassword)
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(

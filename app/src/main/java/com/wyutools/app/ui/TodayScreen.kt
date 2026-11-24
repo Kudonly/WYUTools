@@ -1,6 +1,5 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,8 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -31,7 +31,6 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,13 +51,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wyutools.app.auth.AuthViewModel
 import com.wyutools.app.schedule.ScheduleCourse
 import com.wyutools.app.schedule.ScheduleData
-import com.wyutools.app.schedule.ScheduleNotice
 import com.wyutools.app.schedule.ScheduleSections
 import com.wyutools.app.schedule.ScheduleUiState
 import com.wyutools.app.schedule.ScheduleViewModel
@@ -90,14 +85,7 @@ fun TodayScreen(
     LaunchedEffect(authUi.loggedIn, authUi.restoring) {
         if (!authUi.restoring && authUi.loggedIn) vm.onAuthReady()
     }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.syncCurrentWeek()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    OnResumeEffect { vm.syncCurrentWeek() }
 
     // 待办不依赖登录，所以这一页永远渲染；课表那一段自己按登录/加载状态退化成
     // 一张提示卡，而不是把整页换成登录页——否则未登录时连待办都进不去。
@@ -146,11 +134,7 @@ private fun TodayContent(
     var draft by remember { mutableStateOf("") }
     LaunchedEffect(today) { WyuTodos.ensureLoaded(context, today) }
 
-    LaunchedEffect(ui.notice) {
-        val notice: ScheduleNotice = ui.notice ?: return@LaunchedEffect
-        Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
-        vm.consumeNotice()
-    }
+    WyuNoticeToast(ui.notice?.message) { vm.consumeNotice() }
 
     WyuPageScaffold(
         progress = { collapseFraction.value },
@@ -168,9 +152,9 @@ private fun TodayContent(
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Filled.Refresh,
-                        label = "刷新今日课程",
+                        contentDescription = "刷新今日课程",
                         onClick = {
                             if (authLoggedIn) vm.refresh(showNotice = true) else onLogin()
                         },
@@ -299,7 +283,7 @@ private fun TodayDateHeader(
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         // 日期和星期同号同粗：这是页面的第一落点，比导航栏标题还重要。
         Text(
-            text = "${today.monthValue} 月 ${today.dayOfMonth} 日 ${weekdayName(today)}",
+            text = "${today.monthValue} 月 ${today.dayOfMonth} 日 ${weekdayLabel(today, short = false)}",
             style = MiuixTheme.textStyles.headline1.copy(
                 fontSize = 30.sp,
                 lineHeight = 36.sp,
@@ -499,15 +483,22 @@ private fun TodayTodoCard(
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val todoState = rememberTextFieldState(draft)
+            // 添加待办后 draft 被清空，把 state 一起清掉。
+            LaunchedEffect(draft) {
+                if (todoState.text.toString() != draft) {
+                    todoState.edit { replace(0, length, draft) }
+                }
+            }
             GlassTextField(
-                value = draft,
-                onValueChange = onDraftChange,
+                state = todoState,
                 label = "写点今天要做的事",
                 modifier = Modifier.weight(1f),
                 // 竖向内边距比默认小一档：输入框的底色薄一点，不抢待办列表的版面。
                 insideMargin = TodoFieldInsideMargin,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onAdd() }),
+                onKeyboardAction = KeyboardActionHandler { onAdd() },
+                onValueChange = onDraftChange,
             )
             Spacer(Modifier.width(14.dp))
             Box(

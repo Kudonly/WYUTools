@@ -88,9 +88,9 @@ fun SoftGlassAdvancedScreen(onBack: () -> Unit) {
                     )
                 },
                 actions = {
-                    WyuTopBarAction(
+                    WyuTopBarIconButton(
                         icon = Icons.Outlined.Restore,
-                        label = "恢复默认",
+                        contentDescription = "恢复默认",
                         onClick = { showResetConfirm = true },
                     )
                 },

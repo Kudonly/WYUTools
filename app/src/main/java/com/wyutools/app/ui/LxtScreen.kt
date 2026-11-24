@@ -1,6 +1,5 @@
 package com.wyutools.app.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,7 +33,6 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,18 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wyutools.app.lxt.LxtApi
 import com.wyutools.app.lxt.LxtUiState
 import com.wyutools.app.lxt.LxtViewModel
@@ -68,7 +61,6 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.Locale
 
@@ -83,27 +75,14 @@ fun LxtScreen(
     onBindValve: () -> Unit,
 ) {
     val ui by vm.ui.collectAsState()
-    val context = LocalContext.current
     val scrollState = rememberScrollState()
     val collapseFraction = rememberWyuCollapseFraction(scrollState)
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showValveDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.onLxtEntered() }
-    LaunchedEffect(ui.message) {
-        ui.message?.let { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-            vm.consumeMessage()
-        }
-    }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.onLxtResumed()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    WyuNoticeToast(ui.message) { vm.consumeMessage() }
+    OnResumeEffect { vm.onLxtResumed() }
 
     WyuPageScaffold(
         progress = { collapseFraction.value },
@@ -121,16 +100,16 @@ fun LxtScreen(
                 },
                 actions = {
                     if (ui.token != null) {
-                        WyuTopBarAction(
+                        WyuTopBarIconButton(
                             icon = Icons.Filled.Refresh,
-                            label = "刷新",
+                            contentDescription = "刷新",
                             onClick = vm::refreshBalances,
                             enabled = !ui.balanceBusy,
                         )
                         // 退出账号从卡片挪到顶栏，跟刷新并排两颗玻璃按钮。
-                        WyuTopBarAction(
+                        WyuTopBarIconButton(
                             icon = Icons.AutoMirrored.Filled.ExitToApp,
-                            label = "退出登录",
+                            contentDescription = "退出登录",
                             onClick = { showLogoutDialog = true },
                         )
                     }
@@ -223,6 +202,25 @@ fun LxtScreen(
 @Composable
 private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
     var passwordVisible by remember { mutableStateOf(false) }
+    val accountState = rememberTextFieldState(ui.account)
+    val passwordState = rememberTextFieldState(ui.password)
+    val captchaState = rememberTextFieldState(ui.captchaCode)
+    // 刷新验证码 / 登录失败会清 VM 侧字符串，同步回输入框。
+    LaunchedEffect(ui.account) {
+        if (accountState.text.toString() != ui.account) {
+            accountState.edit { replace(0, length, ui.account) }
+        }
+    }
+    LaunchedEffect(ui.password) {
+        if (passwordState.text.toString() != ui.password) {
+            passwordState.edit { replace(0, length, ui.password) }
+        }
+    }
+    LaunchedEffect(ui.captchaCode) {
+        if (captchaState.text.toString() != ui.captchaCode) {
+            captchaState.edit { replace(0, length, ui.captchaCode) }
+        }
+    }
     val rememberToggle = hapticClick(enabled = !ui.loginBusy) {
         vm.setRememberPassword(!ui.rememberPassword)
     }
@@ -256,26 +254,19 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        TextField(
-            value = ui.account,
-            onValueChange = vm::setAccount,
+        GlassTextField(
+            state = accountState,
             label = "学号 / 手机号",
-            singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            onValueChange = vm::setAccount,
         )
         Spacer(Modifier.height(12.dp))
-        TextField(
-            value = ui.password,
-            onValueChange = vm::setPassword,
+        GlassTextField(
+            state = passwordState,
             label = "密码",
-            singleLine = true,
+            secure = !passwordVisible,
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation = if (passwordVisible) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
@@ -311,13 +302,12 @@ private fun LoginCard(ui: LxtUiState, vm: LxtViewModel) {
         }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextField(
-                value = ui.captchaCode,
-                onValueChange = vm::setCaptchaCode,
+            GlassTextField(
+                state = captchaState,
                 label = "验证码",
-                singleLine = true,
                 modifier = Modifier.weight(1f),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                onValueChange = vm::setCaptchaCode,
             )
             Spacer(Modifier.width(12.dp))
             val captchaBitmap = ui.captchaBitmap

@@ -30,8 +30,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -78,11 +80,9 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -115,15 +115,10 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-
-private val RECORD_TIME_FORMATTER: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
 
 private const val ElecQueryColorMillis = 500
 private const val ElecQueryLabelMillis = 280
@@ -143,8 +138,7 @@ private fun formatDays(days: Double): String = when {
     else -> String.format(Locale.CHINA, "%.1f 天", days)
 }
 
-private fun formatRecordTime(timestamp: Long): String =
-    RECORD_TIME_FORMATTER.format(Instant.ofEpochMilli(timestamp))
+private fun formatRecordTime(timestamp: Long): String = formatClockStamp(timestamp)
 
 private fun formatAmountInput(raw: String): String {
     val value = raw.toDoubleOrNull() ?: return "¥$raw"
@@ -212,16 +206,16 @@ fun ElecScreen(vm: ElecViewModel, onBack: () -> Unit) {
                 },
                 actions = {
                     if (hasDorm) {
-                        WyuTopBarAction(
+                        WyuTopBarIconButton(
                             icon = Icons.Filled.Edit,
-                            label = "修改宿舍",
+                            contentDescription = "修改宿舍",
                             onClick = { dormEditorOpen = true },
                         )
                     }
                     if (ui.result != null) {
-                        WyuTopBarAction(
+                        WyuTopBarIconButton(
                             icon = Icons.Filled.Refresh,
-                            label = "刷新",
+                            contentDescription = "刷新",
                             onClick = vm::query,
                             enabled = !ui.loading,
                         )
@@ -347,28 +341,30 @@ private fun QueryCard(ui: ElecUiState, vm: ElecViewModel) {
             style = MiuixTheme.textStyles.title3,
         )
         Spacer(Modifier.height(16.dp))
+        val buildingState = rememberTextFieldState(ui.building)
+        val roomState = rememberTextFieldState(ui.room)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassTextField(
-                value = ui.building,
-                onValueChange = vm::setBuilding,
+                state = buildingState,
                 label = "楼栋",
                 enabled = !ui.loading,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Next,
                 ),
+                onValueChange = vm::setBuilding,
                 modifier = Modifier.weight(1f),
             )
             GlassTextField(
-                value = ui.room,
-                onValueChange = vm::setRoom,
+                state = roomState,
                 label = "房间号",
                 enabled = !ui.loading,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done,
                 ),
-                keyboardActions = KeyboardActions(onDone = { vm.query() }),
+                onKeyboardAction = KeyboardActionHandler { vm.query() },
+                onValueChange = vm::setRoom,
                 modifier = Modifier.weight(1.4f),
             )
         }
@@ -578,7 +574,7 @@ private fun ResultCard(
                 Text(
                     text = buildString {
                         append("上次查询 · ")
-                        append(RECORD_TIME_FORMATTER.format(Instant.ofEpochMilli(staleAt)))
+                        append(formatClockStamp(staleAt))
                         append(if (refreshing) "，正在刷新" else "，本次未刷新")
                     },
                     style = MiuixTheme.textStyles.footnote1,
@@ -622,6 +618,8 @@ private fun DormEditorDialog(
 ) {
     var draftBuilding by remember(show) { mutableStateOf(building) }
     var draftRoom by remember(show) { mutableStateOf(room) }
+    val draftBuildingState = rememberTextFieldState(building)
+    val draftRoomState = rememberTextFieldState(room)
     val canSave = draftBuilding.isNotBlank() && draftRoom.isNotBlank()
     WyuOverlayDialog(
         show = show,
@@ -637,9 +635,10 @@ private fun DormEditorDialog(
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 GlassTextField(
-                    value = draftBuilding,
-                    onValueChange = { draftBuilding = it.filter { c -> c.isDigit() } },
+                    state = draftBuildingState,
                     label = "楼栋",
+                    inputTransformation = ElecDigitFilter,
+                    onValueChange = { draftBuilding = it },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Next,
@@ -647,18 +646,17 @@ private fun DormEditorDialog(
                     modifier = Modifier.weight(1f),
                 )
                 GlassTextField(
-                    value = draftRoom,
-                    onValueChange = { draftRoom = it.filter { c -> c.isDigit() } },
+                    state = draftRoomState,
                     label = "房间号",
+                    inputTransformation = ElecDigitFilter,
+                    onValueChange = { draftRoom = it },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done,
                     ),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            if (canSave) onConfirm(draftBuilding, draftRoom)
-                        },
-                    ),
+                    onKeyboardAction = KeyboardActionHandler {
+                        if (canSave) onConfirm(draftBuilding, draftRoom)
+                    },
                     modifier = Modifier.weight(1.4f),
                 )
             }
@@ -932,13 +930,10 @@ private fun RechargeAmountContent(
     vm: ElecViewModel,
     onDismiss: () -> Unit,
 ) {
-    var amountField by remember { mutableStateOf(TextFieldValue(ui.rechargeAmount)) }
+    val amountState = rememberTextFieldState(ui.rechargeAmount)
     LaunchedEffect(ui.rechargeAmount) {
-        if (amountField.text != ui.rechargeAmount) {
-            amountField = TextFieldValue(
-                text = ui.rechargeAmount,
-                selection = TextRange(ui.rechargeAmount.length),
-            )
+        if (amountState.text.toString() != ui.rechargeAmount) {
+            amountState.edit { replace(0, length, ui.rechargeAmount) }
         }
     }
     RechargeDialogHeader(
@@ -978,26 +973,17 @@ private fun RechargeAmountContent(
     }
     Spacer(Modifier.height(20.dp))
     GlassTextField(
-        value = amountField,
-        onValueChange = { field ->
-            val normalized = normalizeRechargeAmount(field.text)
-            if (normalized != null) {
-                amountField = if (normalized == field.text) {
-                    field
-                } else {
-                    TextFieldValue(normalized, selection = TextRange(normalized.length))
-                }
-                vm.setRechargeAmount(normalized)
-            }
-        },
+        state = amountState,
         label = "充值金额（元）",
+        inputTransformation = ElecAmountFilter,
+        onValueChange = vm::setRechargeAmount,
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Decimal,
             imeAction = ImeAction.Done,
         ),
-        keyboardActions = KeyboardActions(
-            onDone = { if (ui.rechargeAmount.isNotBlank()) vm.createRechargeOrder() },
-        ),
+        onKeyboardAction = KeyboardActionHandler {
+            if (ui.rechargeAmount.isNotBlank()) vm.createRechargeOrder()
+        },
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(6.dp))
@@ -1814,3 +1800,21 @@ private fun InfoRow(
     }
 }
 
+
+/** 只留数字：宿舍楼栋/房间号。 */
+private val ElecDigitFilter = InputTransformation {
+    val text = asCharSequence()
+    if (text.any { !it.isDigit() }) {
+        replace(0, length, text.filter { it.isDigit() }.toString())
+    }
+}
+
+/** 充值金额：过滤非法字符、限制整数 4 位小数 2 位；非法输入整次回退。 */
+private val ElecAmountFilter = InputTransformation {
+    val text = asCharSequence().toString()
+    val normalized = normalizeRechargeAmount(text)
+    when {
+        normalized == null -> revertAllChanges()
+        normalized != text -> replace(0, length, normalized)
+    }
+}

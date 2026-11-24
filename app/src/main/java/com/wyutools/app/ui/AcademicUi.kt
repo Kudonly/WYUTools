@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,10 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +34,7 @@ import androidx.compose.ui.unit.dp
 // Uses the shared Button from WyuGlass.kt so the haptic tick and glass
 // surface style apply here too.
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -73,9 +69,9 @@ internal fun AcademicStatePage(
                 },
                 actions = {
                     if (showRefresh && onRefresh != null) {
-                        WyuTopBarAction(
+                        WyuTopBarIconButton(
                             icon = Icons.Filled.Refresh,
-                            label = "刷新",
+                            contentDescription = "刷新",
                             onClick = onRefresh,
                         )
                     }
@@ -147,6 +143,45 @@ internal fun AcademicBody(text: String, error: Boolean = false) {
     )
 }
 
+/** 加载中：四页同一个「顶栏 + 返回 + 转圈」页。 */
+@Composable
+internal fun AcademicLoadingPage(title: String, onBack: () -> Unit) {
+    AcademicStatePage(title, onBack) { CircularProgressIndicator() }
+}
+
+/**
+ * 加载失败：图标 + 标题 + 错误文案，可选顶栏刷新与「重试」。
+ *
+ * 四个页面原来各写一遍这段（连 20dp/8dp 的间距都一样），现在只有文案是各自
+ * 的。[onRefresh] 出现在顶栏，[onRetry] 出现在正文。
+ */
+@Composable
+internal fun AcademicErrorPage(
+    title: String,
+    heading: String,
+    message: String,
+    onBack: () -> Unit,
+    onRefresh: (() -> Unit)? = null,
+    onRetry: (() -> Unit)? = null,
+) {
+    AcademicStatePage(
+        title = title,
+        onBack = onBack,
+        showRefresh = onRefresh != null,
+        onRefresh = onRefresh,
+    ) {
+        AcademicGlyph(Icons.Outlined.CloudOff, primary = false)
+        Spacer(Modifier.height(20.dp))
+        AcademicTitle(heading)
+        Spacer(Modifier.height(8.dp))
+        AcademicBody(message, error = true)
+        if (onRetry != null) {
+            Spacer(Modifier.height(20.dp))
+            ActionChip(text = "重试", onClick = onRetry, primary = true)
+        }
+    }
+}
+
 /** 未登录时四页通用的引导块。 */
 @Composable
 internal fun AcademicLoginPrompt(
@@ -189,24 +224,6 @@ internal fun AcademicLoginPrompt(
     }
 }
 
-/** 加载失败时的重试块。 */
-@Composable
-internal fun AcademicErrorBlock(message: String, onRetry: () -> Unit) {
-    AcademicGlyph(icon = Icons.Outlined.CloudOff, primary = false)
-    Spacer(Modifier.height(20.dp))
-    AcademicTitle("加载失败")
-    Spacer(Modifier.height(8.dp))
-    AcademicBody(message, error = true)
-    Spacer(Modifier.height(28.dp))
-    Button(
-        onClick = onRetry,
-        modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.buttonColorsPrimary(),
-    ) {
-        Text(text = "重试", fontWeight = FontWeight.SemiBold)
-    }
-}
-
 /** 学期选择：横向滚动的胶囊，最新的排在前面由调用方决定顺序。 */
 @Composable
 internal fun TermChips(
@@ -227,66 +244,6 @@ internal fun TermChips(
         }
     }
 }
-
-@Composable
-internal fun AcademicInfoRow(
-    icon: ImageVector?,
-    text: String,
-    tint: androidx.compose.ui.graphics.Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-    bold: Boolean = false,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(15.dp),
-                tint = tint,
-            )
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(
-            text = text,
-            style = MiuixTheme.textStyles.footnote1,
-            fontWeight = if (bold) FontWeight.Medium else FontWeight.Normal,
-            color = tint,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/**
- * 详情弹窗的可见性托管。
- *
- * 弹窗要从底部滑出去得先把 `show` 置 false 让它播完退出动画，动画结束后才
- * 能丢掉数据。如果调用方直接把数据置空，整个 Composable 会被移出组合，
- * 卡片就硬生生消失。这个类就是替调用方记住这两步。
- */
-@Stable
-internal class AcademicDetailSheetState<T> {
-    var target by mutableStateOf<T?>(null)
-        private set
-    var visible by mutableStateOf(false)
-        private set
-
-    fun open(value: T) {
-        target = value
-        visible = true
-    }
-
-    fun close() {
-        visible = false
-    }
-
-    fun clear() {
-        target = null
-    }
-}
-
-@Composable
-internal fun <T> rememberAcademicDetailSheet(): AcademicDetailSheetState<T> =
-    remember { AcademicDetailSheetState() }
 
 /**
  * 二级详情弹窗：分析单、体测子项、评价明细都住在这里。

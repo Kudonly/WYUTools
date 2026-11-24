@@ -1,14 +1,8 @@
 package com.wyutools.app.ui
 
-import android.app.Activity
 import android.graphics.Bitmap
-import android.graphics.Shader
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import android.view.PixelCopy
-import android.view.RoundedCorner
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.SpringSpec
@@ -22,11 +16,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -63,7 +55,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -120,24 +111,6 @@ private const val MorphContentShrink = 0.14f
  *  home behind the window never thins out into a bright, fuzzy border. */
 private const val MorphContentFadeStart = 0.55f
 private const val MorphContentFadeEnd = 1f
-
-/**
- * How far the backdrop travel lags the window *while it opens*, as a single
- * exponent.
- *
- * The window advances linearly in time; the backdrop reads the same number
- * through p^k, so while the window grows the wallpaper and the icons are always
- * behind it and only catch up on the last frames. That is what makes the zoom
- * feel slower and longer than the window's — the depth comes from the rate
- * difference, not from extra distance.
- *
- * It is deliberately *open only*. The same curve run backwards (pull 1 → 0) has
- * a slope of k at the very start, which made the close leave at 2.4× the
- * window's speed and overshoot the whole travel in the first quarter. Closing
- * therefore reads the plain window progress, so the backdrop lands in step with
- * the icon it is returning to.
- */
-private const val MorphBackdropOpenTravelPower = 2.4f
 
 /** Where the defocus starts and where it is at full strength. It starts late
  *  and climbs until the very end of the pull, so focus drifts away slowly
@@ -343,80 +316,6 @@ private const val MorphWallpaperExitStiffness = 76f
 private val MorphWallpaperExitSpring = morphSpring(MorphWallpaperExitStiffness)
 
 /**
- * Exponent of the wallpaper's own closing curve.
- *
- * The wallpaper travels on an exponential ease-out: its speed is highest on the
- * first frame and then decays by a constant factor for the rest of the move, so
- * every equal slice of time covers less ground than the one before. Raising it
- * steepens that decay — the deceleration becomes the dominant sensation rather
- * than a detail at the end.
- */
-private const val MorphWallpaperExitExponent = 3f
-
-/**
- * Where along the exponential the wallpaper joins it.
- *
- * Sampling starts this far into the curve instead of at its steep head: the
- * wallpaper skips the fastest part and rides the lower, already-flattening half
- * of the exponential. Two things follow — the first frames are no longer a lurch
- * (the initial speed is only ~63% of the curve's peak), and the shrinking that
- * remains is spread over the whole, longer duration instead of being spent in
- * the first third with a dead tail behind it. The travel is renormalised, so
- * 0 still maps to 1 and 1 still maps to 0 exactly: no jump when the overlay
- * hands back to the live home.
- */
-private const val MorphWallpaperExitJoin = 0.30f
-
-/**
- * Bases of the two closing exponentials.
- *
- * Both the zoom and the defocus decay by a constant factor each frame; the base
- * sets *how* constant. A small base (the wallpaper's) keeps the factor close to
- * 1, so the shrink is spread evenly over the move and the slowdown is gentle —
- * the wallpaper appears to keep drifting in at nearly the same rate until the
- * very end. A larger one (the defocus) collapses fast and then crawls, so the
- * home snaps most of the way back into focus early and the last of it is a long,
- * barely-there tail. The defocus is deliberately the higher of the two: focus
- * should be given back *ahead* of the last of the shrink, never trailing behind
- * it, or the home would still be soft when it has already stopped moving.
- */
-private const val MorphWallpaperExitBase = 1.5f
-private const val MorphDefocusExitBase = 2.0f
-
-/**
- * How far the wallpaper is still pulled in on the way home, 1 → 0.
- *
- * [progress] runs 0 → 1 over the wallpaper's own spring; the return is the
- * portion of the exponential from [MorphWallpaperExitJoin] to its end, rescaled
- * so both endpoints are exact.
- *
- * [base] is the exponential's own base, and it is the only shape knob: a low
- * base decays gently (the move stays close to even over its length), a high one
- * collapses in the first frames and spends the rest of the time barely moving.
- * The wallpaper and the defocus deliberately use different ones — see
- * [MorphWallpaperExitBase] and [MorphDefocusExitBase].
- */
-private fun exitWallpaperPull(
-    progress: Float,
-    base: Float = MorphWallpaperExitBase,
-): Float {
-    // Strictly one-way, 1 → 0. The wallpaper is the frame the whole screen sits
-    // in: any dip below its own size would open a seam around the display, so
-    // the frame never overshoots. The close's elasticity belongs to the icons,
-    // which sit inside the frame and can bounce without exposing an edge.
-    val x = progress.coerceIn(0f, 1f)
-    val k = MorphWallpaperExitExponent
-    val join = MorphWallpaperExitJoin
-    fun travelledAt(u: Float) = (1f - base.pow(-k * u)) / (1f - base.pow(-k))
-    val from = travelledAt(join)
-    val span = 1f - from
-    if (span <= 0f) return 1f - x
-    val travelled = ((travelledAt(join + (1f - join) * x) - from) / span)
-        .coerceIn(0f, 1f)
-    return 1f - travelled
-}
-
-/**
  * The close's rebound, and the only place it is allowed: the icons.
  *
  * The wallpaper comes home on a straight, one-way exponential and stops dead. The
@@ -589,29 +488,6 @@ private fun smoothstep(edge0: Float, edge1: Float, value: Float): Float {
     return t * t * (3f - 2f * t)
 }
 
-/** Backdrop travel while the window opens: the slow, trailing clock. Closing
- *  uses the raw window progress instead — see [MorphBackdropOpenTravelPower]. */
-private fun backdropOpenTravel(progress: Float): Float =
-    progress.coerceIn(0f, 1f).pow(MorphBackdropOpenTravelPower)
-
-fun capturePageBitmap(activity: Activity, onCaptured: (Bitmap?) -> Unit) {
-    val window = activity.window
-    val view = window.decorView
-    val width = view.width
-    val height = view.height
-    if (width <= 0 || height <= 0) {
-        onCaptured(null)
-        return
-    }
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    PixelCopy.request(
-        window,
-        bitmap,
-        { result -> onCaptured(if (result == PixelCopy.SUCCESS) bitmap else null) },
-        Handler(Looper.getMainLooper()),
-    )
-}
-
 /**
  * Blur effects are cached per half-pixel radius: a morph drives the radius
  * every frame, and allocating a RenderEffect per frame puts real pressure on
@@ -687,15 +563,13 @@ private fun squirclePath(rect: Rect, radius: Float): Path {
 }
 
 /** Maps the whole image onto the whole screen, so the sharp and blurred copies align exactly. */
-private fun DrawScope.drawImageStretched(image: ImageBitmap, alpha: Float) {
-    if (alpha <= 0f) return
+private fun DrawScope.drawImageStretched(image: ImageBitmap) {
     drawImage(
         image = image,
         srcOffset = IntOffset.Zero,
         srcSize = IntSize(image.width, image.height),
         dstOffset = IntOffset.Zero,
         dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
-        alpha = alpha,
         filterQuality = FilterQuality.Medium,
     )
 }
@@ -1320,7 +1194,7 @@ fun CardMorphOverlay(
                 // the snapshot at full opacity from the first frame onward,
                 // otherwise home would flash through the shrinking window.
                 clipPath(holePath) {
-                    drawImageStretched(pageImage, 1f)
+                    drawImageStretched(pageImage)
                 }
             }
 
@@ -1619,8 +1493,6 @@ fun CardReturnOverlay(
             // sheet dissolving into the background. It is removed the frame it
             // has landed on the card, which is the frame it matches the home
             // card pixel for pixel, so the hand-over has nothing to show.
-            val windowAlpha = 1f
-            if (windowAlpha <= 0.001f) return@Canvas
             // Same single curve as opening, so close mirrors open exactly —
             // plus the landing rebound, which only exists on the way home.
             val hole = landedWindow(
@@ -1659,7 +1531,7 @@ fun CardReturnOverlay(
                     translate(0f, liftPx * fraction)
                     scale(contentScale, contentScale, pivot = center)
                 }) {
-                    drawImageStretched(pageBitmap, windowAlpha)
+                    drawImageStretched(pageBitmap)
                 }
             }
 
@@ -1671,7 +1543,7 @@ fun CardReturnOverlay(
                         CardWindowReturnFadeStart,
                         CardWindowReturnFadeEnd,
                         fraction,
-                    ) * windowAlpha
+                    )
                     if (cardAlpha > 0.001f) {
                         clipPath(holePath) {
                             drawCardWindow(cardImage, hole, cardAlpha)
@@ -1685,7 +1557,7 @@ fun CardReturnOverlay(
                 // on the tile's own rect — so the hand-over is the tile itself,
                 // never a stretched one.
                 WyuMorphStyle.Tile -> {
-                    val fillAlpha = morphSurfaceReturnAlpha(fraction) * windowAlpha
+                    val fillAlpha = morphSurfaceReturnAlpha(fraction)
                     if (fillAlpha > 0.001f) {
                         clipPath(holePath) {
                             drawCardSurface(cardImage, hole.rect, fillAlpha)
