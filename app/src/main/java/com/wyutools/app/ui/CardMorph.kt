@@ -418,6 +418,24 @@ private const val MorphExitVelocity = 2.5f
 private const val YieldFadeMillis = 140
 
 /**
+ * How long a landed window takes to dissolve into the live home.
+ *
+ * The stored card pixels carry no drop shadow — the capture is the card's own
+ * layer, and the shadow lives outside it — so while the window is up the only
+ * shadow on screen is the home capture's, which was recorded with the card
+ * hidden. Removing the overlay the instant it landed therefore made the live
+ * card's shadow pop in with the hand-over frame.
+ *
+ * By the time the window has landed and the backdrop clocks are home, the
+ * overlay is pixel-for-pixel the live home apart from that shadow. Handing the
+ * slot back and crossfading the still-identical overlay out lets the shadow
+ * ease in (and any last sub-pixel difference settle) instead of cutting.
+ * Long on purpose: the shadow is the only thing moving, so a slow dissolve
+ * reads softer than a quick one.
+ */
+private const val MorphHandOffFadeMillis = 300
+
+/**
  * The one way a window opens.
  *
  * Opening and closing are deliberately separate entry points — see
@@ -792,14 +810,22 @@ private object MorphBackdropState {
         return direction * min(abs(animatable.velocityVector.value), MorphRetargetMaxSpeed)
     }
 
-    /** Hold a closing window up until the shared clocks are truly home, so the
-     *  overlay never comes off one frame before the live home matches it. */
-    suspend fun awaitAtRest() {
-        // Short on purpose: the springs settle in well under 400ms. If a new
-        // window has taken the clocks over in the meantime the wait must end
-        // instead of holding the old overlay (and its BackHandler) hostage —
-        // that was what made a second return feel unresponsive for seconds.
-        withTimeoutOrNull(500L) {
+    /**
+     * Hold a closing window up until the shared clocks are truly home, so the
+     * overlay never comes off one frame before the live home matches it.
+     *
+     * The wallpaper is the slowest clock ([MorphWallpaperExitStiffness]) and a
+     * critically damped spring only crawls through its tail: it needs about a
+     * second to reach the 0.002 threshold, not the few hundred milliseconds
+     * this used to allow. Timing out first cut the last few percent of the
+     * zoom and part of the icon rebound off with a visible jump.
+     *
+     * Still bounded: if a new window takes the clocks over in the meantime the
+     * wait must end instead of holding the old overlay (and its BackHandler)
+     * hostage.
+     */
+    suspend fun awaitAtRest(timeoutMillis: Long = MorphSettleTimeoutMillis) {
+        withTimeoutOrNull(timeoutMillis) {
             snapshotFlow {
                 maxOf(abs(travel.value), abs(wallpaper.value), abs(defocus.value))
             }.first { it <= 0.002f }
@@ -817,6 +843,11 @@ fun MorphBackdropDriver() {
 }
 
 private const val MorphRetargetMaxSpeed = 3f
+
+/** Upper bound on [MorphBackdropState.awaitAtRest]. The wallpaper needs about
+ *  a second on its own; the margin covers a slow frame clock, and a new window
+ *  taking the clocks over ends the wait long before this. */
+private const val MorphSettleTimeoutMillis = 1400L
 
 /** Opening rates of the three independent clocks. All are softer than the
  *  window (250) so the depth still trails the card; the wallpaper is the
@@ -978,6 +1009,9 @@ fun CardMorphOverlay(
     onCovered: () -> Unit,
     onFinished: () -> Unit,
     onCancelled: () -> Unit,
+    /** The reverse has landed on the source slot and the overlay is about to
+     *  dissolve: the slot (and its title) may go back to the live element. */
+    onHandedOff: () -> Unit = {},
 ) {
     val expand = remember(snapshot, home) { Animatable(0f) }
     // A preempt removes this overlay outright, so it never needs a generation
@@ -998,6 +1032,10 @@ fun CardMorphOverlay(
     // reverse animation has landed it must no longer swallow touches, so the
     // home is usable on the very next frame even while the overlay is fading out.
     var landed by remember(snapshot) { mutableStateOf(false) }
+    // The landed window dissolves into the live home so the source element's
+    // shadow eases in — see [MorphHandOffFadeMillis].
+    val handOffAlpha = remember(snapshot) { Animatable(1f) }
+    var handingOff by remember(snapshot) { mutableStateOf(false) }
     // Latched once the open window has become the live page. Written from the
     // spring's progress callback, so it costs exactly one recomposition (not
     // one per frame) and never flips back if the spring settles unevenly.
@@ -1078,6 +1116,12 @@ fun CardMorphOverlay(
                 launch { MorphBackdropState.awaitAtRest() }
             }
             landed = true
+            // The reverse has landed on the source element, so every layer is
+            // already the live home except its shadow. Hand the slot back and
+            // dissolve the window instead of cutting it away.
+            onHandedOff()
+            handingOff = true
+            handOffAlpha.animateTo(0f, tween(MorphHandOffFadeMillis))
             endOnce()
         } else {
             MorphBackdropState.open()
@@ -1100,10 +1144,11 @@ fun CardMorphOverlay(
             // A window standing down for a tab switch fades out as one piece:
             // the home capture, the scrim and the page still shrinking back into
             // the card. Nothing of the page being left may remain over the page
-            // that is sliding in.
+            // that is sliding in. The landed window's hand-off dissolve uses
+            // the same layer.
             .then(
-                if (yieldAlpha < 1f) {
-                    Modifier.graphicsLayer { alpha = yieldAlpha }
+                if (yieldAlpha < 1f || handingOff) {
+                    Modifier.graphicsLayer { alpha = yieldAlpha * handOffAlpha.value }
                 } else {
                     Modifier
                 },
@@ -1267,6 +1312,9 @@ fun CardReturnOverlay(
     onTap: () -> Unit,
     onSwap: () -> Unit,
     onReopened: () -> Unit,
+    /** The landed window is pixel-for-pixel the live home and is about to
+     *  dissolve: the source slot (and its title) may go back to the live card. */
+    onHandedOff: () -> Unit = {},
     /** A press handed this window over to a new morph. It keeps animating in
      *  parallel from exactly where it was, but owns no global state. */
     retiring: Boolean = false,
@@ -1315,6 +1363,10 @@ fun CardReturnOverlay(
     // It must stop intercepting touches right then: the home behind it is the
     // real page and has to respond immediately, not after the overlay is gone.
     var landed by remember(snapshot) { mutableStateOf(false) }
+    // The landed window dissolves into the live home so the card's shadow eases
+    // in — see [MorphHandOffFadeMillis].
+    val handOffAlpha = remember(snapshot) { Animatable(1f) }
+    var handingOff by remember(snapshot) { mutableStateOf(false) }
     // Once a new container has taken the screen this window is background for
     // good. Its move may still be playing when the new opening lands, and it
     // must not pop back into view at that moment: it stays out of the way and
@@ -1369,6 +1421,15 @@ fun CardReturnOverlay(
             }
             applyContent(1f)
             landed = true
+            if (!retiring) {
+                // Every layer on screen now matches the live home — except the
+                // card's drop shadow, which lives outside the recorded pixels.
+                // Hand the slot back, then dissolve the still-identical overlay
+                // so the shadow eases in instead of popping with the cut.
+                onHandedOff()
+                handingOff = true
+                handOffAlpha.animateTo(0f, tween(MorphHandOffFadeMillis))
+            }
             // The window has landed, the backdrop is exactly home, so the swap
             // happens under pixels that look unchanged. When retiring, the host
             // only detaches this overlay — global state belongs to the new morph.
@@ -1406,10 +1467,11 @@ fun CardReturnOverlay(
             .fillMaxSize()
             .then(modifier)
             // Faded as one piece, so nothing of the leaving page is left over the
-            // one that is sliding in.
+            // one that is sliding in. The landed window's hand-off dissolve uses
+            // the same layer.
             .then(
-                if (yieldAlpha < 1f) {
-                    Modifier.graphicsLayer { alpha = yieldAlpha }
+                if (yieldAlpha < 1f || handingOff) {
+                    Modifier.graphicsLayer { alpha = yieldAlpha * handOffAlpha.value }
                 } else {
                     Modifier
                 },

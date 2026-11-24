@@ -1239,6 +1239,15 @@ fun WyuApp(
                         homeLayers.remove(morph.route)
                     }
                 },
+                onHandedOff = {
+                    // The reverse has landed back on the source slot and the
+                    // overlay is dissolving: let the live element show through
+                    // underneath, with the shadow it draws itself.
+                    if (cardMorph?.snapshot === morph.snapshot) {
+                        WyuMorphPageState.flyingRoute = null
+                        WyuMorphPageState.titleHidden = false
+                    }
+                },
             )
         }
         returnMorph?.let { morph ->
@@ -1265,6 +1274,18 @@ fun WyuApp(
                 titleStartFontPx = morph.titleStartFontPx,
                 titleStartLinePx = morph.titleStartLinePx,
                 onTap = { returnReopen.value = true },
+                onHandedOff = {
+                    // The window has landed pixel-for-pixel on the live home and
+                    // is about to dissolve: hand the source slot back so the
+                    // card (and the shadow it draws itself) eases in under it.
+                    val live = returnMorph
+                    if (cardMorph == null && live?.retiring != true &&
+                        live?.snapshot === morph.snapshot
+                    ) {
+                        WyuMorphPageState.flyingRoute = null
+                        WyuMorphPageState.titleHidden = false
+                    }
+                },
                 onSwap = {
                     // Read the live state, not the captured `morph`: a running
                     // LaunchedEffect keeps the lambda it started with, and the
