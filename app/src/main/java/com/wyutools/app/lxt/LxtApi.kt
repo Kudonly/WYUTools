@@ -394,7 +394,37 @@ object LxtApi {
         return envelope.data as? JSONObject
     }
 
-    suspend fun valveStatus(token: String, machineId: String, communicationVal: String): Int? {
+    suspend fun valveClose(
+        token: String,
+        machineId: String,
+        deviceVer: String,
+        communicationVal: String,
+    ): JSONObject? {
+        val channel = channelWay(deviceVer)
+        if (channel == 0) throw ApiException(-2, "该设备不支持远程关阀，请现场操作")
+        val body = buildString {
+            append('{')
+            append("\"typeId\":1,")
+            append("\"channelWay\":").append(channel).append(',')
+            append("\"machineId\":").append(quote(machineId)).append(',')
+            append("\"deviceVer\":").append(quote(deviceVer)).append(',')
+            append("\"machineInfoJson\":{")
+            append("\"machineId\":").append(quote(machineId)).append(',')
+            append("\"communicationVal\":").append(quote(communicationVal))
+            append("}}")
+        }
+        val envelope = ensure(
+            call("POST", "/bath/valve/close", body = body, token = token)
+        )
+        return envelope.data as? JSONObject
+    }
+
+    suspend fun valveStatus(
+        token: String,
+        machineId: String,
+        communicationVal: String,
+        modeValue: Int = 1,
+    ): Int? {
         val envelope = ensure(
             call(
                 "GET",
@@ -402,7 +432,7 @@ object LxtApi {
                 params = listOf(
                     "typeId" to "1",
                     "machineId" to machineId,
-                    "modeValue" to "1",
+                    "modeValue" to modeValue.toString(),
                     "communicationVal" to communicationVal,
                 ),
                 token = token,

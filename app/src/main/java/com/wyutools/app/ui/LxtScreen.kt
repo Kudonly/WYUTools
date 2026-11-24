@@ -103,8 +103,9 @@ fun LxtScreen(
                         WyuTopBarIconButton(
                             icon = Icons.Filled.Refresh,
                             contentDescription = "刷新",
-                            onClick = vm::refreshBalances,
-                            enabled = !ui.balanceBusy,
+                            onClick = vm::refreshAll,
+                            enabled = !ui.balanceBusy && !ui.valveChecking &&
+                                !ui.valveBusy && !ui.valveClosing,
                         )
                         // 退出账号从卡片挪到顶栏，跟刷新并排两颗玻璃按钮。
                         WyuTopBarIconButton(
@@ -135,7 +136,7 @@ fun LxtScreen(
                 ValveCard(
                     ui = ui,
                     onOpenValve = { showValveDialog = true },
-                    onRefreshValve = vm::refreshValve,
+                    onCloseValve = vm::closeValve,
                 )
                 Spacer(Modifier.height(12.dp))
                 // 宿舍修改不是每天要看的数字，只是偶尔进出的设置，压到页尾。
@@ -172,7 +173,7 @@ fun LxtScreen(
     MiuixConfirmDialog(
         show = showValveDialog,
         title = "开启热水阀",
-        message = "将为「$valveTarget」开启热水阀，开阀后开始计费，请在洗澡机上结束用水。",
+        message = "将为「$valveTarget」开启热水阀，开阀后开始计费，可点「关阀」结束用水。",
         confirmText = "开阀",
         onDismiss = { showValveDialog = false },
         onConfirm = {
@@ -184,7 +185,7 @@ fun LxtScreen(
     MiuixConfirmDialog(
         show = ui.valveResumePrompt && ui.token != null && ui.valveDevice != null,
         title = "继续开启热水阀",
-        message = "登录已恢复。是否为「$valveTarget」开启热水阀？开阀后开始计费，请在洗澡机上结束用水。",
+        message = "登录已恢复。是否为「$valveTarget」开启热水阀？开阀后开始计费，可点「关阀」结束用水。",
         confirmText = "继续开阀",
         onDismiss = vm::dismissValveResume,
         onConfirm = {
@@ -627,17 +628,19 @@ private fun DormRow(
     }
 }
 
-/** 远程开阀：主按钮「开阀用水」+ 次要的「刷新状态」，按截图排成一行。 */
+/** 远程开阀/关阀：主按钮「开阀」+ 次要的「关阀」，按截图排成一行。 */
 @Composable
 private fun ValveCard(
     ui: LxtUiState,
     onOpenValve: () -> Unit,
-    onRefreshValve: () -> Unit,
+    onCloseValve: () -> Unit,
 ) {
     val device = ui.valveDevice
     val remoteSupported = device != null &&
         device.deviceVer.isNotBlank() &&
         LxtApi.channelWay(device.deviceVer) != 0
+    val canClose = ui.valveUsingActive && remoteSupported &&
+        !ui.valveBusy && !ui.valveChecking && !ui.valveClosing
     Card(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(20.dp),
@@ -654,7 +657,7 @@ private fun ValveCard(
             text = when {
                 device == null -> "先绑定浴室设备，才能远程开阀。"
                 !remoteSupported -> "该设备不支持远程开阀，请现场操作。"
-                else -> "开阀后开始计费，请在洗澡机上结束用水。"
+                else -> "开阀后开始计费，可点「关阀」结束用水。"
             },
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -663,7 +666,8 @@ private fun ValveCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = onOpenValve,
-                enabled = remoteSupported && !ui.valveBusy && !ui.valveChecking,
+                enabled = remoteSupported && !ui.valveBusy &&
+                    !ui.valveChecking && !ui.valveClosing,
                 modifier = Modifier.weight(1f),
                 minHeight = 48.dp,
                 colors = ButtonDefaults.buttonColorsPrimary(),
@@ -685,17 +689,23 @@ private fun ValveCard(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("开阀用水")
+                    Text("开阀")
                 }
             }
             Spacer(Modifier.width(10.dp))
             Button(
-                onClick = onRefreshValve,
-                enabled = !ui.valveChecking,
+                onClick = onCloseValve,
+                enabled = canClose,
                 minHeight = 48.dp,
                 colors = ButtonDefaults.buttonColors(),
             ) {
-                Text("刷新状态")
+                if (ui.valveClosing) {
+                    CircularProgressIndicator(size = 18.dp, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("正在关阀…")
+                } else {
+                    Text("关阀")
+                }
             }
         }
         if (ui.valveChecking) {
@@ -714,7 +724,7 @@ private fun ValveCard(
 }
 
 /** 「使用中」玻璃胶囊：盖在「开热水」标题旁边，只显示状态与已用时长；
- *  刷新走卡片里原本的「刷新状态」按钮。 */
+ *  刷新走顶栏刷新按钮。 */
 @Composable
 private fun ValveUsingCapsule(using: ValveUsing) {
     val minutes = ((System.currentTimeMillis() - using.openTime) / 60000L)
