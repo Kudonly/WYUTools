@@ -17,8 +17,8 @@ android {
         applicationId = "com.wyutools.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "3.2.0"
+        versionCode = 17
+        versionName = "3.3.0"
     }
 
     signingConfigs {
