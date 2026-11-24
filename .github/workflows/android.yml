@@ -41,9 +41,11 @@ jobs:
             exit 1
           fi
           mkdir -p "$HOME/.android"
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+          KEYSTORE="$HOME/.android/debug.keystore"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          echo "ANDROID_DEBUG_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
+          keytool -list -v -keystore "$KEYSTORE" \
             -storepass android -alias androiddebugkey | grep -E "Alias name|SHA1" | head -3
 
       - name: Install Android SDK platform
@@ -68,7 +70,7 @@ jobs:
           echo "apksigner=$SIGNER"
           "$SIGNER" verify --print-certs "$APK" | tee certs.txt
           # 本地 debug.keystore 的证书指纹；不同则说明 CI 没有沿用本机签名。
-          grep -q '4A:A3:EA:0C:A8:5E:03:66:39:6D:AA:83:BE:CE:4A:97:F1:2B:EB:C3' certs.txt
+          grep -qi '4aa3ea0ca85e0366396daa83bece4a97f12bebc3' certs.txt
 
       - name: Name APK
         run: |

@@ -21,6 +21,19 @@ android {
         versionName = "3.2.0"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // CI 从 Secret 恢复本机那一份 debug.keystore。显式指定路径，
+            // 否则 AGP 在 runner 上可能改用镜像自带的标准 debug key。
+            System.getenv("ANDROID_DEBUG_KEYSTORE")?.let { path ->
+                storeFile = file(path)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
