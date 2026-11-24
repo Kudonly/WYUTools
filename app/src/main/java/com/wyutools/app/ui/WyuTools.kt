@@ -54,7 +54,7 @@ enum class WyuTool(
 ) {
     Today("today", "今日", "今日待办 · 今天的课", false),
     Schedule("schedule", "课表", "本周课程 · 今日安排", false),
-    Lxt("lxt", "洗澡", "热水余额 · 开阀/关阀", false),
+    Lxt("lxt", "洗澡", "热水余额 · 开阀用水", false),
     Elec("elec", "电费", "用电查询 · 扫码充值", false),
     Gym("gym", "体育馆预约", "场地查询 · 在线预约", false),
     Exam("exam", "考试", "考试安排查询", false),

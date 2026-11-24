@@ -85,7 +85,6 @@ data class LxtUiState(
     val valveUsingActive: Boolean = false,
     val valveChecking: Boolean = false,
     val valveBusy: Boolean = false,
-    val valveClosing: Boolean = false,
     val valveResumePrompt: Boolean = false,
     val message: String? = null,
     val bindForValve: Boolean = false,
@@ -227,7 +226,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                             valveUsing = null,
                             valveUsingActive = false,
                             valveChecking = false,
-                            valveClosing = false,
                             valveResumePrompt = false,
                         )
                     }
@@ -240,7 +238,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                         captchaCode = "",
                         captchaBitmap = null,
                         loginError = null,
-                        valveClosing = false,
                         hotCent = null,
                         coldCent = null,
                         message = "登录成功",
@@ -282,7 +279,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                 valveUsing = null,
                 valveUsingActive = false,
                 valveChecking = false,
-                valveClosing = false,
                 valveResumePrompt = false,
             )
         }
@@ -290,7 +286,7 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshAll() {
         val state = _ui.value
-        if (state.valveBusy || state.valveClosing) return
+        if (state.valveBusy) return
         refreshBalances()
         if (state.valveUsing != null) validateValve(showResult = true)
     }
@@ -509,10 +505,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(message = "正在确认热水阀状态，请稍候") }
             return
         }
-        if (state.valveClosing) {
-            _ui.update { it.copy(message = "正在关阀，请稍候") }
-            return
-        }
         _ui.update { it.copy(valveBusy = true) }
         viewModelScope.launch {
             try {
@@ -579,120 +571,13 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun closeValve() {
-        val state = _ui.value
-        val token = state.token ?: return
-        val using = state.valveUsing
-        if (using == null) {
-            _ui.update { it.copy(message = "请先开阀") }
-            return
-        }
-        if (!state.valveUsingActive) {
-            _ui.update { it.copy(message = "当前未开阀，无需关阀") }
-            return
-        }
-        if (state.valveBusy || state.valveChecking || state.valveClosing) return
-        if (LxtApi.channelWay(using.deviceVer) == 0) {
-            _ui.update { it.copy(message = "该设备不支持远程关阀，请在洗澡机上结束用水") }
-            return
-        }
-
-        _ui.update { it.copy(valveClosing = true) }
-        viewModelScope.launch {
-            var expired = false
-            try {
-                val data = withContext(Dispatchers.IO) {
-                    LxtApi.valveClose(token, using.machineId, using.deviceVer, using.communicationVal)
-                }
-                val communicationVal = data?.opt("communicationVal")
-                    ?.toString()
-                    ?.takeUnless { it == "null" }
-                    ?.takeIf { it.isNotBlank() }
-                    ?: using.communicationVal
-                val updated = using.copy(communicationVal = communicationVal)
-                prefs.edit().putString("valveUsing", updated.toJson()).apply()
-                _ui.update { it.copy(valveUsing = updated) }
-
-                var closed = false
-                var reachable = false
-                for (i in 0 until 5) {
-                    if (closed || expired) break
-                    delay(if (i == 0) 1500L else 2000L)
-                    try {
-                        val status = withContext(Dispatchers.IO) {
-                            LxtApi.valveStatus(token, using.machineId, communicationVal, modeValue = 2)
-                        }
-                        if (status != null) {
-                            reachable = true
-                            if (status == 0) closed = true
-                        }
-                    } catch (e: ApiException) {
-                        if (e.code == -44) expired = true
-                    } catch (e: Exception) {
-                    }
-                    if (!closed && !expired && using.siteId.isNotBlank()) {
-                        try {
-                            val list = withContext(Dispatchers.IO) {
-                                LxtApi.machineStatusList(token, using.siteId, using.siteFlag)
-                            }
-                            reachable = true
-                            val running = list.any {
-                                it.machineId == using.machineId && LxtApi.isMachineRunning(it.curStatus)
-                            }
-                            if (!running) closed = true
-                        } catch (e: ApiException) {
-                            if (e.code == -44) expired = true
-                        } catch (e: Exception) {
-                        }
-                    }
-                }
-
-                if (expired) {
-                    sessionExpired()
-                    return@launch
-                }
-
-                if (closed) {
-                    prefs.edit().remove("valveUsing").apply()
-                    _ui.update {
-                        it.copy(
-                            valveClosing = false,
-                            valveUsing = null,
-                            valveUsingActive = false,
-                            valveChecking = false,
-                            message = "已结束用水",
-                        )
-                    }
-                } else {
-                    _ui.update {
-                        it.copy(
-                            valveClosing = false,
-                            message = if (reachable) {
-                                "关阀结果未确认，请到洗澡机上结束用水"
-                            } else {
-                                "暂未获取到阀状态，请稍后刷新或到洗澡机上结束用水"
-                            },
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                _ui.update { it.copy(valveClosing = false) }
-                if (e is ApiException && e.code == -44) {
-                    sessionExpired("登录已失效，请重新登录后再关阀")
-                } else {
-                    _ui.update { it.copy(message = friendly(e)) }
-                }
-            }
-        }
-    }
-
     fun dismissValveResume() = _ui.update { it.copy(valveResumePrompt = false) }
 
     private fun validateValve(showResult: Boolean) {
         val state = _ui.value
         val token = state.token ?: return
         val using = state.valveUsing ?: return
-        if (state.valveChecking || state.valveClosing) return
+        if (state.valveChecking) return
         val age = System.currentTimeMillis() - using.openTime
         if (age > VALVE_USING_MAX_AGE) {
             prefs.edit().remove("valveUsing").apply()
@@ -807,7 +692,6 @@ class LxtViewModel(app: Application) : AndroidViewModel(app) {
                 coldCent = null,
                 valveUsingActive = false,
                 valveChecking = false,
-                valveClosing = false,
                 valveResumePrompt = if (resumeOpen) it.valveDevice != null else it.valveResumePrompt,
                 balanceBusy = false,
                 valveBusy = false,
