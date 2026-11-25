@@ -652,7 +652,7 @@ private fun ValveCard(
             text = when {
                 device == null -> "先绑定浴室设备，才能远程开阀。"
                 !remoteSupported -> "该设备不支持远程开阀，请现场操作。"
-                else -> "开阀后开始计费，请在洗澡机上结束用水。"
+                else -> "结束用水请长按热水表按钮"
             },
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
