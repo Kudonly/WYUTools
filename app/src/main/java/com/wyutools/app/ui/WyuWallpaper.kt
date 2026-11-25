@@ -193,15 +193,28 @@ internal const val WyuSoftGlassBlurMin = 0
 private fun encodeGlassDarkValues(values: WyuGlassDarkValues): String = listOf(
     values.refractionIor, values.edgeThickness, values.shapeEdgePx, values.reflectOffset,
     values.reflectionStrength, values.blendAmount, values.innerColorMix, values.lightIntensity,
+    values.shapeEdgePow, values.blendSaturation, values.innerColorPow,
 ).joinToString(",") { it?.toString() ?: "" }
 
 private fun decodeGlassDarkValues(raw: String?): WyuGlassDarkValues {
-    if (raw == null) return WyuGlassDarkValues()
+    // 老存档只有前八位，缺的尾巴要落回深色默认值，不能读成 null 把默认顶掉。
+    val defaults = WyuGlassDarkValues()
+    if (raw == null) return defaults
     val parts = raw.split(",")
-    fun f(i: Int): Float? = parts.getOrNull(i)?.takeIf { it.isNotEmpty() }?.toFloatOrNull()
+    fun f(i: Int, fallback: Float?): Float? =
+        parts.getOrNull(i)?.takeIf { it.isNotEmpty() }?.toFloatOrNull() ?: fallback
     return WyuGlassDarkValues(
-        refractionIor = f(0), edgeThickness = f(1), shapeEdgePx = f(2), reflectOffset = f(3),
-        reflectionStrength = f(4), blendAmount = f(5), innerColorMix = f(6), lightIntensity = f(7),
+        refractionIor = f(0, defaults.refractionIor),
+        edgeThickness = f(1, defaults.edgeThickness),
+        shapeEdgePx = f(2, defaults.shapeEdgePx),
+        reflectOffset = f(3, defaults.reflectOffset),
+        reflectionStrength = f(4, defaults.reflectionStrength),
+        blendAmount = f(5, defaults.blendAmount),
+        innerColorMix = f(6, defaults.innerColorMix),
+        lightIntensity = f(7, defaults.lightIntensity),
+        shapeEdgePow = f(8, defaults.shapeEdgePow),
+        blendSaturation = f(9, defaults.blendSaturation),
+        innerColorPow = f(10, defaults.innerColorPow),
     )
 }
 
@@ -235,7 +248,7 @@ object WyuAppearance {
     private const val KeySoftGlassTuningCardTintLight = "soft_glass_tuning_card_tint_light"
     private const val KeySoftGlassTuningCardTintDark = "soft_glass_tuning_card_tint_dark"
     private const val KeySoftGlassDefaultsVersion = "soft_glass_defaults_version"
-    private const val SoftGlassDefaultsVersion = 8
+    private const val SoftGlassDefaultsVersion = 10
     private const val SoftGlassBlurDefault = 40
     private const val KeyLiquidGlassBlur = "liquid_glass_blur_radius"
     private const val KeyLiquidGlassTuningIor = "liquid_glass_tuning_refraction_ior"
@@ -264,6 +277,7 @@ object WyuAppearance {
     private const val KeyBackgroundBrightness = "glass_background_brightness"
     private const val KeyNoise = "glass_noise_coefficient"
     private const val KeyGlassDarkValues = "glass_dark_values"
+    // 已废弃：同步调节已移除，只在加载时清掉旧存档里的残键。
     private const val KeyTuneSync = "glass_tune_sync"
     private const val KeyMonetSeed = "monet_seed"
     private const val KeyPaletteScheme = "monet_palette_scheme"
@@ -308,8 +322,6 @@ object WyuAppearance {
     private val _softGlassTuning = MutableStateFlow(WyuSoftGlassTuning())
     val softGlassTuning: StateFlow<WyuSoftGlassTuning> = _softGlassTuning.asStateFlow()
 
-    private val _softGlassTuneSync = MutableStateFlow(false)
-    val softGlassTuneSync: StateFlow<Boolean> = _softGlassTuneSync.asStateFlow()
     private val _liquidGlassBlur = MutableStateFlow(LiquidGlassBlurDefault)
     val liquidGlassBlur: StateFlow<Int> = _liquidGlassBlur.asStateFlow()
     private val _liquidGlassTuning = MutableStateFlow(WyuLiquidGlassTuning())
@@ -505,7 +517,7 @@ object WyuAppearance {
             noiseCoefficient = loaded.getFloat(KeyNoise, tuningDefaults.noiseCoefficient).coerceIn(0f, 0.03f),
             darkValues = decodeGlassDarkValues(loaded.getString(KeyGlassDarkValues, null)),
         )
-        _softGlassTuneSync.value = loaded.getBoolean(KeyTuneSync, false)
+        if (loaded.contains(KeyTuneSync)) loaded.edit().remove(KeyTuneSync).apply()
         _monetSeed.value = loaded.getInt(KeyMonetSeed, 0).takeIf { it != 0 }
         _paletteScheme.value = WyuPaletteScheme.fromStored(loaded.getString(KeyPaletteScheme, null))
         val saved = WyuWallpaper.entries
@@ -704,14 +716,6 @@ object WyuAppearance {
             ?.putString(KeyGlassDarkValues, encodeGlassDarkValues(clamped.darkValues))
             ?.remove(KeySoftGlassTuningCardTint)
             ?.apply()
-    }
-
-    /** 两种玻璃的高级模式共用同步调节开关，默认只改当前深浅色。 */
-    fun setSoftGlassTuneSync(context: Context, sync: Boolean) {
-        ensureLoaded(context)
-        if (_softGlassTuneSync.value == sync) return
-        _softGlassTuneSync.value = sync
-        prefs?.edit()?.putBoolean(KeyTuneSync, sync)?.apply()
     }
 
     suspend fun loadCustomWallpaper(context: Context) {

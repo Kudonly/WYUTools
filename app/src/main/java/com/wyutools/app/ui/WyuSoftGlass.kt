@@ -244,11 +244,19 @@ float3 sdfNormal(float2 c) {
   float2 grad = float2((right - left) / (2.0 * eps), (top - bottom) / (2.0 * eps));
   return normalize(float3(grad, 1.0));
 }
-float4 renderGlassShape(float4 nmlData, float2 uvPx, float2 centerPx, float2 sizePx, float2 vUv) {
+float4 renderGlassShape(float4 nmlData, float2 uvPx, float2 centerPx, float2 sizePx, float2 vUv, float cover) {
   float cornerMask = nmlData.z;
   float oneMinusW = clamp(1.0 - nmlData.w, 0.0, 1.0);
   float nmlZ = 1.0 - pow(oneMinusW, uRefractBlurScale_invEdgePow.y);
-  float finalAlpha = smoothstep(0.0, uNmlZAAThreshold, nmlZ);
+  // Live glass uses the silhouette's own one-pixel ramp, not the bevel
+  // profile. Using the profile as alpha made the rim fade out over a band that
+  // grows with the edge width: on a 1080p/low-dpi panel that band is tens of
+  // pixels, so the top edge read as a translucent fringe and the surface
+  // looked short. The baked wallpaper path is already correct and keeps its
+  // original threshold (`uShapeInset` is zero only there).
+  float finalAlpha = uShapeInset.x > 0.0001
+      ? cover
+      : smoothstep(0.0, uNmlZAAThreshold, nmlZ);
   if ((1.0 - uSatBri_burn_unshade.w) <= 0.000001) {
     return float4(uGlassColor.rgb, uAlpha_shapeEdgeThickReflect.x * cornerMask * finalAlpha);
   }
@@ -276,7 +284,12 @@ float4 renderGlassShape(float4 nmlData, float2 uvPx, float2 centerPx, float2 siz
   glassMaterial.rgb = addLight(glassMaterial.rgb, reflectionResult.rgb, oneMinusW * uRefractIORStrengthLight_clrpow.z);
   glassMaterial = calculateInnerEdgeEffects(glassMaterial, vUv);
   glassMaterial = isInnerBoxW ? glassMaterial : processLighting(glassMaterial, uvDisplayPx, normal);
-  glassMaterial = pow(glassMaterial, float4(uRefractIORStrengthLight_clrpow.w, uRefractIORStrengthLight_clrpow.w, uRefractIORStrengthLight_clrpow.w, uRefractIORStrengthLight_clrpow.w));
+  // Gamma is 1.0 in every shipped preset; four pow() calls per fragment for a
+  // no-op is the single most expensive avoidable branch in this shader.
+  float gamma = uRefractIORStrengthLight_clrpow.w;
+  if (abs(gamma - 1.0) > 0.0001) {
+    glassMaterial = pow(max(glassMaterial, float4(0.0)), float4(gamma, gamma, gamma, gamma));
+  }
   glassMaterial.rgb = mix(clamp(glassMaterial.rgb, 0.0, 1.0), uGlassColor.rgb, uSatBri_burn_unshade.w);
   glassMaterial.a *= uAlpha_shapeEdgeThickReflect.x * cornerMask * finalAlpha;
   return glassMaterial;
@@ -295,7 +308,13 @@ half4 main(float2 xy) {
   float4 nmlData = float4(n.xy * 0.5 + 0.5, 1.0, -d / e);
   float2 screenUV = shapePos / shapeSize;
   float2 centerPx = size * 0.5;
-  float4 color = (nmlData.w <= -2.0 / e) ? float4(0.0, 0.0, 0.0, 0.0) : renderGlassShape(nmlData, xy, centerPx, size, screenUV);
+  // Keep the glass solid slightly outside the silhouette so the shape
+  // clip antialiasing samples real glass colour instead of a faded edge.
+  // With the ramp starting at d=0 the clipped AA pixel mixed in the
+  // backdrop and, on a 1080p low-dpi panel, read as the glass not reaching
+  // the bright rim line. The extra band lives outside the clip.
+  float cover = clamp(1.0 - d + 2.0, 0.0, 1.0);
+  float4 color = cover <= 0.0 ? float4(0.0, 0.0, 0.0, 0.0) : renderGlassShape(nmlData, xy, centerPx, size, screenUV, cover);
   return half4(half(color.r * color.a), half(color.g * color.a), half(color.b * color.a), half(color.a));
 }
 """
@@ -397,12 +416,10 @@ fun WyuLiquidGlassTuning.editedLiquid(
     WyuGlassParam.Saturation -> when (scope) {
         WyuTuneScope.Light -> copy(saturationLight = value)
         WyuTuneScope.Dark -> copy(saturationDark = value)
-        WyuTuneScope.Sync -> copy(saturationLight = value, saturationDark = value)
     }
     WyuGlassParam.CardTintAlpha -> when (scope) {
         WyuTuneScope.Light -> copy(cardTintAlphaLight = value)
         WyuTuneScope.Dark -> copy(cardTintAlphaDark = value)
-        WyuTuneScope.Sync -> copy(cardTintAlphaLight = value, cardTintAlphaDark = value)
     }
     WyuGlassParam.ShapeEdgePow -> copy(shapeEdgePow = value)
     WyuGlassParam.ReflectLighten -> copy(reflectLighten = value)
@@ -441,6 +458,7 @@ internal fun Modifier.wyuLiquidGlass(
     shapeEdgePow: Float? = null,
     refractionThicknessPx: Float? = null,
     reflectionThicknessPx: Float? = null,
+    dirLightScale: Float = 1f,
 ): Modifier {
     val edge = shapeEdgePx ?: tuning.shapeEdgePx
     val pow = shapeEdgePow ?: tuning.shapeEdgePow
@@ -480,6 +498,7 @@ internal fun Modifier.wyuLiquidGlass(
             bgSaturation = tuning.saturation(dark),
             reflectionStrength = tuning.reflectionStrength,
             refractionIor = tuning.refractionIor,
+            dirLightScale = dirLightScale,
         )
     }
 }
@@ -500,17 +519,17 @@ private const val GlassDrawScale = 0.75f
  * Saturation is split per mode (vivid in light, gentler in dark).
  */
 // Defaults follow miuix-glass GlassStyles.CommonMediumRegular* (source-density units).
-private const val UpstreamIor = 3.0f
-private const val UpstreamEdgeWidth = 60f
-private const val UpstreamEdgePow = 4.0f
-private const val UpstreamThickness = 80f
+private const val UpstreamIor = 3.2f
+private const val UpstreamEdgeWidth = 64f
+private const val UpstreamEdgePow = 5.27f
+private const val UpstreamThickness = 199f
 private const val UpstreamReflectOffset = 600f
 private const val UpstreamReflectLighten = 1.0f
 private const val UpstreamReflectStrength = 0.8f
 private const val UpstreamSaturationLight = 2.0f
-private const val UpstreamSaturationDark = 3.0f
+private const val UpstreamSaturationDark = 2.0f
 private const val UpstreamTintLight = 0.5f
-private const val UpstreamTintDark = 0.4f
+private const val UpstreamTintDark = 0.72f
 private const val UpstreamBlendAmount = 0.2f
 private const val UpstreamBlendSaturation = 2.0f
 private const val UpstreamBlendBrightness = 0.2f
@@ -523,11 +542,10 @@ private const val UpstreamLightOpposite = 0.8f
 private const val UpstreamBackgroundBrightness = 0.0f
 private const val UpstreamNoise = 0.0045f
 
-/** 高级模式当前编辑的深浅色范围。 */
-enum class WyuTuneScope(val label: String) {
-    Light("仅浅色"),
-    Dark("仅深色"),
-    Sync("同步调节"),
+/** 高级模式编辑的永远是当前主题那一份：浅色或深色，不再有同步档。 */
+enum class WyuTuneScope {
+    Light,
+    Dark,
 }
 
 /** 高级模式暴露的参数；深色可单独覆盖，浅色存主字段。 */
@@ -539,17 +557,49 @@ enum class WyuGlassParam {
     LightIntensity, LightOppositeIntensity, BackgroundBrightness, NoiseCoefficient,
 }
 
-/** 深色模式下对共享参数的覆盖；null 表示沿用浅色值。 */
+/**
+ * 深色模式下对共享参数的覆盖；null 表示沿用浅色值。
+ *
+ * 这里的默认值就是深色的出厂观感：折射更强、边缘更宽更硬，混合量归零、
+ * 内层更淡。高级模式选「仅深色」拖动滑条时写的就是这些位。
+ */
 data class WyuGlassDarkValues(
+    // 折射与边缘四项深浅统一，深色直接继承浅色默认。
     val refractionIor: Float? = null,
     val edgeThickness: Float? = null,
     val shapeEdgePx: Float? = null,
+    val shapeEdgePow: Float? = null,
     val reflectOffset: Float? = null,
     val reflectionStrength: Float? = null,
-    val blendAmount: Float? = null,
-    val innerColorMix: Float? = null,
+    val blendAmount: Float? = 0f,
+    val blendSaturation: Float? = 1.52f,
+    val innerColorMix: Float? = 0.25f,
+    val innerColorPow: Float? = 1.03f,
     val lightIntensity: Float? = null,
-)
+) {
+    companion object {
+        /**
+         * 全部沿用浅色值。
+         *
+         * [resolvedFor] 摊平后必须置成它，不能置成 `WyuGlassDarkValues()`：
+         * 那是有默认值的构造，二次解析会把深色出厂值重新盖回用户刚改的结果
+         * （卡片样式就被解析了两次，深色调参因此看起来完全不生效）。
+         */
+        val None = WyuGlassDarkValues(
+            refractionIor = null,
+            edgeThickness = null,
+            shapeEdgePx = null,
+            shapeEdgePow = null,
+            reflectOffset = null,
+            reflectionStrength = null,
+            blendAmount = null,
+            blendSaturation = null,
+            innerColorMix = null,
+            innerColorPow = null,
+            lightIntensity = null,
+        )
+    }
+}
 
 data class WyuSoftGlassTuning(
     val refractionIor: Float = UpstreamIor,
@@ -588,14 +638,17 @@ fun WyuSoftGlassTuning.resolvedFor(dark: Boolean): WyuSoftGlassTuning {
         refractionIor = d.refractionIor ?: refractionIor,
         edgeThickness = d.edgeThickness ?: edgeThickness,
         shapeEdgePx = d.shapeEdgePx ?: shapeEdgePx,
+        shapeEdgePow = d.shapeEdgePow ?: shapeEdgePow,
         reflectOffset = d.reflectOffset ?: reflectOffset,
         reflectionStrength = d.reflectionStrength ?: reflectionStrength,
         blendAmount = d.blendAmount ?: blendAmount,
+        blendSaturation = d.blendSaturation ?: blendSaturation,
         innerColorMix = d.innerColorMix ?: innerColorMix,
+        innerColorPow = d.innerColorPow ?: innerColorPow,
         lightIntensity = d.lightIntensity ?: lightIntensity,
         saturationLight = saturationDark,
         cardTintAlphaLight = cardTintAlphaDark,
-        darkValues = WyuGlassDarkValues(),
+        darkValues = WyuGlassDarkValues.None,
     )
 }
 
@@ -603,10 +656,13 @@ private fun WyuGlassDarkValues.withParam(param: WyuGlassParam, value: Float) = w
     WyuGlassParam.RefractionIor -> copy(refractionIor = value)
     WyuGlassParam.EdgeThickness -> copy(edgeThickness = value)
     WyuGlassParam.ShapeEdgePx -> copy(shapeEdgePx = value)
+    WyuGlassParam.ShapeEdgePow -> copy(shapeEdgePow = value)
     WyuGlassParam.ReflectOffset -> copy(reflectOffset = value)
     WyuGlassParam.ReflectionStrength -> copy(reflectionStrength = value)
     WyuGlassParam.BlendAmount -> copy(blendAmount = value)
+    WyuGlassParam.BlendSaturation -> copy(blendSaturation = value)
     WyuGlassParam.InnerColorMix -> copy(innerColorMix = value)
+    WyuGlassParam.InnerColorPow -> copy(innerColorPow = value)
     WyuGlassParam.LightIntensity -> copy(lightIntensity = value)
     else -> this
 }
@@ -671,10 +727,9 @@ fun WyuSoftGlassTuning.edited(
         WyuGlassParam.Saturation -> copy(saturationDark = v)
         WyuGlassParam.CardTintAlpha -> copy(cardTintAlphaDark = v)
         // 上游材质里单值参数没有深色覆盖位，深色范围下调成跟随浅色。
-        WyuGlassParam.ShapeEdgePow, WyuGlassParam.ReflectLighten,
-        WyuGlassParam.BlendSaturation, WyuGlassParam.BlendBrightness,
+        WyuGlassParam.ReflectLighten, WyuGlassParam.BlendBrightness,
         WyuGlassParam.InnerBottom, WyuGlassParam.InnerColorWhite,
-        WyuGlassParam.InnerColorPow, WyuGlassParam.LightOppositeIntensity,
+        WyuGlassParam.LightOppositeIntensity,
         WyuGlassParam.BackgroundBrightness, WyuGlassParam.NoiseCoefficient,
         -> setLight(v)
         else -> copy(darkValues = darkValues.withParam(param, v))
@@ -683,7 +738,6 @@ fun WyuSoftGlassTuning.edited(
     return when (scope) {
         WyuTuneScope.Light -> setLight(value)
         WyuTuneScope.Dark -> setDark(value)
-        WyuTuneScope.Sync -> setLight(value).setDark(value)
     }
 }
 
@@ -702,6 +756,7 @@ private class WyuSoftGlassEffects(
     private val reflectionStrength: Float,
     private val refractionIor: Float,
     private val downscale: Int,
+    private val dirLightScale: Float,
 ) : (BackdropEffectScope) -> Unit {
     private var cached: RenderEffect? = null
     private var cachedW = -1f
@@ -721,7 +776,10 @@ private class WyuSoftGlassEffects(
             scope.noiseCoefficient = 0f
             return
         }
-        val pad = min(min(w, h), 128f).roundToInt().toFloat().coerceAtLeast(1f)
+        // The padding only has to hold the blur and the (already capped) ray
+        // offsets. Keeping it proportional to the short side stops small
+        // controls from paying for a card-sized 128 px ring on every frame.
+        val pad = min(min(w, h) * 0.75f, 128f).roundToInt().toFloat().coerceAtLeast(1f)
         // miuix-blur only implements 1/2/4/8/16; anything else throws inside
         // its draw pass, so snap arbitrary values onto a supported step.
         val factor = when {
@@ -752,10 +810,21 @@ private class WyuSoftGlassEffects(
             val inv = 1f / factor
             val layerW = (w + pad * 2f) * inv
             val layerH = (h + pad * 2f) * inv
-            val edgePx = (shapeEdgePx * densityScale).coerceAtLeast(0.5f)
+            val minSide = min(layerW, layerH)
+            // Card-tuned rim numbers are larger than a short control is tall.
+            // Left uncapped on a 1080p/low-dpi panel the bevel owns the whole
+            // surface and the top edge never reaches a flat interior.
+            val edgeLayer = (shapeEdgePx * densityScale * inv)
+                .coerceAtLeast(0.5f)
+                .coerceAtMost(max(minSide * 0.35f, 0.5f))
             val edgePow = shapeEdgePow.coerceAtLeast(0.05f)
-            val refractionPx = (refractionThicknessPx * densityScale).coerceAtLeast(0f)
-            val reflectionPx = (reflectionThicknessPx * densityScale).coerceAtLeast(0f)
+            // Rays that leave the padded layer clamp at its border and smear
+            // the edge; keep both offsets inside the padding that was recorded.
+            val rayLimit = (pad - 2f).coerceAtLeast(0f) * inv
+            val refractionLayer = (refractionThicknessPx * densityScale * inv)
+                .coerceIn(0f, rayLimit)
+            val reflectionLayer = (reflectionThicknessPx * densityScale * inv)
+                .coerceIn(0f, rayLimit)
             val shader = android.graphics.RuntimeShader(WyuSoftGlassShader).apply {
                 setFloatUniform("uGeoPx_pos_size", 0f, 0f, layerW, layerH)
                 setFloatUniform("uRot_Scale", 1f, 0f, 1f, 1f)
@@ -766,9 +835,9 @@ private class WyuSoftGlassEffects(
                 setFloatUniform(
                     "uAlpha_shapeEdgeThickReflect",
                     1f,
-                    edgePx * inv,
-                    refractionPx * inv,
-                    reflectionPx * inv,
+                    edgeLayer,
+                    refractionLayer,
+                    reflectionLayer,
                 )
                 // HyperLight "balanced" (平衡柔光玻璃) preset, tuned on-device.
                 setFloatUniform("uRefractIORStrengthLight_clrpow", refractionIor, reflectionStrength, reflectionLighten, 1f)
@@ -777,13 +846,13 @@ private class WyuSoftGlassEffects(
                 setFloatUniform("uDarkRangeDark_hit", 0.6f, 1f, 0f, 0f)
                 setFloatUniform("uDirLightDir_angleRange", -0.4f, 0.6f, -0.8f, 0.8f * Math.PI.toFloat())
                 setFloatUniform("uRefractBlurScale_invEdgePow", 1f, 1f / edgePow, 0f, 0f)
-                setFloatUniform("uDirLightIntensityOpp_inBottom_lumiAmount", 1.54f, 0.7f, 0.03f, 0.216f)
+                setFloatUniform("uDirLightIntensityOpp_inBottom_lumiAmount", 1.54f * dirLightScale, 0.7f * dirLightScale, 0.03f, 0.216f)
                 setFloatUniform("uLuminanceValues", 0.67f, 0.16f, 0.09f, 0f)
                 setFloatUniform("uSatBri_burn_unshade", 1.68f, -0.1f, 0f, 0f)
                 setFloatUniform("uLuminanceCurveMode", 1f)
-                setFloatUniform("uNmlZAAThreshold", nmlZThreshold(edgePx))
+                setFloatUniform("uNmlZAAThreshold", nmlZThreshold(edgeLayer))
                 setFloatUniform("uCornerRadius", cornerPx * inv)
-                setFloatUniform("uShapeEdgePx", edgePx * inv)
+                setFloatUniform("uShapeEdgePx", edgeLayer)
                 setFloatUniform("uShapeEdgePow", edgePow)
                 setFloatUniform("uBaseTint", baseTint.red, baseTint.green, baseTint.blue, baseTint.alpha)
             }
@@ -835,6 +904,7 @@ fun Modifier.wyuSoftGlass(
     bgSaturation: Float = RawBgSaturation,
     reflectionStrength: Float = RawReflectionStrength,
     refractionIor: Float = RawRefractionIor,
+    dirLightScale: Float = 1f,
 ): Modifier {
     if (backdrop == null || !wyuSoftGlassSupported) return this
     val effects = remember(
@@ -852,6 +922,7 @@ fun Modifier.wyuSoftGlass(
         bgSaturation,
         reflectionStrength,
         refractionIor,
+        dirLightScale,
     ) {
         WyuSoftGlassEffects(
             glassShape = glassShape,
@@ -868,6 +939,7 @@ fun Modifier.wyuSoftGlass(
             reflectionStrength = reflectionStrength,
             refractionIor = refractionIor,
             downscale = downscale,
+            dirLightScale = dirLightScale,
         )
     }
     val backdropModifier = remember(backdrop, shape, effects) {

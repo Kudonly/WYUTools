@@ -1033,6 +1033,11 @@ private fun WyuSwitchingTitle(
 // card-sized offsets clamp at the layer boundary and fringe the rim highlight.
 internal const val TopBarGlassRefractionPx = 56f
 internal const val TopBarGlassReflectionPx = 96f
+// Control-sized rim. The card profile (106 px at 3x) is wider than a 30–44 dp
+// control is tall: the whole surface stays inside the bevel and the top edge
+// never reaches a flat interior. The 40 dp card band uses the same correction.
+internal const val TopBarGlassEdgePx = 44f
+internal const val TopBarGlassEdgePow = 2.4f
 
 /**
  * 一块控件玻璃底：投影、材质、裁剪，以及「要不要再叠容器色」。
@@ -1076,6 +1081,8 @@ internal fun rememberWyuControlGlass(
             dark = style.dark,
             baseTint = wyuLiquidControlTint(),
             blurPercent = style.liquidBlur,
+            shapeEdgePx = TopBarGlassEdgePx,
+            shapeEdgePow = TopBarGlassEdgePow,
             refractionThicknessPx = TopBarGlassRefractionPx,
             reflectionThicknessPx = TopBarGlassReflectionPx,
         )
@@ -2257,6 +2264,13 @@ fun WyuNavigatorBar(
                                 dark = dark,
                                 baseTint = wyuLiquidControlTint(),
                                 blurPercent = glassStyle.liquidBlur,
+                                // 1:1 渲染：downscale=2 时形状 AA 只有半分辨率的一格，
+                                // 上采样后顶边会留 2-3px 半透明毛边，圆角也被量化成阶梯。
+                                downscale = 1,
+                                // 底栏边缘的两盏方向光把最外 2px 打成白线：1080p /
+                                // density 450 上像素更粗，看着像玻璃外面的一条白框；
+                                // 高 dpi 屏这条线只有 1px 反而自然，所以只压低密度端。
+                                dirLightScale = if (LocalDensity.current.density < 3f) 0.4f else 1f,
                             )
                             .graphicsLayer {
                                 val width = size.width.coerceAtLeast(1f)

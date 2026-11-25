@@ -63,17 +63,6 @@ fun MeContent(
 
     Box(modifier = modifier.fillMaxSize()) {
         when {
-            ui.restoring -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = topInset),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-
             ui.loggedIn -> {
                 LoggedInContent(
                     ui = ui,
@@ -90,7 +79,11 @@ fun MeContent(
             else -> {
                 LoggedOutContent(
                     loginError = ui.loginError,
-                    autoLoggingIn = ui.autoLoggingIn,
+                    // Session restore is the same "working on it" state as an
+                    // auto-login retry. Keep the cards on screen and put the
+                    // spinner inside the login card instead of blanking the page.
+                    autoLoggingIn = ui.restoring || ui.autoLoggingIn,
+                    restoring = ui.restoring,
                     onLogin = onLogin,
                     scrollState = scrollState,
                     topPadding = topInset,
@@ -118,6 +111,7 @@ fun MeContent(
 private fun LoggedOutContent(
     loginError: String?,
     autoLoggingIn: Boolean,
+    restoring: Boolean,
     onLogin: () -> Unit,
     scrollState: ScrollState,
     topPadding: Dp,
@@ -155,16 +149,20 @@ private fun LoggedOutContent(
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = if (autoLoggingIn) "正在自动登录" else "尚未登录",
+                    text = when {
+                        restoring -> "正在恢复登录"
+                        autoLoggingIn -> "正在自动登录"
+                        else -> "尚未登录"
+                    },
                     style = MiuixTheme.textStyles.title4,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (autoLoggingIn) {
-                        "登录状态已失效，正在使用本机保存的密码重新登录…"
-                    } else {
-                        "登录统一身份认证后，可连接并打开教务系统"
+                    text = when {
+                        restoring -> "正在读取本机登录状态，请稍候…"
+                        autoLoggingIn -> "登录状态已失效，正在使用本机保存的密码重新登录…"
+                        else -> "登录统一身份认证后，可连接并打开教务系统"
                     },
                     style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
