@@ -138,22 +138,46 @@ class GymApi(
             .sortedBy { it.name }
     }
 
-    fun fetchRecords(): List<GymRecord> {
+    /**
+     * 我的预约列表。
+     *
+     * 接口是分页的，只请求 pageNumber=1 会丢掉第 50 条之后的旧记录（列表按
+     * 学期分组展示，页数少了整个学期都会消失）。这里逐页拉，直到返回不满一页、
+     * 累计条数到齐，或某页没有任何新记录（服务端忽略页码时防止死循环）。
+     */
+    fun fetchRecords(maxPages: Int = RecordMaxPages): List<GymRecord> {
         ensureAppSession()
-        val root = postJson(
-            "/modules/myApplication/getMyAppointmentListData.do",
-            linkedMapOf(
-                "pageSize" to "50",
-                "pageNumber" to "1",
-            ),
-        )
-        val rows = extractRows(root, "getMyAppointmentListData")
-        return rows.mapNotNull { parseRecord(it) }
-            .distinctBy { record -> record.recordId ?: "${record.wid}|${record.dateRaw}|${record.slot}" }
-            .sortedWith(
-                compareByDescending<GymRecord> { it.date }
-                    .thenByDescending { it.submittedAt.orEmpty() },
+        val collected = LinkedHashMap<String, GymRecord>()
+        var page = 1
+        var total = -1
+        while (page <= maxPages) {
+            val root = postJson(
+                "/modules/myApplication/getMyAppointmentListData.do",
+                linkedMapOf(
+                    "pageSize" to "$RecordPageSize",
+                    "pageNumber" to "$page",
+                ),
             )
+            val rows = extractRows(root, "getMyAppointmentListData")
+            var added = 0
+            for (row in rows) {
+                val record = parseRecord(row) ?: continue
+                val key = record.recordId ?: "${record.wid}|${record.dateRaw}|${record.slot}"
+                if (!collected.containsKey(key)) {
+                    collected[key] = record
+                    added += 1
+                }
+            }
+            if (total < 0) total = extractTotal(root, "getMyAppointmentListData")
+            // 不满一页 = 最后一页；整页都是重复 = 服务端没认页码；够数 = 齐了。
+            if (rows.size < RecordPageSize || added == 0) break
+            if (total in 0..collected.size) break
+            page += 1
+        }
+        return collected.values.sortedWith(
+            compareByDescending<GymRecord> { it.date }
+                .thenByDescending { it.submittedAt.orEmpty() },
+        )
     }
 
     /**
@@ -252,7 +276,8 @@ class GymApi(
         }
 
         val records = try {
-            fetchRecords()
+            // 新预约一定在最近这一页，没必要为核对把历史全拉一遍。
+            fetchRecords(maxPages = 1)
         } catch (auth: GymException) {
             throw auth
         } catch (_: Exception) {
@@ -629,6 +654,24 @@ class GymApi(
     private fun JSONArray.toObjectList(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
+    /** 分页接口的总条数；字段名各模块不统一，取到哪个算哪个，没有就 -1。 */
+    private fun extractTotal(root: JSONObject, key: String): Int {
+        val holder = root.optJSONObject("datas")?.optJSONObject(key)
+            ?: root.optJSONObject("data")
+            ?: return -1
+        val names = listOf("total", "totalCount", "recordCount", "rowCount", "totalRow", "count")
+        for (name in names) {
+            if (!holder.has(name)) continue
+            val count = when (val value = holder.opt(name)) {
+                is Number -> value.toInt()
+                is String -> value.toIntOrNull()
+                else -> null
+            }
+            if (count != null && count >= 0) return count
+        }
+        return -1
+    }
+
     // -------------------- 解析 --------------------
 
     private fun parseVenue(row: JSONObject, date: LocalDate): GymVenue? {
@@ -789,6 +832,9 @@ class GymApi(
 
     companion object {
         private const val TRACE_TAG = "GymTrace"
+        // 「我的预约」分页参数：50 是一页的稳定上限，40 页 = 2000 条兜底。
+        private const val RecordPageSize = 50
+        private const val RecordMaxPages = 40
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/118.0 Mobile Safari/537.36"

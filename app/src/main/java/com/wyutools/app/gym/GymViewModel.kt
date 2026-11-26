@@ -27,6 +27,9 @@ data class GymNotice(
 // repeat inside this window is the same message to the user, so it is dropped.
 private const val NoticeDedupeMillis = 1500L
 
+// Last successful record pull, so the tab is not blank on a cold start.
+private const val KeyRecordsCache = "records_cache"
+
 data class GymUiState(
     val user: GymUser? = null,
     val checkingSession: Boolean = true,
@@ -110,6 +113,16 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         if (cachedUser != null) {
             _ui.update { it.copy(user = cachedUser) }
         }
+        // Paint the last pull right away. Only a cache belonging to this very
+        // account is used, and an empty one is ignored so a genuinely empty
+        // history still goes through the network instead of claiming "no
+        // records" from stale data.
+        prefs.getString(KeyRecordsCache, null)
+            ?.let(::decodeGymRecords)
+            ?.takeIf { cached -> account != null && cached.account == account && cached.records.isNotEmpty() }
+            ?.let { cached ->
+                _ui.update { it.copy(records = cached.records, recordsLoaded = true) }
+            }
 
         viewModelScope.launch {
             try {
@@ -363,7 +376,9 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(loadingRecords = true) }
         viewModelScope.launch {
             try {
-                val records = withContext(Dispatchers.IO) { api.fetchRecords() }
+                val records = withContext(Dispatchers.IO) {
+                    api.fetchRecords().also { cacheRecords(it) }
+                }
                 WyuMorphPageState.awaitSettled()
                 _ui.update {
                     it.copy(
@@ -377,6 +392,22 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
                 handleApiError(e)
             }
         }
+    }
+
+    private fun cacheRecords(records: List<GymRecord>) {
+        val account = _ui.value.user?.account?.takeIf { it.isNotBlank() } ?: return
+        prefs.edit()
+            .putString(
+                KeyRecordsCache,
+                encodeGymRecords(
+                    GymRecordCache(
+                        account = account,
+                        fetchedAt = System.currentTimeMillis(),
+                        records = records,
+                    ),
+                ),
+            )
+            .apply()
     }
 
     private fun handleApiError(e: Exception) {
@@ -417,7 +448,12 @@ class GymViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun clearStoredSession() {
         GymSessionStore.clear(getApplication())
-        prefs.edit().remove("cookie").remove("name").remove("account").apply()
+        prefs.edit()
+            .remove("cookie")
+            .remove("name")
+            .remove("account")
+            .remove(KeyRecordsCache)
+            .apply()
     }
 
     private fun friendlyMessage(e: Exception): String = when (e) {
