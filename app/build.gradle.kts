@@ -17,8 +17,12 @@ android {
         applicationId = "com.wyutools.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "3.4"
+        versionCode = 22
+        versionName = "3.4.1"
+        // Only ship 64-bit libraries. Every included .so must be 16 KB aligned.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     signingConfigs {

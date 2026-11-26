@@ -25,17 +25,24 @@ AES、改过的 SM4/SNOW3G、三层 modified-TEA 等），用标准 JCE/BC 无�
 
 ## 预编译产物
 
-`app/src/main/jniLibs/{arm64-v8a,armeabi-v7a}/libesurf_cipher.so` 由 NDK r27
-（`aarch64-linux-android26-clang` / `armv7a-linux-androideabi26-clang`）编译，
-CI 与本地构建都不需要 NDK。重新编译的方法：
+`app/src/main/jniLibs/arm64-v8a/libesurf_cipher.so` 由 NDK r28 的
+`aarch64-linux-android26-clang` 编译，APK 只保留 arm64-v8a。CI 与本地构建都不需要 NDK。
+
+为支持 16 KB 页大小设备，链接时必须带 16 KB 对齐标志（NDK r28 默认已对齐，显式写出
+避免换工具链后回退）。在本目录执行：
 
 ```bash
-clang -shared -fPIC -O2 -w \
+CLANG=/path/to/ndk/toolchains/llvm/prebuilt/<host>/bin/aarch64-linux-android26-clang
+"$CLANG" -shared -fPIC -O2 -w \
+  -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 \
   -Iinclude -Isrc \
   -o ../jniLibs/arm64-v8a/libesurf_cipher.so \
   src/cipher/CipherFactory.c src/cipher/CipherUtils.c src/cipher/KeyData.c \
   $(ls src/cipher/algo/*.c | grep -v desede_ecb) \
   src/jni_bridge.c src/stub_unsupported.c
+
+# 验证：每个 LOAD 段的对齐必须是 0x4000
+readelf -lW ../jniLibs/arm64-v8a/libesurf_cipher.so | grep LOAD
 ```
 
 ## 许可
