@@ -75,8 +75,10 @@ import com.wyutools.app.ui.PhysicalScreen
 import com.wyutools.app.ui.LocalWyuDarkTheme
 import com.wyutools.app.ui.ROUTE_COMMON
 import com.wyutools.app.ui.ROUTE_EVAL
+import com.wyutools.app.ui.CampusAccountsScreen
 import com.wyutools.app.ui.CampusScreen
 import com.wyutools.app.ui.ROUTE_CAMPUS
+import com.wyutools.app.ui.ROUTE_CAMPUS_ACCOUNTS
 import com.wyutools.app.ui.ROUTE_EXAM
 import com.wyutools.app.ui.ROUTE_GPA
 import com.wyutools.app.ui.ROUTE_GRADES
@@ -873,6 +875,20 @@ fun WyuApp(
                     CampusScreen(
                         vm = app.campusViewModel,
                         onBack = { closeTool(ROUTE_CAMPUS) },
+                        onOpenAccounts = { nav.navigate(ROUTE_CAMPUS_ACCOUNTS) },
+                    )
+                }
+            }
+            composable(ROUTE_CAMPUS_ACCOUNTS) {
+                WyuRoutePage(
+                    route = ROUTE_CAMPUS_ACCOUNTS,
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    reveal = pageRevealSharp,
+                ) {
+                    CampusAccountsScreen(
+                        vm = app.campusViewModel,
+                        onBack = goBack,
                     )
                 }
             }

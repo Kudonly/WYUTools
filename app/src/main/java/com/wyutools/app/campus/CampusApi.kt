@@ -1,12 +1,11 @@
 package com.wyutools.app.campus
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.LinkProperties
 import java.io.IOException
-import java.net.Inet4Address
 import java.net.InetSocketAddress
-import java.net.Socket
+import java.net.Proxy
+import java.net.URI
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,35 +23,157 @@ import okhttp3.Response
  *
  * Shape of one session:
  *
- *  1. Hit a plain-HTTP generate_204 endpoint. While unauthenticated the gateway
- *     answers 302 and the Location header is the portal URL, which carries
- *     wlanuserip / wlanacip. Those two are mandatory later, so everything starts
- *     here — no portal URL, no login.
- *  2. POST the ticket endpoint with the zero Algo-ID. The answer is a ZSM blob
- *     (bytes starting with "001") that carries the Algo-ID to install. Unsupported
- *     ids are dropped and the identity regenerated, because reusing the same
- *     client-id would only fetch the same rejected id again.
- *  3. With the cipher installed, POST ticket → login → heartbeat, every packet an
- *     encrypted XML body, every answer encrypted in turn.
- *  4. Disconnect is a final encrypted packet to term.cgi — the portal does
- *     implement logout, so no session is left dangling on the server.
+ *  1. Probe a plain-HTTP generate_204 endpoint from the bound WLAN. While
+ *     unauthenticated the gateway answers 302 and the Location header leads to the
+ *     portal page, which is the only place the login endpoints are announced.
+ *  2. Read the portal page's config block. It carries `<ticket-url>` and
+ *     `<auth-url>` — full URLs, query included, possibly on a different host than
+ *     the page itself. Constructing these from the server IP works on a standard
+ *     deployment, but the announced URLs are the contract; guessing them is the
+ *     fallback.
+ *  3. POST ticket-url with the zero Algo-ID. The answer is a ZSM blob (bytes
+ *     starting with "001") that names the Algo-ID to install. Unsupported ids are
+ *     dropped and the identity regenerated, because reusing the same client-id
+ *     would only fetch the same rejected id again.
+ *  4. With the cipher installed, POST ticket → auth, every packet an encrypted XML
+ *     body. The auth answer carries `<keep-url>`, `<term-url>` and `<keep-retry>`;
+ *     heartbeats and logout go to those, not to derived paths.
+ *
+ * Every POST has to carry the portal's client headers (`Algo-ID`, `Client-ID`,
+ * `CDC-Checksum` and the school triple). Without them ticket.cgi answers with an
+ * empty body instead of the ZSM — which is exactly what a "portal not responding"
+ * dead end looks like from the outside.
  *
  * Redirects are deliberately not followed on the shared client: the portal URL is
  * exactly the value of the 302 Location header.
+ *
+ * Every request goes through [CampusNetGate]'s socket factory. Without it an
+ * unauthenticated WLAN has no default route, the traffic leaks onto mobile data
+ * and the portal subnet becomes unreachable — see [CampusNetGate] for the detail.
  */
 class CampusApi(private val context: Context) {
 
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .writeTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
+        // The portal only answers on the local subnet; a system-wide proxy would
+        // send those requests somewhere that cannot resolve them.
+        .proxy(Proxy.NO_PROXY)
+        .socketFactory(CampusNetGate.liveSocketFactory())
         .build()
+
+    // School identity the portal advertises in its response headers. It is echoed
+    // back on every POST, so it has to be captured from whichever answer arrives
+    // first — the probe's portal page usually gets there before ticket.cgi.
+    private var schoolId = ""
+    private var domain = ""
+    private var area = ""
 
     private var session: CampusSession? = null
 
     val currentSession: CampusSession? get() = session
+
+    /**
+     * Decides what the current WLAN needs, without any credentials.
+     *
+     * This is the "do I need to log in?" question, answered by what the gateway
+     * does to a plain HTTP request:
+     *  - 204 / 301 / 404 → internet already works, nothing to do;
+     *  - 302 → follow the Location chain, a portal page answers 200;
+     *  - 200 straight away → the probe itself was served the portal page;
+     *  - no answer at all → retry the backup probe, then the auth servers.
+     */
+    suspend fun probe(log: (String) -> Unit): CampusProbe = withContext(Dispatchers.IO) {
+        if (!CampusNetGate.hasWifiOrEthernet(context)) {
+            return@withContext CampusProbe(state = CampusNetState.NoNetwork)
+        }
+        CampusNetGate.bind(context)
+        log("网络：${CampusNetGate.describe(context)}")
+
+        var url = PROBE_URL
+        var hops = 0
+        var primaryFailed = false
+        var lastPortal = ""
+
+        while (hops < MAX_PROBE_HOPS) {
+            val response = tryGet(url, withAuthHeaders = hops > 0)
+            if (response == null) {
+                if (!primaryFailed) {
+                    primaryFailed = true
+                    log("主探测地址不可达，改用备用地址")
+                    url = PROBE_BAK_URL
+                    hops++
+                    continue
+                }
+                log("探测失败，尝试认证服务器连通性")
+                for (server in AUTH_SERVERS) {
+                    val result = tryGet(server, withAuthHeaders = false) ?: continue
+                    log("认证服务器 $server → ${result.code}")
+                    if (result.code == 200 || result.code == 302) {
+                        val portal = result.location?.takeIf { it.isNotBlank() } ?: server
+                        return@withContext CampusProbe(
+                            state = CampusNetState.NeedLogin,
+                            portalUrl = portal,
+                        )
+                    }
+                }
+                return@withContext CampusProbe(
+                    state = CampusNetState.Failed,
+                    detail = "网络请求失败，请检查是否已连上校园 WiFi",
+                )
+            }
+
+            when (response.code) {
+                204, 301, 404 -> {
+                    log("已可上网（${response.code}），无需认证")
+                    return@withContext CampusProbe(state = CampusNetState.Online)
+                }
+
+                302 -> {
+                    val location = response.location
+                    if (location.isNullOrBlank()) {
+                        return@withContext CampusProbe(
+                            state = CampusNetState.Failed,
+                            detail = "门户重定向缺少地址",
+                        )
+                    }
+                    url = resolve(url, location)
+                    lastPortal = url
+                    hops++
+                    log("重定向 → $url")
+                }
+
+                200 -> {
+                    // The probe got a page instead of an empty answer: that page is
+                    // the portal, and the WLAN is not authenticated yet.
+                    log("命中门户页 $url")
+                    return@withContext CampusProbe(
+                        state = CampusNetState.NeedLogin,
+                        portalUrl = response.location?.takeIf { it.isNotBlank() } ?: url,
+                    )
+                }
+
+                else -> {
+                    log("意外响应码 ${response.code}")
+                    return@withContext CampusProbe(
+                        state = CampusNetState.Failed,
+                        detail = "意外响应码 ${response.code}",
+                    )
+                }
+            }
+        }
+
+        if (lastPortal.isNotEmpty()) {
+            return@withContext CampusProbe(
+                state = CampusNetState.NeedLogin,
+                portalUrl = lastPortal,
+            )
+        }
+        CampusProbe(state = CampusNetState.Failed, detail = "无法判定网络状态")
+    }
 
     suspend fun connect(
         identity: CampusIdentity,
@@ -64,14 +185,33 @@ class CampusApi(private val context: Context) {
             throw CampusException("当前设备缺少密码库，校园网功能不可用。")
         }
         CampusCipher.release()
-        val portal = discoverPortal(log)
-        log("客户端 IP ${portal.clientIp} / AC ${portal.acIp}")
 
-        val server = pickServer(log)
-        val base = "http://$server:${CampusChannel.PORT}"
-        val algoId = installAlgo(base, portal, identity, log)
+        val found = probe(log)
+        when (found.state) {
+            CampusNetState.NoNetwork ->
+                throw CampusNoNetworkException("未连接校园 WiFi 或以太网，请先连接后再试。")
+
+            CampusNetState.Online ->
+                throw CampusException("当前网络已能直接上网，无需认证。")
+
+            CampusNetState.NeedLogin -> Unit
+
+            CampusNetState.Failed ->
+                throw CampusException(found.detail)
+
+            CampusNetState.Unknown ->
+                throw CampusException("网络状态未知，请重新检测后再试。")
+        }
+
+        val portal = readPortal(found.portalUrl, log)
+        log("客户端 IP ${portal.clientIp} / AC ${portal.acIp}")
+        log("票据地址 ${portal.ticketUrl}")
+        log("认证地址 ${portal.authUrl}")
+
+        val algoId = installAlgo(portal.ticketUrl, identity, log)
         val active = CampusSession(
-            server = base,
+            ticketUrl = portal.ticketUrl,
+            authUrl = portal.authUrl,
             clientIp = portal.clientIp,
             acIp = portal.acIp,
             algoId = algoId,
@@ -79,34 +219,147 @@ class CampusApi(private val context: Context) {
         )
 
         val ticket = fetchTicket(active, log)
-        val keep = login(active, account, password, ticket, log)
-        val established = active.copy(ticket = ticket, keepSeconds = keep)
+        val opened = login(active.copy(ticket = ticket), account, password, log)
+        val established = active.copy(
+            ticket = ticket,
+            keepUrl = opened.keepUrl,
+            termUrl = opened.termUrl,
+            keepSeconds = opened.keepSeconds,
+            // The portal's school triple is echoed on every POST. It has to be
+            // persisted with the ticket or a resumed heartbeat misses the headers.
+            schoolId = schoolId,
+            domain = domain,
+            area = area,
+        )
         session = established
         established
     }
 
     /**
-     * Fetches the ZSM and installs the cipher it names. Retries with the same
-     * zero id when the blob is unreadable or names an unsupported algorithm.
+     * Rebuilds a session from the flat disk record, the same way the reference
+     * client restores `auth_session`: ticket + keep + term must all be present,
+     * the native cipher is reinstalled from the saved Algo-ID, and the school
+     * triple is put back so heartbeats carry the portal's headers.
+     *
+     * This only reconstructs memory — the caller still has to heartbeat before
+     * claiming the account is logged in.
+     */
+    fun restore(saved: CampusAuthSession, log: (String) -> Unit): Boolean {
+        if (!saved.isValid) {
+            log("磁盘会话票据不完整")
+            return false
+        }
+        if (!CampusCipher.available) return false
+        CampusCipher.release()
+        if (!CampusCipher.install(saved.algoId)) {
+            log("恢复会话 algo 无效: ${saved.algoId}")
+            return false
+        }
+        schoolId = saved.schoolId
+        domain = saved.domain
+        area = saved.area
+        session = CampusSession(
+            ticketUrl = saved.ticketUrl,
+            authUrl = saved.authUrl,
+            clientIp = saved.clientIp,
+            acIp = saved.acIp,
+            algoId = saved.algoId,
+            identity = saved.identity,
+            ticket = saved.ticket,
+            keepUrl = saved.keepUrl,
+            termUrl = saved.termUrl,
+            keepSeconds = saved.keepSeconds,
+            schoolId = saved.schoolId,
+            domain = saved.domain,
+            area = saved.area,
+        )
+        log("恢复会话 ticket=${saved.ticket.take(8)}…")
+        return true
+    }
+
+    /**
+     * Finds the login endpoints. The portal page is the authority: it ships a
+     * config block (`<!--//config.campus.js.chinatelecom.com … -->`) holding the
+     * real `<ticket-url>` and `<auth-url>`, query parameters included. Only when
+     * that block is missing do we build the standard URLs from the server IP.
+     */
+    private fun readPortal(portalUrl: String, log: (String) -> Unit): PortalEndpoint {
+        val html = fetchPortalPage(portalUrl, log)
+        val config = extractBetween(html, CONFIG_START, CONFIG_END)
+        if (config == null) log("门户页未带配置块，按标准地址登录")
+
+        var ticketUrl = config?.let { cleanCdata(tag(it, "ticket-url")) }.orEmpty()
+        var authUrl = config?.let { cleanCdata(tag(it, "auth-url")) }.orEmpty()
+
+        // The IP pair is mandatory for every ticket POST; it rides in the URL.
+        var clientIp = query(ticketUrl.ifBlank { portalUrl }, "wlanuserip")
+            ?: query(portalUrl, "wlanuserip")
+        var acIp = query(ticketUrl.ifBlank { portalUrl }, "wlanacip")
+            ?: query(portalUrl, "wlanacip")
+        if (clientIp.isNullOrBlank()) clientIp = regexParam(html, "wlanuserip")
+        if (acIp.isNullOrBlank()) acIp = regexParam(html, "wlanacip")
+        if (clientIp.isNullOrBlank()) {
+            // Last resort: our own address on the bound network is the same value
+            // the gateway would report for this client.
+            clientIp = CampusNetGate.localIpv4(context)
+        }
+        // Same for the AC: the gateway that handed us this address *is* the access
+        // controller on this deployment.
+        if (acIp.isNullOrBlank()) acIp = CampusNetGate.gatewayIp(context)
+        if (clientIp.isNullOrBlank()) throw CampusException("门户未提供客户端 IP，无法认证。")
+        if (acIp.isNullOrBlank()) throw CampusException("门户未提供网关地址，无法认证。")
+
+        if (ticketUrl.isBlank() || authUrl.isBlank()) {
+            val base = ticketUrl.takeIf { it.isNotBlank() }?.let(::baseOf)
+                ?: "http://${pickServer(log)}:${CampusChannel.PORT}"
+            if (ticketUrl.isBlank()) {
+                ticketUrl = "$base/ticket.cgi?wlanuserip=$clientIp&wlanacip=$acIp"
+            }
+            if (authUrl.isBlank()) authUrl = "$base/auth.cgi"
+        }
+        return PortalEndpoint(
+            portalUrl = portalUrl,
+            clientIp = clientIp,
+            acIp = acIp,
+            ticketUrl = ticketUrl,
+            authUrl = authUrl,
+        )
+    }
+
+    /**
+     * Fetches the ZSM and installs the cipher it names. Retries when the blob is
+     * empty, unreadable, or names an unsupported algorithm — an empty answer is the
+     * portal refusing the request, so the retry also flips to the empty-body form
+     * some portals insist on.
      */
     private fun installAlgo(
-        base: String,
-        portal: PortalEndpoint,
+        ticketUrl: String,
         identity: CampusIdentity,
         log: (String) -> Unit,
     ): String {
-        val url = "$base/ticket.cgi?wlanuserip=${portal.clientIp}&wlanacip=${portal.acIp}"
+        var lastCode = 0
+        var lastSize = 0
         repeat(MAX_ALGO_ATTEMPTS) { attempt ->
-            val response = post(url, ZERO_ALGO)
-            val bytes = response.body?.bytes()
-            response.close()
-            if (bytes == null || bytes.isEmpty()) throw CampusException("门户无响应，请确认已连上校园 WiFi。")
-            if (!looksLikeZsm(bytes)) {
-                throw CampusException("门户未下发算法标识，请稍后重试。")
+            var reply = postXml(ticketUrl, ZERO_ALGO, ZERO_ALGO, identity.clientId)
+            // Upstream fallback: a handful of portals answer the first POST with an
+            // empty 200 and only hand out the blob when the body is empty.
+            if (reply.bytes.isEmpty() && reply.code == 200) {
+                log("票据响应为空，按空报体重试")
+                reply = postXml(ticketUrl, "", ZERO_ALGO, identity.clientId)
             }
-            val algo = parseAlgoId(bytes)
+            lastCode = reply.code
+            lastSize = reply.bytes.size
+            if (reply.bytes.isEmpty()) {
+                log("票据响应为空（HTTP ${reply.code}），重试 ${attempt + 1}")
+                return@repeat
+            }
+            if (!looksLikeZsm(reply.bytes)) {
+                log("票据响应不是算法报文（HTTP ${reply.code}，${reply.bytes.size} 字节）")
+                return@repeat
+            }
+            val algo = parseAlgoId(reply.bytes)
             if (algo == null) {
-                log("未解析出算法标识（${bytes.size} 字节），重试 ${attempt + 1}")
+                log("未解析出算法标识（${reply.bytes.size} 字节），重试 ${attempt + 1}")
                 return@repeat
             }
             if (!CampusCipher.supported(algo)) {
@@ -120,154 +373,215 @@ class CampusApi(private val context: Context) {
             log("算法标识 $algo")
             return algo
         }
-        throw CampusException("门户下发的密码算法不受支持，暂时无法认证。")
+        throw CampusException(
+            if (lastSize == 0) {
+                "门户无响应（HTTP $lastCode），已重试 $MAX_ALGO_ATTEMPTS 次。请确认连着校园 WiFi，稍后再试。"
+            } else {
+                "门户下发的密码算法不受支持，暂时无法认证。"
+            },
+        )
     }
 
     private fun fetchTicket(active: CampusSession, log: (String) -> Unit): String {
-        val url = "${active.server}/ticket.cgi?wlanuserip=${active.clientIp}&wlanacip=${active.acIp}"
-        val plain = exchange(url, payload(active, Payload.Ticket), log)
-            ?: throw CampusException("获取票据失败。")
+        val plain = exchange(active.ticketUrl, payload(active, Payload.Ticket), active, log)
+            ?: throw CampusException("获取票据失败：门户返回为空。")
         val ticket = tag(plain, "ticket") ?: throw CampusException("票据解析失败。")
         log("票据已获取")
         return ticket
     }
 
+    /**
+     * Login, and with it the two URLs the rest of the session lives on. The portal
+     * answers with `<keep-url>` / `<term-url>`; deriving them from the ticket URL
+     * is only the fallback for a portal that omits them.
+     */
     private fun login(
         active: CampusSession,
         account: String,
         password: String,
-        ticket: String,
         log: (String) -> Unit,
-    ): Long {
-        val withTicket = active.copy(ticket = ticket)
+    ): Opened {
         val plain = exchange(
-            "${withTicket.server}/auth.cgi",
-            payload(withTicket, Payload.Login, account = account, password = password),
+            active.authUrl,
+            payload(active, Payload.Login, account = account, password = password),
+            active,
             log,
         ) ?: throw CampusException("认证失败：门户未返回结果。")
-        val keep = tag(plain, "keep-retry")?.toLongOrNull() ?: DEFAULT_KEEP_SECONDS
+
+        val base = baseOf(active.ticketUrl)
+        val keepUrl = cleanCdata(tag(plain, "keep-url")).orEmpty().ifBlank { "$base/keep.cgi" }
+        val termUrl = cleanCdata(tag(plain, "term-url")).orEmpty().ifBlank { "$base/term.cgi" }
+        val keep = tag(plain, "keep-retry")?.trim()?.toLongOrNull() ?: DEFAULT_KEEP_SECONDS
         log("认证成功，心跳间隔 ${keep}s")
-        return keep
+        return Opened(keepUrl = keepUrl, termUrl = termUrl, keepSeconds = keep)
     }
 
     /** Returns the server-reported next interval, or null when the session is gone. */
     fun heartbeat(active: CampusSession, log: (String) -> Unit): Long? {
-        val plain = exchange("${active.server}/keep.cgi", payload(active, Payload.Heartbeat), log)
-            ?: return null
-        return tag(plain, "interval")?.toLongOrNull() ?: active.keepSeconds
+        val url = active.keepUrl.ifBlank { "${baseOf(active.ticketUrl)}/keep.cgi" }
+        val plain = exchange(url, payload(active, Payload.Heartbeat), active, log) ?: return null
+        return tag(plain, "interval")?.trim()?.toLongOrNull() ?: active.keepSeconds
     }
 
-    /** Logout: a final encrypted packet to term.cgi. */
+    /** Logout: a final encrypted packet to the portal's own term URL. */
     fun disconnect(active: CampusSession, log: (String) -> Unit): Boolean {
         val encrypted = CampusCipher.encrypt(payload(active, Payload.Terminate))
         if (encrypted == null) {
             log("断连报文构造失败")
             return false
         }
-        val response = try {
-            post("${active.server}/term.cgi", encrypted)
+        val url = active.termUrl.ifBlank { "${baseOf(active.ticketUrl)}/term.cgi" }
+        val reply = try {
+            postXml(url, encrypted, active.algoId, active.identity.clientId)
         } catch (e: CampusException) {
             log("断连请求失败：${e.message}")
             return false
         }
-        val code = response.header("Error-Code")
-        response.close()
-        log("断连返回 Error-Code=${code ?: "无"}")
-        session = null
-        CampusCipher.release()
-        return code == null || code == "0" || code == "200"
+        log("断连返回 HTTP ${reply.code} Error-Code=${reply.errorCode ?: "无"}")
+        val ok = reply.code in 200..299 &&
+            (reply.errorCode == null || reply.errorCode == "0" || reply.errorCode == "200")
+        if (ok) {
+            session = null
+            CampusCipher.release()
+        }
+        return ok
     }
 
-    // ---- portal discovery -------------------------------------------------
-
-    fun discoverPortal(log: (String) -> Unit): PortalEndpoint {
-        val response = try {
-            http.newCall(Request.Builder().url(PROBE_URL).get().build()).execute()
-        } catch (e: IOException) {
-            throw CampusException("网络不可达，请先连接校园 WiFi。")
-        }
-        val code = response.code
-        val location = response.header("Location")
-        val resolved = location?.let { response.request.url.resolve(it)?.toString() }
-        val finalUrl = resolved ?: response.request.url.toString()
-        response.close()
-
-        if (code == 204 || code == 200) {
-            // Already online: the gateway let the probe straight through.
-            throw CampusException("当前网络已可直接上网，无需认证。")
-        }
-        if (finalUrl.isBlank()) throw CampusException("未获取到认证门户地址，请稍后重试。")
-
-        var clientIp = query(finalUrl, "wlanuserip")
-        var acIp = query(finalUrl, "wlanacip")
-        if (clientIp.isNullOrBlank() || acIp.isNullOrBlank()) {
-            val page = fetchPortalPage(finalUrl, log)
-            if (clientIp.isNullOrBlank()) clientIp = regexParam(page, "wlanuserip")
-            if (acIp.isNullOrBlank()) acIp = regexParam(page, "wlanacip")
-        }
-        if (clientIp.isNullOrBlank()) throw CampusException("门户未提供客户端 IP，无法认证。")
-        if (acIp.isNullOrBlank()) throw CampusException("门户未提供网关地址，无法认证。")
-        return PortalEndpoint(portalUrl = finalUrl, clientIp = clientIp, acIp = acIp)
-    }
+    // ---- portal page ------------------------------------------------------
 
     private fun fetchPortalPage(url: String, log: (String) -> Unit): String {
         var current = url
         repeat(4) {
-            val response = try {
-                http.newCall(Request.Builder().url(current).get().build()).execute()
-            } catch (e: IOException) {
-                log("门户页获取失败：${e.message}")
+            val response = tryGet(current, withAuthHeaders = false)
+            if (response == null) {
+                log("门户页获取失败")
                 return ""
             }
-            val next = response.header("Location")
-            if (response.code in 300..399 && next != null) {
-                current = response.request.url.resolve(next)?.toString() ?: current
-                response.close()
+            val next = response.location
+            if (response.code in 300..399 && !next.isNullOrBlank()) {
+                current = resolve(current, next)
                 return@repeat
             }
-            val body = response.body?.string().orEmpty()
-            response.close()
-            return body
+            return response.body.orEmpty()
         }
         return ""
     }
 
     // ---- transport --------------------------------------------------------
 
-    private fun exchange(url: String, xml: String, log: (String) -> Unit): String? {
+    private data class ProbeResponse(
+        val code: Int,
+        val location: String?,
+        val body: String?,
+    )
+
+    private data class Reply(
+        val code: Int,
+        val bytes: ByteArray,
+        val location: String?,
+        val errorCode: String?,
+    )
+
+    /** GET that never throws: null stands for "no answer", like the reference client. */
+    private fun tryGet(url: String, withAuthHeaders: Boolean): ProbeResponse? {
+        val builder = Request.Builder().url(url).get().header("Accept", ACCEPT)
+        if (withAuthHeaders) {
+            builder.header("User-Agent", CampusChannel.USER_AGENT)
+        }
+        return try {
+            http.newCall(builder.build()).execute().use { response ->
+                captureSchool(response)
+                ProbeResponse(
+                    code = response.code,
+                    location = response.header("Location"),
+                    body = if (response.code == 200) {
+                        runCatching { response.body?.string() }.getOrNull()
+                    } else {
+                        null
+                    },
+                )
+            }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
+    /**
+     * One portal POST, with the headers the portal checks before it will answer:
+     * `CDC-Checksum` is the MD5 of the exact body, `Algo-ID` says which cipher the
+     * packet was built with, `Client-ID` ties it to the identity in the XML.
+     */
+    private fun postXml(url: String, body: String, algoId: String, clientId: String): Reply {
+        val request = Request.Builder()
+            .url(url)
+            .post(body.toRequestBody(CONTENT_TYPE.toMediaType()))
+            .header("Accept", ACCEPT)
+            .header("User-Agent", CampusChannel.USER_AGENT)
+            .header("CDC-Checksum", md5(body))
+            .header("Algo-ID", algoId)
+            .header("Client-ID", clientId)
+            .apply {
+                if (schoolId.isNotEmpty()) header("CDC-SchoolId", schoolId)
+                if (domain.isNotEmpty()) header("CDC-Domain", domain)
+                if (area.isNotEmpty()) header("CDC-Area", area)
+            }
+            .build()
+        return execute(request)
+    }
+
+    private fun execute(request: Request): Reply = try {
+        http.newCall(request).execute().use { response ->
+            captureSchool(response)
+            Reply(
+                code = response.code,
+                bytes = response.body?.bytes() ?: ByteArray(0),
+                location = response.header("Location"),
+                errorCode = response.header("Error-Code"),
+            )
+        }
+    } catch (e: IOException) {
+        throw CampusException("与门户通信失败：${e.message}")
+    }
+
+    /** The portal tells us which school/domain/area its AC serves; echo it back. */
+    private fun captureSchool(response: Response) {
+        if (schoolId.isEmpty()) schoolId = response.header("schoolid")?.trim().orEmpty()
+        if (domain.isEmpty()) domain = response.header("domain")?.trim().orEmpty()
+        if (area.isEmpty()) area = response.header("area")?.trim().orEmpty()
+    }
+
+    private fun exchange(
+        url: String,
+        xml: String,
+        active: CampusSession,
+        log: (String) -> Unit,
+    ): String? {
+        if (url.isBlank()) {
+            log("门户地址缺失")
+            return null
+        }
         val encrypted = CampusCipher.encrypt(xml) ?: run {
             log("报文加密失败")
             return null
         }
-        val response = post(url, encrypted)
-        val code = response.header("Error-Code")
-        val raw = response.body?.string().orEmpty()
-        response.close()
-
+        val reply = postXml(url, encrypted, active.algoId, active.identity.clientId)
+        val code = reply.errorCode
         if (code != null && code != "0" && code != "200") {
             log("门户返回 Error-Code=$code")
             throw CampusException(describeError(code))
         }
+        if (reply.code !in 200..299) {
+            log("门户返回 HTTP ${reply.code}")
+            throw CampusException("门户返回 HTTP ${reply.code}，请稍后重试。")
+        }
+        val raw = String(reply.bytes, Charsets.UTF_8)
         if (raw.isBlank()) {
-            log("门户响应为空")
+            log("门户响应为空（HTTP ${reply.code}）")
             return null
         }
         return CampusCipher.decrypt(raw) ?: run {
             log("响应解密失败（长度 ${raw.length}）")
             null
-        }
-    }
-
-    private fun post(url: String, body: String): Response {
-        val request = Request.Builder()
-            .url(url)
-            .post(body.toRequestBody(CONTENT_TYPE.toMediaType()))
-            .header("User-Agent", CampusChannel.USER_AGENT)
-            .build()
-        return try {
-            http.newCall(request).execute()
-        } catch (e: IOException) {
-            throw CampusException("与门户通信失败：${e.message}")
         }
     }
 
@@ -281,6 +595,8 @@ class CampusApi(private val context: Context) {
     ): String {
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         val identity = active.identity
+        // Trailing newline matches the reference client byte for byte: the checksum
+        // header is computed over this string, so the two must not drift.
         return when (kind) {
             Payload.Ticket -> """
                 <?xml version="1.0" encoding="utf-8"?>
@@ -293,9 +609,9 @@ class CampusApi(private val context: Context) {
                     <ipv6></ipv6>
                     <mac>${identity.mac}</mac>
                     <ostag>${CampusChannel.OSTAG}</ostag>
-                    <gwip>${gatewayIp().orEmpty()}</gwip>
+                    <gwip>${active.acIp}</gwip>
                 </request>
-            """.trimIndent()
+            """.trimIndent() + "\n"
 
             Payload.Login -> """
                 <?xml version="1.0" encoding="utf-8"?>
@@ -307,7 +623,7 @@ class CampusApi(private val context: Context) {
                     <userid>$account</userid>
                     <passwd>$password</passwd>
                 </request>
-            """.trimIndent()
+            """.trimIndent() + "\n"
 
             Payload.Heartbeat, Payload.Terminate -> """
                 <?xml version="1.0" encoding="utf-8"?>
@@ -322,17 +638,23 @@ class CampusApi(private val context: Context) {
                     <mac>${identity.mac}</mac>
                     <ostag>${CampusChannel.OSTAG}</ostag>
                 </request>
-            """.trimIndent()
+            """.trimIndent() + "\n"
         }
     }
 
     // ---- environment ------------------------------------------------------
 
+    /**
+     * Picks the auth server that answers first. Only used when the portal page did
+     * not announce its own endpoints. The socket has to come from the bound network
+     * too, otherwise the check itself reports a false negative.
+     */
     private fun pickServer(log: (String) -> Unit): String {
+        val factory = CampusNetGate.liveSocketFactory()
         val reachable = CampusChannel.SERVERS.firstOrNull { server ->
             runCatching {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress(server, CampusChannel.PORT), 2000)
+                factory.createSocket().use { socket ->
+                    socket.connect(InetSocketAddress(server, CampusChannel.PORT), 2500)
                 }
                 true
             }.getOrDefault(false)
@@ -342,12 +664,9 @@ class CampusApi(private val context: Context) {
         return chosen
     }
 
-    private fun gatewayIp(): String? = runCatching {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val props: LinkProperties = cm.activeNetwork?.let { cm.getLinkProperties(it) } ?: return null
-        props.routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }
-            ?.gateway?.hostAddress
-    }.getOrNull()
+    private fun resolve(base: String, ref: String): String = runCatching {
+        URI(base).resolve(ref).toString()
+    }.getOrDefault(ref)
 
     private fun describeError(code: String): String = when {
         code.startsWith("140102") -> "认证被拒绝（$code）：账号状态或密码有问题。"
@@ -357,14 +676,33 @@ class CampusApi(private val context: Context) {
         else -> "认证失败（Error-Code=$code）。"
     }
 
+    private data class Opened(
+        val keepUrl: String,
+        val termUrl: String,
+        val keepSeconds: Long,
+    )
+
     private enum class Payload { Ticket, Login, Heartbeat, Terminate }
 
     companion object {
         private const val PROBE_URL = "http://connect.rom.miui.com/generate_204"
+        private const val PROBE_BAK_URL = "http://1.1.1.1"
+        private val AUTH_SERVERS = listOf("http://14.146.227.141:7001", "http://121.8.177.212:7001")
+        private const val MAX_PROBE_HOPS = 8
         private const val CONTENT_TYPE = "application/x-www-form-urlencoded"
+        private const val ACCEPT = "text/html,text/xml,application/xhtml+xml,application/x-javascript,*/*"
         private const val ZERO_ALGO = "00000000-0000-0000-0000-000000000000"
         private const val MAX_ALGO_ATTEMPTS = 4
         private const val DEFAULT_KEEP_SECONDS = 60L
+
+        // The portal page wraps its endpoints in this HTML comment.
+        private const val CONFIG_START = "<!--//config.campus.js.chinatelecom.com"
+        private const val CONFIG_END = "//config.campus.js.chinatelecom.com-->"
+
+        private fun md5(text: String): String {
+            val digest = MessageDigest.getInstance("MD5").digest(text.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { "%02x".format(it) }
+        }
 
         private fun looksLikeZsm(bytes: ByteArray): Boolean =
             bytes.size >= 4 &&
@@ -423,6 +761,32 @@ class CampusApi(private val context: Context) {
             return xml.substring(from, end)
         }
 
+        /** Portal endpoints are sometimes wrapped in CDATA; unwrap and trim. */
+        private fun cleanCdata(raw: String?): String? {
+            val text = raw ?: return null
+            val start = text.indexOf("<![CDATA[")
+            if (start < 0) return text.trim().ifEmpty { null }
+            val from = start + "<![CDATA[".length
+            val end = text.indexOf("]]>", from)
+            if (end < 0) return null
+            return text.substring(from, end).trim().ifEmpty { null }
+        }
+
+        private fun extractBetween(text: String, startTag: String, endTag: String): String? {
+            val start = text.indexOf(startTag)
+            if (start < 0) return null
+            val from = start + startTag.length
+            val end = text.indexOf(endTag, from)
+            if (end < 0) return null
+            return text.substring(from, end)
+        }
+
+        /** `http://host:7001/ticket.cgi?a=b` → `http://host:7001`. */
+        private fun baseOf(url: String): String {
+            val noQuery = url.substringBefore('?')
+            return noQuery.substringBeforeLast('/').ifEmpty { noQuery }
+        }
+
         private fun query(url: String, key: String): String? = runCatching {
             android.net.Uri.parse(url).getQueryParameter(key)
         }.getOrNull()
@@ -436,14 +800,37 @@ data class PortalEndpoint(
     val portalUrl: String,
     val clientIp: String,
     val acIp: String,
+    val ticketUrl: String,
+    val authUrl: String,
+)
+
+data class CampusProbe(
+    val state: CampusNetState,
+    val portalUrl: String = "",
+    val detail: String = "",
 )
 
 data class CampusSession(
-    val server: String,
+    val ticketUrl: String,
+    val authUrl: String,
     val clientIp: String,
     val acIp: String,
     val algoId: String,
     val identity: CampusIdentity,
     val ticket: String = "",
+    val keepUrl: String = "",
+    val termUrl: String = "",
     val keepSeconds: Long = 60L,
-)
+    val schoolId: String = "",
+    val domain: String = "",
+    val area: String = "",
+) {
+    /** What the status card shows next to the Algo-ID: the portal's own host. */
+    val server: String
+        get() = runCatching {
+            java.net.URI(ticketUrl).let { uri ->
+                val host = uri.host ?: return@runCatching ticketUrl
+                if (uri.port > 0) "http://$host:${uri.port}" else "http://$host"
+            }
+        }.getOrDefault(ticketUrl)
+}

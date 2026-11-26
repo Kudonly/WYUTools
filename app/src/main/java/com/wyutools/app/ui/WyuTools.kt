@@ -36,6 +36,9 @@ const val ROUTE_PHYSICAL = "physical"
 /** 校园网认证页，独立页面，不参与卡片形变。 */
 const val ROUTE_CAMPUS = "campus"
 
+/** 校园网账号管理二级页，从校园网页进入。 */
+const val ROUTE_CAMPUS_ACCOUNTS = "campus/accounts"
+
 /** 体测二级页面（某一学年的各项成绩），不是工具，不参与卡片形变。 */
 const val ROUTE_PHYSICAL_DETAIL = "physical/detail"
 

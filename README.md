@@ -57,6 +57,17 @@
 - **待办**：输入一行回车即添加，点圆圈勾选，右侧叉号删除，顶部显示「完成 x/y」。清单按天存储，跨天自动清空，不需要登录也能用。
 - **今天的课**：按时间列出当天的全部课程，上完的也保留，方便回看；正在上的标出「正在上课」。没有课表数据时给出登录入口，而不是空白。
 
+## 校园网
+
+从「更多 → 校园网」进入。页面先判断当前网络：没有 WLAN/以太网、已在校园网中、还是需要门户认证，状态卡只给出一种明确结论，不重复提示。
+
+- **账号管理**：右上角玻璃按钮进入二级页，一个账号一张玻璃卡；卡片左端常驻圆形选择按钮，单选切换当前账号。保存账号即记住密码，可编辑或删除。
+- **连接**：门户配置块里取真正的 ticket / auth / keep / term 地址，随请求带上门户下发的 Algo-ID 与校验头完成广东校园认证。连接后状态卡以大字号显示 `HH:MM:SS`，未连接与已连接之间用叠加模糊渐变切换。
+- **登录态**：票据、设备标识与学校标识保存在本机。重新打开应用后，只有在确认网络已通时才用原票据打一次心跳验真，通过后才恢复在线并接续计时；主动断开会清掉本地票据，不会留下假在线状态。
+- **日志**：右上角设置按钮里可手动开启校园网日志，默认关闭。
+
+密码层编译自开源项目 [ESurfingClient-CVersion](https://github.com/BadGhost520/ESurfingClient-CVersion)（Apache-2.0），源码来源与重建方式见 `app/src/main/cpp/esurf/README.md`。
+
 ## 液态玻璃
 
 <p align="center">
@@ -112,3 +123,16 @@
 ## 开源协议
 
 本项目代码基于 [MIT License](LICENSE) 开源。第三方依赖与 `app/libs/` 下的预编译库遵循其各自的许可协议，不在 MIT 许可范围内。
+
+## 使用的开源项目
+
+WUKit 的实现使用或参考了以下 GitHub 开源项目，版权与许可归各自作者所有：
+
+- [AndroidX / Jetpack Compose](https://github.com/androidx/androidx) — 界面、生命周期与导航（Apache-2.0）
+- [Miuix](https://github.com/compose-miuix-ui/miuix) — Compose 组件库与视觉语言（Apache-2.0）
+- [OkHttp](https://github.com/square/okhttp) — 网络请求（Apache-2.0）
+- [MaterialKolor](https://github.com/jordond/materialkolor) — Material You 动态取色（MIT；上游 Material Color Utilities 为 Apache-2.0）
+- [ZXing](https://github.com/zxing/zxing) — 电费支付二维码（Apache-2.0）
+- [ESurfingClient-CVersion](https://github.com/BadGhost520/ESurfingClient-CVersion) — 校园网门户密码算法与协议参考（Apache-2.0）
+
+`app/libs/` 下的 SharedViewKit 为 Gitee 分发的闭源 SDK，不属于上述 GitHub 开源项目。

@@ -14,94 +14,244 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Drives one campus-network session.
+ * Drives one campus-network session and the account list behind it.
  *
- * Lives on the Application, not on the page: leaving the screen must not drop the
- * session, and the heartbeat has to keep running while the user is elsewhere in
- * the app. A process death still ends it — the portal times the session out on its
- * own, and reopening the page simply authenticates again.
+ * The heartbeat has to keep running while the user is elsewhere in the app, so the
+ * loop hangs off [viewModelScope] rather than the screen. A process death only
+ * ends the in-memory cipher: the disk ticket is restored when a later network
+ * probe finds the internet already reachable and a heartbeat accepts it.
  */
 class CampusViewModel(app: Application) : AndroidViewModel(app) {
     private val store = CampusStore(app)
     private val api = CampusApi(app)
 
     private var heartbeatJob: Job? = null
+    private var probeJob: Job? = null
 
     private val _ui = MutableStateFlow(
         CampusUiState(
-            account = store.account,
-            password = store.password,
-            rememberPassword = store.rememberPassword,
+            accounts = store.accounts,
+            selectedId = store.selectedId,
             logEnabled = store.logEnabled,
             cipherMissing = !CampusCipher.available,
+            networkLabel = CampusNetGate.describe(app),
         ),
     )
     val ui: StateFlow<CampusUiState> = _ui.asStateFlow()
 
-    fun setAccount(value: String) = _ui.update { it.copy(account = value) }
-
-    fun setPassword(value: String) = _ui.update { it.copy(password = value) }
-
-    fun setRememberPassword(value: Boolean) = _ui.update { it.copy(rememberPassword = value) }
+    // ---- network state ----------------------------------------------------
 
     /**
-     * Logging is off by default and only records while enabled — the panel exists
-     * for troubleshooting a failed login, not as a permanent trace of the account.
+     * Answers "does this network need a login?" without touching credentials.
+     * Runs automatically when the page opens and whenever the user pulls the
+     * status card, so the button can say what it will do.
      */
-    fun setLogEnabled(enabled: Boolean) {
-        store.logEnabled = enabled
-        _ui.update {
-            it.copy(
-                logEnabled = enabled,
-                logs = if (enabled) it.logs + line("日志已开启") else emptyList(),
-            )
+    fun probeNetwork(showChecking: Boolean = false) {
+        if (_ui.value.busy) return
+        // The page triggers a probe on every visit; an in-flight probe must not be
+        // restarted by a second caller (page re-entry, or a manual refresh).
+        if (probeJob?.isActive == true) return
+        probeJob = viewModelScope.launch {
+            if (showChecking) {
+                _ui.update {
+                    it.copy(
+                        phase = if (it.online) CampusPhase.Online else CampusPhase.Checking,
+                        networkLabel = CampusNetGate.describe(getApplication()),
+                    )
+                }
+            }
+            log("网络检测开始")
+            val result = runCatching { api.probe(::log) }
+                .getOrElse { CampusProbe(CampusNetState.Failed, detail = it.message ?: "检测失败") }
+            val label = CampusNetGate.describe(getApplication())
+            log("网络检测：${result.state} ${result.detail}")
+
+            // Like the reference client, a disk ticket is trusted only after the
+            // gateway says the internet already works, and only after the portal
+            // accepts a heartbeat with that ticket. Not at app start, and not on
+            // a network that still shows the login portal.
+            var restored: CampusAuthSession? = null
+            if (result.state == CampusNetState.Online && !_ui.value.online) {
+                val saved = runCatching { store.savedSession }.getOrNull()
+                if (saved != null && saved.isValid) {
+                    withContext(Dispatchers.IO) {
+                        if (api.restore(saved, ::log)) {
+                            val active = api.currentSession
+                            val alive = active != null &&
+                                runCatching { api.heartbeat(active, ::log) }.getOrNull() != null
+                            if (alive) {
+                                restored = saved
+                            } else {
+                                log("恢复会话心跳失败，ticket 可能过期")
+                            }
+                        }
+                    }
+                }
+            }
+            val restoredNow = restored
+            // No WLAN/Ethernet at all is not a failed login — show 未连接 at once
+            // and keep the disk ticket for when the interface comes back.
+            val noNetwork = result.state == CampusNetState.NoNetwork
+            if (noNetwork) {
+                heartbeatJob?.cancel()
+                heartbeatJob = null
+            }
+            if (restoredNow != null) {
+                // Heartbeats are signed with the identity the ticket was issued to.
+                store.restoreIdentity(restoredNow.identity)
+                if (restoredNow.accountId.isNotEmpty()) store.select(restoredNow.accountId)
+            }
+            _ui.update {
+                it.copy(
+                    netState = result.state,
+                    netDetail = result.detail,
+                    networkLabel = label,
+                    phase = when {
+                        noNetwork -> CampusPhase.Idle
+                        restoredNow != null -> CampusPhase.Online
+                        it.online -> CampusPhase.Online
+                        result.state == CampusNetState.NeedLogin -> CampusPhase.Idle
+                        it.phase == CampusPhase.Checking -> CampusPhase.Idle
+                        else -> it.phase
+                    },
+                    onlineSince = if (noNetwork) null
+                        else restoredNow?.loginAtMs?.takeIf { ms -> ms > 0L }
+                            ?: if (restoredNow == null) it.onlineSince else System.currentTimeMillis(),
+                    algoId = restoredNow?.algoId ?: it.algoId,
+                    server = restoredNow?.server ?: it.server,
+                    accounts = if (restoredNow != null) store.accounts else it.accounts,
+                    selectedId = if (restoredNow != null) store.selectedId else it.selectedId,
+                    notice = if (restoredNow != null || noNetwork) null else it.notice,
+                )
+            }
+            if (restoredNow != null) {
+                log("账号已登录: ${restoredNow.accountName.ifBlank { restoredNow.accountId }}")
+                startHeartbeat()
+            }
         }
     }
 
-    fun clearLogs() = _ui.update { it.copy(logs = emptyList()) }
+    // ---- settings ---------------------------------------------------------
+
+    fun openSettings() = _ui.update { it.copy(settingsOpen = true) }
+
+    fun closeSettings() = _ui.update { it.copy(settingsOpen = false) }
+
+    // ---- accounts ---------------------------------------------------------
+
+    /**
+     * Adds or updates an account. Leaving the password blank keeps the stored one,
+     * so the management page can rename an account without retyping the secret.
+     */
+    fun saveAccount(account: String, password: String) {
+        val name = account.trim()
+        if (name.isEmpty()) return
+        val existing = _ui.value.accounts.firstOrNull { it.account.equals(name, ignoreCase = true) }
+        val effective = password.ifBlank { existing?.password.orEmpty() }
+        store.save(name, effective)
+        _ui.update {
+            it.copy(
+                accounts = store.accounts,
+                selectedId = store.selectedId,
+            )
+        }
+        log("账号已保存：$name")
+    }
+
+    fun removeAccount(id: String) {
+        val removed = _ui.value.accounts.firstOrNull { it.id == id }
+        store.remove(id)
+        _ui.update { it.copy(accounts = store.accounts, selectedId = store.selectedId) }
+        if (removed != null) log("账号已删除：${removed.account}")
+    }
+
+    fun selectAccount(id: String) {
+        store.select(id)
+        _ui.update { it.copy(accounts = store.accounts, selectedId = store.selectedId) }
+    }
+
+    // ---- session ----------------------------------------------------------
 
     fun connect() {
         val state = _ui.value
         if (state.busy || state.online) return
-        val account = state.account.trim()
-        val password = state.password
-        if (account.isEmpty()) {
-            _ui.update { it.copy(notice = "请填写宽带账号。", phase = CampusPhase.Failed) }
+        val account = state.selected
+        if (account == null) {
+            _ui.update { it.copy(notice = "还没有账号，点右上角添加。", phase = CampusPhase.Idle) }
             return
         }
-        if (password.isEmpty()) {
-            _ui.update { it.copy(notice = "请填写宽带密码。", phase = CampusPhase.Failed) }
+        if (account.password.isEmpty()) {
+            _ui.update { it.copy(notice = "请先在账号管理里填写密码。", phase = CampusPhase.Failed) }
+            return
+        }
+        if (state.netState == CampusNetState.NoNetwork) {
+            _ui.update {
+                it.copy(phase = CampusPhase.Idle, onlineSince = null, notice = null)
+            }
             return
         }
 
-        store.saveCredentials(account, password, state.rememberPassword)
+        store.save(account.account, account.password)
         store.resetIdentity()
-
         _ui.update {
-            it.copy(phase = CampusPhase.Discovering, busy = true, notice = null)
+            it.copy(
+                phase = CampusPhase.Authenticating,
+                busy = true,
+                notice = null,
+                accounts = store.accounts,
+            )
         }
-        log("开始认证 $account")
+        log("开始认证 ${account.account}")
 
+        probeJob?.cancel()
         viewModelScope.launch {
             try {
-                // The first phase is portal discovery, which happens inside connect();
-                // flip the label once the handshake reaches the auth step.
-                _ui.update { it.copy(phase = CampusPhase.Authenticating) }
-                val session = api.connect(store.identity, account, password, ::log)
+                val session = api.connect(store.identity, account.account, account.password, ::log)
+                val since = System.currentTimeMillis()
                 _ui.update {
                     it.copy(
                         phase = CampusPhase.Online,
+                        netState = CampusNetState.Online,
                         busy = false,
-                        onlineSince = System.currentTimeMillis(),
+                        onlineSince = since,
                         algoId = session.algoId,
                         server = session.server,
                         notice = null,
                     )
                 }
+                // Written the moment the portal accepts, so a process kill during
+                // the session resumes the same ticket instead of authenticating
+                // again and orphaning this one on the server.
+                store.savedSession = CampusAuthSession(
+                    accountId = account.id,
+                    accountName = account.account,
+                    ticket = session.ticket,
+                    ticketUrl = session.ticketUrl,
+                    authUrl = session.authUrl,
+                    keepUrl = session.keepUrl,
+                    termUrl = session.termUrl,
+                    algoId = session.algoId,
+                    clientId = session.identity.clientId,
+                    hostName = session.identity.hostName,
+                    mac = session.identity.mac,
+                    schoolId = session.schoolId,
+                    domain = session.domain,
+                    area = session.area,
+                    clientIp = session.clientIp,
+                    acIp = session.acIp,
+                    keepSeconds = session.keepSeconds,
+                    loginAtMs = since,
+                )
                 log("已连接，服务器 ${session.server}")
                 startHeartbeat()
+            } catch (e: CampusNoNetworkException) {
+                log("认证中止：${e.message}")
+                _ui.update {
+                    it.copy(phase = CampusPhase.Idle, onlineSince = null, busy = false, notice = null)
+                }
             } catch (e: Exception) {
                 val message = e.message ?: "认证失败，请稍后重试"
                 log("认证失败：$message")
@@ -123,6 +273,9 @@ class CampusViewModel(app: Application) : AndroidViewModel(app) {
         val session = api.currentSession
         heartbeatJob?.cancel()
         heartbeatJob = null
+        // Whatever happens to the request, the user asked for the session to end:
+        // it must not come back on the next launch.
+        store.savedSession = null
         if (session == null) {
             _ui.update { it.copy(phase = CampusPhase.Idle, onlineSince = null, busy = false) }
             return
@@ -138,9 +291,11 @@ class CampusViewModel(app: Application) : AndroidViewModel(app) {
                     notice = if (ok) "已断开连接。" else "断连未得到确认，可稍后重试。",
                 )
             }
+            probeNetwork()
         }
     }
 
+    /** Keeps an accepted session alive; the first heartbeat already verified it. */
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch(Dispatchers.IO) {
@@ -153,13 +308,7 @@ class CampusViewModel(app: Application) : AndroidViewModel(app) {
                     failures++
                     log("心跳失败（$failures）")
                     if (failures >= 2) {
-                        _ui.update {
-                            it.copy(
-                                phase = CampusPhase.Failed,
-                                onlineSince = null,
-                                notice = "连接已断开，请重新认证。",
-                            )
-                        }
+                        onSessionLost("连接已断开，请重新认证。")
                         return@launch
                     }
                 } else {
@@ -168,6 +317,38 @@ class CampusViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** The portal no longer has this session: forget it everywhere. */
+    private fun onSessionLost(message: String) {
+        store.savedSession = null
+        _ui.update {
+            it.copy(
+                phase = CampusPhase.Failed,
+                onlineSince = null,
+                notice = message,
+            )
+        }
+    }
+
+    // ---- log --------------------------------------------------------------
+
+    /**
+     * Logging is off by default and only records while enabled — the panel exists
+     * for troubleshooting a failed login, not as a permanent trace of the account.
+     */
+    fun setLogEnabled(enabled: Boolean) {
+        store.logEnabled = enabled
+        _ui.update {
+            it.copy(
+                logEnabled = enabled,
+                logs = if (enabled) it.logs + line("日志已开启") else emptyList(),
+            )
+        }
+    }
+
+    fun clearLogs() = _ui.update { it.copy(logs = emptyList()) }
+
+    fun dismissNotice() = _ui.update { it.copy(notice = null) }
 
     private fun log(message: String) {
         if (!_ui.value.logEnabled) return
@@ -179,6 +360,12 @@ class CampusViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun line(message: String): String =
         "${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}  $message"
+
+    override fun onCleared() {
+        heartbeatJob?.cancel()
+        probeJob?.cancel()
+        super.onCleared()
+    }
 
     private companion object {
         const val MAX_LOG_LINES = 300
