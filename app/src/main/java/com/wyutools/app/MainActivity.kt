@@ -75,6 +75,8 @@ import com.wyutools.app.ui.PhysicalScreen
 import com.wyutools.app.ui.LocalWyuDarkTheme
 import com.wyutools.app.ui.ROUTE_COMMON
 import com.wyutools.app.ui.ROUTE_EVAL
+import com.wyutools.app.ui.CampusScreen
+import com.wyutools.app.ui.ROUTE_CAMPUS
 import com.wyutools.app.ui.ROUTE_EXAM
 import com.wyutools.app.ui.ROUTE_GPA
 import com.wyutools.app.ui.ROUTE_GRADES
@@ -206,7 +208,7 @@ fun WyuApp(
     // (it is never launched from a shortcut), but it still opens in-app.
     val morphRoutes = remember {
         SharedViewTransition.featureRoutes + ROUTE_TODAY + ROUTE_EXAM + ROUTE_COMMON +
-            ROUTE_GRADES + ROUTE_GPA + ROUTE_EVAL + ROUTE_PHYSICAL
+            ROUTE_GRADES + ROUTE_GPA + ROUTE_EVAL + ROUTE_PHYSICAL + ROUTE_CAMPUS
     }
 
     val cardSnapshots = remember { mutableMapOf<String, SharedCardSnapshot>() }
@@ -858,6 +860,20 @@ fun WyuApp(
                     reveal = pageRevealSharp,
                 ) {
                     CommonCardsScreen(onBack = { closeTool(ROUTE_COMMON) })
+                }
+            }
+            composable(ROUTE_CAMPUS) {
+                WyuRoutePage(
+                    route = ROUTE_CAMPUS,
+                    currentRoute = currentRoute,
+                    stackRoutes = stackRoutes,
+                    startSharp = pageStartsSharp,
+                    reveal = pageRevealSharp,
+                ) {
+                    CampusScreen(
+                        vm = app.campusViewModel,
+                        onBack = { closeTool(ROUTE_CAMPUS) },
+                    )
                 }
             }
             composable(ROUTE_EXAM) {

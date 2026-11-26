@@ -621,6 +621,7 @@ private val WyuTool.iconColor: Color
         WyuTool.Grades -> Color(0xFF5E5CE6)
         WyuTool.Eval -> Color(0xFFFF375F)
         WyuTool.Physical -> Color(0xFF00C7BE)
+        WyuTool.Campus -> Color(0xFF32ADE6)
     }
 
 /** Whether [point] is inside this cell, with [slop] px of forgiveness. */

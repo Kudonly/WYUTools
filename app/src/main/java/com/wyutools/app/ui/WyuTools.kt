@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SportsBasketball
 import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material.icons.outlined.WaterDrop
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.wyutools.app.SharedViewTransition
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,9 @@ const val ROUTE_GRADES = "grades"
 const val ROUTE_GPA = "grades/gpa"
 const val ROUTE_EVAL = "eval"
 const val ROUTE_PHYSICAL = "physical"
+
+/** 校园网认证页，独立页面，不参与卡片形变。 */
+const val ROUTE_CAMPUS = "campus"
 
 /** 体测二级页面（某一学年的各项成绩），不是工具，不参与卡片形变。 */
 const val ROUTE_PHYSICAL_DETAIL = "physical/detail"
@@ -61,6 +65,7 @@ enum class WyuTool(
     Grades("grades", "成绩", "学期成绩 · 单科分析单", false),
     Eval("eval", "教评", "结课评价 · 评价明细", false),
     Physical("physical", "体测", "体测总分 · 各项成绩", false),
+    Campus("campus", "校园网", "认证连接 · 在线时长", false),
     ;
 
     val icon: ImageVector
@@ -74,6 +79,7 @@ enum class WyuTool(
             Grades -> Icons.Outlined.School
             Eval -> Icons.Outlined.RateReview
             Physical -> Icons.Outlined.FitnessCenter
+            Campus -> Icons.Outlined.Wifi
         }
 
     val route: String
@@ -87,6 +93,7 @@ enum class WyuTool(
             Grades -> ROUTE_GRADES
             Eval -> ROUTE_EVAL
             Physical -> ROUTE_PHYSICAL
+            Campus -> ROUTE_CAMPUS
         }
 
     companion object {
@@ -138,6 +145,7 @@ object WyuToolLayoutStore {
         WyuTool.Grades.id,
         WyuTool.Eval.id,
         WyuTool.Physical.id,
+        WyuTool.Campus.id,
     )
 
     fun ensureLoaded(context: Context) {
